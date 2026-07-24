@@ -73,9 +73,11 @@ test('batch mutations require concurrency and replay guards', () => {
 test('batch resume approval and truth certification are separate', () => {
   assert.match(reference, /resume approval.*exact content hash/is);
   assert.match(reference, /per-run local path proof/i);
-  assert.match(reference, /local paths and content hashes are user-visible local proof only/i);
-  assert.match(reference, /Never\s+send them to the backend, application answers, observations, analytics, or\s+logs/i);
+  assert.match(reference, /Exact local paths are user-visible local proof only/i);
+  assert.match(reference, /Content hashes may be sent only to authenticated Trackly resume/i);
+  assert.match(reference, /Never send either value to observations, application answers, analytics, logs/is);
   assert.match(reference, /truth certification.*after final answers/is);
+  assert.match(reference, /`resumeDependency: not_applicable`/);
   assert.match(reference, /complete current run set that has\s+passed every other review-readiness gate/i);
   assert.match(reference, /never.*reusable profile answer/is);
   assert.match(reference, /membership.*profile revision.*resume hash.*answer snapshot.*wording.*inspection epoch change invalidates/is);
@@ -96,14 +98,15 @@ test('batch handoff separates grouped actions from per-run review evidence', () 
 });
 
 test('batch orchestration uses bounded server-owned checkpoint tools', () => {
+  assert.match(reference, /`trackly_get_active_apply_batch`/);
   assert.match(reference, /`trackly_create_apply_batch`/);
   assert.match(reference, /`trackly_get_apply_batch`/);
   assert.match(reference, /`trackly_claim_apply_batch`/);
   assert.match(reference, /`trackly_checkpoint_apply_batch`/);
   assert.match(reference, /groups of at most 20/i);
-  assert.match(reference, /prior inspection epoch.*new inspection epoch/is);
+  assert.match(reference, /unchanged current\s+inspection epoch in both epoch fields/is);
   assert.match(reference, /one to 25 typed actions/i);
-  assert.match(reference, /epoch\/version advances once/i);
+  assert.match(reference, /member version advances once.*only a browser bind or reclaim may advance the\s+inspection epoch/is);
   assert.match(reference, /Never add raw labels, options, answers,\s+or\s+page\s+text/i);
   assert.match(reference, /`packetPhase: first_pass`/);
   assert.match(reference, /`packetPhase: delta`/);
@@ -113,19 +116,27 @@ test('batch orchestration uses bounded server-owned checkpoint tools', () => {
 test('a deterministic 20-member first pass stays inside the request budget', () => {
   const members = 20;
   const nonResumeRequests = (
-    1 // create
+    1 // active-batch recovery
+    + 1 // create when no active batch exists
     + 1 // page
     + 1 // claim
     + members // start or reuse runs
     + members // bind browser surfaces
-    + 1 // bulk checkpoint
+    + 2 // browser-ready and final scenario bulk observations
+    + 2 // first-pass and review-ready bulk checkpoints
     + 1 // batch resume approval
     + 1 // truth certification
+    + 1 // bulk outcomes
     + 1 // final refresh
   );
 
-  assert.equal(nonResumeRequests, 47);
+  assert.equal(nonResumeRequests, 52);
   assert.ok(nonResumeRequests <= 60);
-  assert.match(reference, /within 47\s+non-resume MCP\/HTTP requests/i);
-  assert.match(reference, /Do not replace bulk checkpoints with\s+per-member checkpoint requests/i);
+  assert.match(reference, /within 52\s+non-resume MCP\/HTTP requests/i);
+  assert.match(reference, /`trackly_report_apply_observations`/);
+  assert.match(reference, /`trackly_record_application_outcomes`/);
+  assert.match(
+    reference,
+    /Do not replace bulk observations,\s+checkpoints, or outcomes with per-member\s+requests/i,
+  );
 });

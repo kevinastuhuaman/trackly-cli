@@ -10,7 +10,9 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), '
 
 function toolArguments(name) {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const registration = new RegExp(`server\\.tool\\(\\s*['"]${escapedName}['"]`).exec(source);
+  const registration = new RegExp(
+    `server\\.(tool|registerTool)\\(\\s*['"]${escapedName}['"]`
+  ).exec(source);
   assert.ok(registration, `${name} is not registered`);
   const open = source.indexOf('(', registration.index);
   const args = [];
@@ -41,17 +43,53 @@ function toolArguments(name) {
       argStart = index + 1;
     }
   }
+  if (registration[1] === 'registerTool') {
+    const inputSchema = args[1].match(/\binputSchema:\s*([A-Za-z0-9_]+)/)?.[1];
+    assert.ok(inputSchema, `${name} registerTool input schema is not named`);
+    return [args[0], args[1], inputSchema];
+  }
   return args;
 }
 
 const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
 
+test('documented local MCP tool count matches every registered tool', () => {
+  const registeredTools = [...source.matchAll(
+    /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
+  )].map((match) => match[1]);
+
+  assert.equal(registeredTools.length, 36);
+  assert.equal(new Set(registeredTools).size, registeredTools.length);
+});
+
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.3.0');
+  assert.equal(contract.contractVersion, '3.3.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     assert.equal(normalizeSchema(toolArguments(name)[2]), localSchema, `${name} schema drifted`);
   }
+});
+
+test('truth certification schema binds exact resume identity only when approved', () => {
+  const truthStart = source.indexOf('const truthCertificationCommon');
+  const truthEnd = source.indexOf(
+    "server.registerTool(\n    'trackly_certify_apply_batch_truth'",
+    truthStart
+  );
+  const truthSchema = source.slice(truthStart, truthEnd);
+
+  assert.match(truthSchema, /z\.discriminatedUnion\('resumeDependency'/);
+  assert.match(truthSchema, /resumeDependency: z\.literal\('approved'\)/);
+  assert.match(truthSchema, /resumeId: z\.number\(\)\.int\(\)\.min\(1\)/);
+  assert.match(truthSchema, /resumeDependency: z\.literal\('not_applicable'\)/);
+  assert.match(truthSchema, /resumeId: z\.null\(\)\.optional\(\)/);
+});
+
+test('MCP prompt orders durable review checkpoints before truth and outcomes', () => {
+  assert.match(
+    source,
+    /After durable review-ready checkpoints, create the late truth certification before recording review-ready outcomes\./
+  );
 });
 
 test('versioned contract owns the exact Apply scenario and browser-surface enums', () => {
@@ -148,7 +186,12 @@ test('Apply contract separates exact resume approval from late truth certificati
   assert.match(resumeSchema, /memberRuns:z\.array\(z\.object\(/);
   assert.doesNotMatch(resumeSchema, /answerSnapshotHash|wordingFingerprint/);
 
-  const truthSchema = normalizeSchema(toolArguments('trackly_certify_apply_batch_truth')[2]);
+  const truthStart = source.indexOf('const truthCertificationCommon');
+  const truthEnd = source.indexOf(
+    "server.registerTool(\n    'trackly_certify_apply_batch_truth'",
+    truthStart
+  );
+  const truthSchema = normalizeSchema(source.slice(truthStart, truthEnd));
   assert.match(truthSchema, /answerSnapshotHash/);
   assert.match(truthSchema, /wordingFingerprint/);
   assert.match(truthSchema, /inspectionEpoch/);
@@ -198,7 +241,9 @@ test('Apply skill emits value-free beta evidence for contact integrity and the m
 });
 
 test('local MCP has no uncontracted Trackly Apply tools', () => {
-  const names = [...source.matchAll(/server\.tool\(\s*['"]([^'"]+)['"]/g)]
+  const names = [
+    ...source.matchAll(/server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g),
+  ]
     .map((match) => match[1])
     .filter((name) => name.includes('apply') || name.includes('application_profile') || name.includes('application_outcome') || name.includes('profile_onboarding') || name === 'trackly_prepare_resume' || name === 'trackly_verify_prepared_resume')
     .sort();
@@ -208,11 +253,13 @@ test('local MCP has no uncontracted Trackly Apply tools', () => {
 test('Apply contract makes maintenance resumable without duplicate runs or submission', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   assert.match(skill, /Treat maintenance as resumable, never retryable/);
-  assert.match(skill, /Do not call `trackly_start_apply_run` again/);
+  assert.match(skill, /call it only when the active frozen member omits `runId`/);
+  assert.match(skill, /sanctioned idempotent lookup/);
   assert.match(skill, /refetch `trackly_get_apply_protocol` and the application profile/);
   assert.match(skill, /Never click Submit/);
 
-  assert.match(source, /If maintenance interrupts an existing run, do not call this tool again/);
+  assert.match(source, /existing member run when `runId` is present/i);
+  assert.match(source, /idempotent lookup only when the recovered member omits `runId`/i);
   assert.match(source, /resume the existing agent_browser run/);
   assert.match(source, /Never start a duplicate run, blindly retry a mutation,.*or click Submit/);
 });
@@ -251,7 +298,7 @@ test('Apply skill freezes and completes every member of an explicitly requested 
   assert.match(skill, /conditional resume preparation\/confirmation\/verification when an upload control exists/);
   assert.match(skill, /for every member/);
   assert.match(skill, /show and verify each member's exact path, size, hash, run ID, and expiration/);
-  assert.match(skill, /never send them in backend observations, logs, application answers, or remote evidence/i);
+  assert.match(skill, /never send either value in observations, logs, application answers, analytics, or employer form fields/i);
   assert.match(skill, /only for the frozen job\/run\/tab set/);
   assert.match(skill, /a run falls outside the frozen batch/);
   assert.match(skill, /preserve the current review-ready tab and continue the same lifecycle for the next mapped batch member/);
@@ -343,7 +390,7 @@ test('Apply MCP prompt gates resume preparation on the same browser binding', ()
   assert.match(source.slice(browserGate, prepare), /browser_ready attestation/);
 });
 
-test('Apply MCP evidence preserves custom bounds and prompt gates new batches on protocol 3.3', () => {
+test('Apply MCP evidence preserves custom bounds and prompt gates new batches on protocol 3.3.1', () => {
   const evidenceRegion = source.slice(
     source.indexOf("'trackly_get_apply_evidence'"),
     source.indexOf("'trackly_get_apply_protocol'"),
@@ -355,26 +402,28 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.0 or newer and skill 4\.2\.0 or newer/);
+  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.1 or newer/);
   assert.match(promptRegion, /Protocol 3\.2 remains valid only for resuming an already-active legacy single run/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
 });
 
-test('Apply skill 4.2 requires protocol 3.3 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.1 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2 requires protocol major 3/);
-  assert.match(skill, /Protocol 3\.3 or newer is required for frozen-batch execution/);
+  assert.match(skill, /Skill 4\.2\.1 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active legacy single-run workflow/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.1/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 
 test('Apply skill consumes backend ATS capabilities and enforces guided stop conditions', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const playbook = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'ats-playbook.md'), 'utf8');
-  assert.match(skill, /backend-owned `atsCapability`, `originPolicy`, and `executionBlocker`/);
-  assert.match(skill, /Stop before `trackly_start_apply_run` whenever `executionBlocker` is non-null/);
+  assert.match(
+    skill,
+    /backend-owned `atsCapability`, `originPolicy`, `executionBlocker`, and required scenarios/,
+  );
+  assert.match(skill, /Stop after `trackly_start_apply_run` whenever its `executionBlocker` is non-null/);
   assert.match(skill, /Unknown employer forms use the protocol's `unknownAtsFallback` only when/);
   assert.match(skill, /LinkedIn-hosted applications are manual-only/);
   assert.match(skill, /corresponding same-run committed evidence/);

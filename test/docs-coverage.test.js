@@ -10,9 +10,9 @@
 // 11th tool (trackly_request_company) reached main undocumented.
 //
 // JS regex `\s*` DOES match across newlines (unlike grep), so this extraction is
-// correct. We also cross-check the extracted count against the raw `server.tool(`
-// call count so a future quote-style change can't silently drop a tool, and a
-// fixture case proves the checker actually fails on an undocumented tool.
+// correct. It covers both MCP SDK registration styles, cross-checks the extracted
+// count against their raw call sites, and proves with a fixture that the checker
+// actually fails on an undocumented tool.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -25,17 +25,17 @@ const ROOT = path.join(__dirname, '..');
 
 // Extract MCP tool names from server.js source. Supports ', ", and ` string quotes.
 function extractToolNames(serverSrc) {
-  const re = /server\.tool\(\s*['"`]([^'"`]+)['"`]/g;
+  const re = /server\.(?:tool|registerTool)\(\s*['"`]([^'"`]+)['"`]/g;
   const names = [];
   let m;
   while ((m = re.exec(serverSrc)) !== null) names.push(m[1]);
   return names;
 }
 
-// Count raw `server.tool(` call sites (quote-style agnostic) to cross-check that
-// extractToolNames didn't miss one because of an unexpected quote style.
+// Count raw tool registration call sites (quote-style agnostic) to cross-check
+// that extractToolNames did not miss one because of an unexpected quote style.
 function countToolCalls(serverSrc) {
-  return (serverSrc.match(/server\.tool\(/g) || []).length;
+  return (serverSrc.match(/server\.(?:tool|registerTool)\(/g) || []).length;
 }
 
 // Slice the README down to just the "MCP Tools Reference" section (heading → next
@@ -74,7 +74,9 @@ function coverageGaps(serverSrc, readmeSrc, docsSrc) {
 // tool count. This restores the guard the old grep-based count step provided
 // (Codex P3): name-presence alone wouldn't catch a stale "11 MCP tools" headline.
 function toolCountClaims(readmeSrc) {
-  return [...readmeSrc.matchAll(/(\d+)\s+(?:MCP\s+)?tools\b/gi)].map((m) => Number(m[1]));
+  return [...readmeSrc.matchAll(
+    /(\d+)\s+(?:(?:local\s+)?MCP\s+|local\s+)?tools\b/gi
+  )].map((m) => Number(m[1]));
 }
 
 // --- real-repo assertions ---
@@ -83,14 +85,14 @@ const serverSrc = fs.readFileSync(path.join(ROOT, 'mcp/server.js'), 'utf8');
 const readmeSrc = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 const docsSrc = fs.readFileSync(path.join(ROOT, 'docs/trackly-tools.md'), 'utf8');
 
-test('tool extraction is not vacuous and matches the raw server.tool( count', () => {
+test('tool extraction is not vacuous and matches every raw registration call', () => {
   const names = extractToolNames(serverSrc);
   const rawCount = countToolCalls(serverSrc);
   assert.ok(names.length > 0, 'extracted zero MCP tools — the extraction is broken/vacuous');
   assert.equal(
     names.length,
     rawCount,
-    `extracted ${names.length} tool names but found ${rawCount} server.tool( calls — a quote style was missed`
+    `extracted ${names.length} tool names but found ${rawCount} registration calls — a style was missed`
   );
 });
 

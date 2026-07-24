@@ -24,14 +24,16 @@ or pagination in the prompt.
 
 ## Backend tool sequence
 
-For every new protocol 3.3 request:
+For every protocol 3.3.1 request:
 
-1. call `trackly_create_apply_batch` once with the requested size and a fresh
+1. call `trackly_get_active_apply_batch` before any create call;
+2. resume the returned active batch, or, only when none exists, call
+   `trackly_create_apply_batch` once with the requested size and a fresh
    idempotency key;
-2. page only that batch with `trackly_get_apply_batch`;
-3. acquire or renew ownership with `trackly_claim_apply_batch`;
-4. start or reuse each run with the complete batch/member/lease binding; and
-5. send browser findings in groups of at most 20 through
+3. page only that batch with `trackly_get_apply_batch`;
+4. acquire or renew ownership with `trackly_claim_apply_batch`;
+5. start or reuse each run with the complete batch/member/lease binding; and
+6. send browser findings in groups of at most 20 through
    `trackly_checkpoint_apply_batch`.
 
 Do not recreate a batch after maintenance. Refetch the existing batch, reclaim
@@ -39,13 +41,17 @@ its lease with the latest revision, and resume its existing run bindings.
 
 ### Request budget
 
-For a 20-member batch, keep planning, initial binding, one bulk checkpoint,
-resume approval, truth certification, and final batch refresh within 47
-non-resume MCP/HTTP requests: one create, one page, one claim, 20 run starts, 20
-surface bindings, one bulk checkpoint, one resume approval, one truth
-certification, and one final refresh. Do not replace bulk checkpoints with
-per-member checkpoint requests. Resume download and exact local verification
-are excluded from this count.
+For a new 20-member batch, keep recovery, planning, initial binding, evidence,
+two bulk checkpoints, resume approval, truth certification, outcomes, and the
+final batch refresh within 52 non-resume MCP/HTTP requests: one active-batch
+lookup, one create, one page, one claim, 20 run starts, 20 surface bindings, one
+`trackly_report_apply_observations` call before resume preparation, a second
+bulk observation call for final scenario coverage, two bulk checkpoints, one
+resume approval, one truth certification, one
+`trackly_record_application_outcomes` call, and one final refresh. An existing
+active batch omits the create call. Do not replace bulk observations,
+checkpoints, or outcomes with per-member requests. Resume download and exact
+local verification are excluded from this count.
 
 ## Ownership and replay safety
 
@@ -84,18 +90,23 @@ continuation flags, status, and redacted fingerprints. Credentials, OTPs,
 CAPTCHA answers, raw question text, and private answer values never enter
 Trackly observations.
 
-Each checkpoint includes the expected member version, prior inspection epoch,
-new inspection epoch, lease token, one to 25 typed actions, the shared
+Each checkpoint includes the expected member version, unchanged current
+inspection epoch in both epoch fields, lease token, one to 25 typed actions, the shared
 known-fields-committed flag, optional packet phase, and its own idempotency key.
 Each action carries its continuation flag and optional redacted field
-fingerprint. All actions in one checkpoint share one member lifecycle and the
-member's epoch/version advances once. Never add raw labels, options, answers, or
-page text to this packet.
+fingerprint. All actions in one checkpoint share one member lifecycle. The
+member version advances once, but only a browser bind or reclaim may advance the
+inspection epoch. Never add raw labels, options, answers, or page text to this
+packet.
 
 Use `packetPhase: first_pass` while inventorying the frozen set. Use
 `packetPhase: delta` only for a conditional question or action that became
 visible after the first grouped packet. A per-member conflict does not cancel
 successful siblings; refresh only the conflicted member before retrying it.
+When the user has completed or answered a prior human action, include its exact
+server-returned ID in `resolvedActionIds` on the next checkpoint for that same
+member and current inspection epoch. Never infer, fabricate, or resolve an
+action from another member; an unknown or stale action ID must conflict.
 
 ## Challenge placement
 
@@ -116,9 +127,11 @@ membership, default-resume identity, exact content hash, user-facing filename,
 size, profile revision, and expiry. Each upload still needs its own immediate
 per-run local path proof for the exact bytes.
 
-Exact local paths and content hashes are user-visible local proof only. Never
-send them to the backend, application answers, observations, analytics, or
-logs.
+Exact local paths are user-visible local proof only and never leave the
+machine. Content hashes may be sent only to authenticated Trackly resume
+approval, prepared-resume verification, and truth-certification endpoints.
+Never send either value to observations, application answers, analytics, logs,
+or employer form fields.
 
 Prepare the resume for every run that exposes a real Resume or CV control. Show
 one consolidated proof with every run/path plus the shared resume identity,
@@ -130,8 +143,11 @@ resume ID and signed local proof.
 
 Truth certification is late. Ask only after final answers and any conditional
 wording are known. Bind it to the run set, answer snapshot, wording
-fingerprints, profile revision, resume hash, inspection epochs, and expiry.
-It is ephemeral evidence and never a reusable profile answer.
+fingerprints, profile revision, inspection epochs, and expiry. When at least
+one form used a resume attachment, use `resumeDependency: approved` and bind
+the exact approved resume identity. When no form in the batch exposes a resume
+control, use `resumeDependency: not_applicable` with no resume ID or hash. It
+is ephemeral evidence and never a reusable profile answer.
 
 After all conditional questions and certification wording are visible, show one
 final truthfulness prompt. Only after explicit user confirmation, compute the

@@ -104,6 +104,7 @@ API-key creation attempts.
 - **trackly_get_profile_onboarding** — Get backend-owned questions plus only missing/unconfirmed answers.
 - **trackly_update_application_profile** — Save explicit answer states with optimistic concurrency and global/provider/company scope.
 - **trackly_create_apply_batch** — Freeze an exact recent-first set of approved jobs with an idempotency key.
+- **trackly_get_active_apply_batch** — Recover the newest unexpired active batch before creating another after chat or browser context loss.
 - **trackly_get_apply_batch** — Page a server-owned frozen batch without reordering or replacing members.
 - **trackly_claim_apply_batch** — Acquire or renew the optimistic browser-mutation lease.
 - **trackly_checkpoint_apply_batch** — Bulk-record up to 20 value-free inspection checkpoints, typed human actions, and per-member conflicts.
@@ -112,15 +113,17 @@ API-key creation attempts.
 - **trackly_record_apply_submission_evidence** — Record typed, redacted submit-request, success-page, explicit user-confirmation, or provider-receipt evidence without page text or external references.
 - **trackly_approve_apply_batch_resume** — Approve one exact default-resume identity and content hash for the complete current frozen run set.
 - **trackly_certify_apply_batch_truth** — Record an expiring late truthfulness certification over final answer and wording fingerprints after every other review-readiness gate has passed.
-- **trackly_start_apply_run** — Start or reuse a manual-submit browser run, optionally bound to a frozen batch member.
+- **trackly_start_apply_run** — Start or reuse a manual-submit browser run with the complete frozen batch/member/lease binding.
 - **trackly_get_apply_evidence** — Get the authenticated user's aggregate beta evidence and release gate without returning profile answers or contact values.
 - **trackly_get_apply_protocol** — Get the current ATS support, browser integrity rules, and compatible skill version.
 - **trackly_report_apply_observation** — Report redacted ATS mechanics and actual scenario coverage without answer values or page text.
+- **trackly_report_apply_observations** — Bulk-report up to 200 current-epoch, batch-bound redacted observations in one request.
 - **trackly_record_application_outcome** — Record review readiness or a confirmed manual submission.
+- **trackly_record_application_outcomes** — Bulk-record up to 20 leased, batch-bound outcomes while returning per-member conflicts explicitly.
 - **trackly_prepare_resume** — Local MCP only: materialize the default resume in a private, expiring mode-0600 cache and return filename, size, SHA-256, exact local path, and visual-confirmation metadata. Hosted MCP returns a manual/local-agent requirement.
 - **trackly_verify_prepared_resume** — Local MCP only: immediately before attachment, recompute the user-confirmed resume hash and size, validate the exact path/run/expiration, and lock the file read-only. Any mismatch requires a fresh preview and confirmation.
 
-Apply contract v3 intentionally gives this verifier different local and hosted schemas: local MCP receives the full proof needed to inspect the private file, while hosted MCP accepts only run and confirmation identifiers and returns the manual/local-agent requirement. Local paths and fingerprints are never sent to the hosted verifier. Version 3.1 also records universal value-free evidence for critical-contact integrity and the manual-submit boundary. Version 3.2 authorizes the exact stored HTTPS origin for jobs Trackly ingested from employer careers sources, without granting redirect, iframe, or hostname-suffix privileges.
+Apply contract v3 intentionally gives this verifier different local and hosted schemas: local MCP receives the full proof needed to inspect the private file, while hosted MCP accepts only run and confirmation identifiers and returns the manual/local-agent requirement. Local paths are never sent remotely. Resume fingerprints are sent only to authenticated Trackly resume approval and truth-certification endpoints, never observations or employer forms. Version 3.1 also records universal value-free evidence for critical-contact integrity and the manual-submit boundary. Version 3.2 authorizes the exact stored HTTPS origin for jobs Trackly ingested from employer careers sources, without granting redirect, iframe, or hostname-suffix privileges. Version 3.3.1 adds active-batch recovery, epoch-bound observations/outcomes, and truth certification for forms with no resume control.
 
 ### Maintenance behavior
 

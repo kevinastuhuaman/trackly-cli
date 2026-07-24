@@ -88,6 +88,23 @@ function validatePolicy(policy) {
 }
 
 function validateAuditReport(report, policy) {
+  if (
+    report
+    && typeof report === 'object'
+    && (
+      (report.error && typeof report.error === 'object')
+      || typeof report.message === 'string'
+    )
+  ) {
+    const detail = [
+      report.message,
+      report.error?.summary,
+      report.error?.detail,
+    ].find((value) => typeof value === 'string' && value.trim());
+    throw new Error(
+      `npm audit did not return an advisory report${detail ? `: ${detail.trim()}` : ''}`,
+    );
+  }
   assert.equal(report?.auditReportVersion, 2, 'Unsupported npm audit report version');
   const exception = validatePolicy(policy);
 

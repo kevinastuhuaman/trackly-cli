@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-24
+
 ### Added
 
-- Trackly Apply skill 4.2 and protocol 3.3 freeze recent-first batches before
+- Trackly Apply skill 4.2.1 and protocol 3.3.1 freeze recent-first batches before
   browser work, inspect the full batch before asking one grouped set of
   questions, and preserve member/run identity across interruptions.
 - Added exact batch resume approval, late truth certification, browser-surface

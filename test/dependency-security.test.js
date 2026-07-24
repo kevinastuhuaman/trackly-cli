@@ -194,3 +194,15 @@ test('audit gate accepts a clean report after the upstream fix lands', () => {
     propagatedVulnerabilities: [],
   });
 });
+
+test('audit gate reports registry failures without misclassifying the schema version', () => {
+  const policy = JSON.parse(fs.readFileSync(POLICY_PATH, 'utf8'));
+
+  assert.throws(
+    () => validateAuditReport({
+      message: 'request to the npm audit endpoint failed',
+      error: { summary: '', detail: '' },
+    }, policy),
+    /npm audit did not return an advisory report: request to the npm audit endpoint failed/i,
+  );
+});

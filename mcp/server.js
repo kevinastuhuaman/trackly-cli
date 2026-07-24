@@ -597,6 +597,29 @@ function createServer() {
   );
 
   server.tool(
+    'trackly_get_active_apply_batch',
+    'Recover the newest unexpired frozen Apply batch for this user after context loss. Returns active=false when no resumable batch exists.',
+    {
+      limit: z.number().int().min(1).max(100).optional(),
+      cursor: z.string().min(1).max(2048).optional(),
+    },
+    wrapTool(async ({ limit, cursor }) => {
+      const qs = new URLSearchParams();
+      if (limit !== undefined) qs.set('limit', String(limit));
+      if (cursor) qs.set('cursor', cursor);
+      const query = qs.toString();
+      return apiRequest(
+        'GET',
+        `/api/jobscout/apply/batches/active${query ? `?${query}` : ''}`,
+        null,
+        false,
+        false,
+        MCP_USER_AGENT
+      );
+    }, 'Failed to recover active apply batch')
+  );
+
+  server.tool(
     'trackly_claim_apply_batch',
     'Acquire or renew the optimistic lease required before mutating browser-bound batch members.',
     {
@@ -627,9 +650,10 @@ function createServer() {
         runId: z.number().int().min(1),
         expectedMemberVersion: z.number().int().min(1),
         expectedInspectionEpoch: z.number().int().min(0),
-        inspectionEpoch: z.number().int().min(1),
+        inspectionEpoch: z.number().int().min(0),
         packetPhase: z.enum(APPLY_CHECKPOINT_PACKET_PHASES).optional(),
         knownFieldsCommitted: z.boolean(),
+        resolvedActionIds: z.array(z.string().regex(/^[1-9][0-9]*$/)).max(25).optional(),
         idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
         actions: z.array(z.object({
           actionCode: z.enum(APPLY_CHECKPOINT_ACTION_CODES),
@@ -763,16 +787,11 @@ function createServer() {
     ), 'Failed to record apply submission evidence')
   );
 
-  server.tool(
-    'trackly_certify_apply_batch_truth',
-    'Record a late, expiring truthfulness certification over final answer and wording fingerprints for the exact current run set after every other review-readiness gate has passed. This never becomes a profile answer.',
-    {
+  const truthCertificationCommon = {
       batchId: z.number().int().min(1),
       leaseToken: z.string().min(1).max(1024),
       membershipHash: z.string().regex(/^[a-f0-9]{64}$/),
       profileRevision: z.number().int().min(0),
-      resumeId: z.number().int().min(1),
-      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/),
       memberRuns: z.array(z.object({
         memberId: z.number().int().min(1),
         runId: z.number().int().min(1),
@@ -783,6 +802,26 @@ function createServer() {
       wordingFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       expiresAt: z.string().datetime(),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+  };
+  const truthCertificationSchema = z.discriminatedUnion('resumeDependency', [
+    z.object({
+      ...truthCertificationCommon,
+      resumeDependency: z.literal('approved'),
+      resumeId: z.number().int().min(1),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    }),
+    z.object({
+      ...truthCertificationCommon,
+      resumeDependency: z.literal('not_applicable'),
+      resumeId: z.null().optional(),
+      resumeSha256: z.null().optional(),
+    }),
+  ]);
+  server.registerTool(
+    'trackly_certify_apply_batch_truth',
+    {
+      description: 'Record a late, expiring truthfulness certification over final answer and wording fingerprints for the exact current run set after every other review-readiness gate has passed. This never becomes a profile answer.',
+      inputSchema: truthCertificationSchema,
     },
     wrapTool(async ({ batchId, idempotencyKey, ...body }) => apiRequest(
       'POST',
@@ -797,15 +836,15 @@ function createServer() {
 
   server.tool(
     'trackly_start_apply_run',
-    'Start a manual-submit browser run for a job already in the approved queue. If maintenance interrupts an existing run, do not call this tool again: wait, refetch protocol/profile state, and resume that same run.',
+    'Start or recover a manual-submit browser run for a frozen member. Resume the existing member run when `runId` is present; after maintenance, use this as an idempotent lookup only when the recovered member omits `runId`.',
     {
       jobId: z.number().int().min(1),
       clientName: z.string().max(100).optional(),
-      batchId: z.number().int().min(1).optional(),
-      memberId: z.number().int().min(1).optional(),
-      expectedMemberVersion: z.number().int().min(1).optional(),
-      expectedInspectionEpoch: z.number().int().min(0).optional(),
-      leaseToken: z.string().min(1).max(1024).optional(),
+      batchId: z.number().int().min(1),
+      memberId: z.number().int().min(1),
+      expectedMemberVersion: z.number().int().min(1),
+      expectedInspectionEpoch: z.number().int().min(0),
+      leaseToken: z.string().min(1).max(1024),
     },
     wrapTool(async (params) => apiRequest('POST', '/api/jobscout/apply/runs', params, false, false, MCP_USER_AGENT), 'Failed to start apply run')
   );
@@ -839,6 +878,9 @@ function createServer() {
     'Report a redacted ATS mechanics or scenario-coverage observation. Never include answer values, addresses, contact data, OTPs, or free-form page content.',
     {
       runId: z.number().int().min(1),
+      batchId: z.number().int().min(1).optional(),
+      memberId: z.number().int().min(1).optional(),
+      inspectionEpoch: z.number().int().min(0).optional(),
       provider: z.string().regex(SAFE_OBSERVATION_CODE),
       fieldLabel: z.string().min(1).max(1000),
       observationType: z.string().regex(SAFE_OBSERVATION_CODE),
@@ -858,14 +900,83 @@ function createServer() {
   );
 
   server.tool(
+    'trackly_report_apply_observations',
+    'Bulk-report up to 200 redacted, batch-bound ATS mechanics or scenario-coverage observations in one request. Never include answer values, addresses, contact data, OTPs, or page content.',
+    {
+      observations: z.array(z.object({
+        runId: z.number().int().min(1),
+        batchId: z.number().int().min(1),
+        memberId: z.number().int().min(1),
+        inspectionEpoch: z.number().int().min(0),
+        provider: z.string().regex(SAFE_OBSERVATION_CODE),
+        fieldLabel: z.string().min(1).max(1000),
+        observationType: z.string().regex(SAFE_OBSERVATION_CODE),
+        resolutionCode: z.string().regex(SAFE_OBSERVATION_CODE).optional(),
+        metadata: z.object({
+          controlType: z.string().regex(SAFE_OBSERVATION_CODE).optional(),
+          required: z.boolean().optional(),
+          errorCode: z.string().regex(SAFE_OBSERVATION_CODE).optional(),
+          committed: z.boolean(),
+          scenarioCode: z.enum(APPLY_SCENARIO_CODES),
+          browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+          browserBindingHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+          resumedAfterHandoff: z.boolean().optional(),
+        }),
+      })).min(1).max(200),
+    },
+    wrapTool(
+      async (params) => apiRequest(
+        'POST',
+        '/api/jobscout/apply/observations/bulk',
+        params,
+        false,
+        false,
+        MCP_USER_AGENT
+      ),
+      'Failed to report bulk apply observations'
+    )
+  );
+
+  server.tool(
     'trackly_record_application_outcome',
     'Record review readiness or a user-confirmed outcome. Mark submitted only after a success page or explicit user confirmation.',
     {
       runId: z.number().int().min(1),
+      batchId: z.number().int().min(1).optional(),
+      memberId: z.number().int().min(1).optional(),
+      inspectionEpoch: z.number().int().min(0).optional(),
+      leaseToken: z.string().min(1).max(1024).optional(),
       outcome: z.enum(['review_ready', 'submitted', 'failed', 'blocked']),
       confirmation: z.string().max(500).optional(),
     },
     wrapTool(async ({ runId, ...body }) => apiRequest('POST', `/api/jobscout/apply/runs/${runId}/outcome`, body, false, false, MCP_USER_AGENT), 'Failed to record application outcome')
+  );
+
+  server.tool(
+    'trackly_record_application_outcomes',
+    'Bulk-record up to 20 leased, batch-bound review or user-confirmed outcomes. Each member returns recorded or conflict without hiding sibling results.',
+    {
+      outcomes: z.array(z.object({
+        runId: z.number().int().min(1),
+        batchId: z.number().int().min(1),
+        memberId: z.number().int().min(1),
+        inspectionEpoch: z.number().int().min(0),
+        leaseToken: z.string().min(1).max(1024),
+        outcome: z.enum(['review_ready', 'submitted', 'failed', 'blocked']),
+        confirmation: z.string().max(500).optional(),
+      })).min(1).max(20),
+    },
+    wrapTool(
+      async (params) => apiRequest(
+        'POST',
+        '/api/jobscout/apply/outcomes/bulk',
+        params,
+        false,
+        false,
+        MCP_USER_AGENT
+      ),
+      'Failed to record bulk application outcomes'
+    )
   );
 
   server.tool(
@@ -903,13 +1014,13 @@ function createServer() {
       role: 'user',
       content: {
         type: 'text',
-        text: 'Compatibility gate: require Trackly Apply protocol 3.3.0 or newer and skill 4.2.0 or newer for every new frozen batch. Protocol 3.2 remains valid only for resuming an already-active legacy single run. Never continue or replace a pre-evidence 3.0.x run; preserve it, record it blocked when possible, and stop for supported lifecycle cleanup.',
+        text: 'Compatibility gate: require Trackly Apply protocol 3.3.1 or newer and skill 4.2.1 or newer for every new frozen batch. Protocol 3.2 remains valid only for resuming an already-active legacy single run. Recover the newest active frozen batch before creating another. Do not fetch or select from the queue until active-batch recovery proves that no active batch exists; any later generic queue-first instruction applies only to the legacy 3.2 single-run workflow. Never continue or replace a pre-evidence 3.0.x run; preserve it, record it blocked when possible, and stop for supported lifecycle cleanup. If the batch exposes no resume control, use resumeDependency not_applicable and omit resume identity from the truth certification.',
       },
     }, {
       role: 'user',
       content: {
         type: 'text',
-        text: 'Batch workflow: resume the active frozen batch or create one exact recent-first batch, including for a one-job request. Claim its lease, keep membership and order fixed, inspect all members before asking one grouped packet of questions, bind each initial or recovered browser surface to the same run and exact backend URL, and discard older-epoch evidence. Require one exact batch resume approval plus immediate local proof before each attachment, then a late truth certification before review. After manual Submit, keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted.',
+        text: 'Batch workflow: resume the active frozen batch or create one exact recent-first batch, including for a one-job request. Claim its lease, keep membership and order fixed, inspect all members before asking one grouped packet of questions, bind each initial or recovered browser surface to the same run and exact backend URL, and discard older-epoch evidence. Require one exact batch resume approval plus immediate local proof before each attachment. After durable review-ready checkpoints, create the late truth certification before recording review-ready outcomes. After manual Submit, keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted.',
       },
     }, {
       role: 'user',
