@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Trackly Apply skill 4.2 and protocol 3.3 freeze recent-first batches before
+  browser work, inspect the full batch before asking one grouped set of
+  questions, and preserve member/run identity across interruptions.
+- Added exact batch resume approval, late truth certification, browser-surface
+  reconciliation, missing-tab recovery, and typed redacted submission evidence.
+- Hosted and local MCP expose the same versioned batch contract; hosted MCP
+  retains the documented local-file exception for resume preparation.
+
 ### Security
 
 - Added an exact-shape npm audit gate for the temporarily unreachable

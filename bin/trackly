@@ -1159,6 +1159,8 @@ async function cmdAgent(args) {
     console.log(color('bold', 'Trackly Apply doctor'));
     console.log(`Overall: ${color(report.ok ? 'green' : 'yellow', report.ok ? 'ready' : 'needs attention')}`);
     console.log(`Authenticated: ${report.authenticated ? 'yes' : 'no'}`);
+    console.log(`CLI: ${report.cliVersion}; MCP contract: ${report.mcpContractVersion}`);
+    console.log(`Skill: ${report.skillVersion}; digest: ${report.skillPackIntegrity.expectedDigest || 'unavailable'}`);
     console.log(`Protocol: ${report.protocol?.version || 'unavailable'}; compatible=${report.compatible ? 'yes' : 'no'}`);
     console.log(`Semantic browser + computer use: ${report.browserControl.semanticReady ? 'ready' : 'not verified'}`);
     for (const client of report.clients) {
