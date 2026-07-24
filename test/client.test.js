@@ -134,6 +134,45 @@ function setupRefreshTestHarness(t, handler) {
   });
 }
 
+test('apiRequest permits only a bounded Idempotency-Key additional header', async (t) => {
+  let receivedKey = null;
+  const { configDir, port } = await setupRefreshTestHarness(t, (req, res) => {
+    receivedKey = req.headers['idempotency-key'];
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ success: true }));
+  });
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: 'trk_idempotency_test',
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+  }, async () => {
+    await client.apiRequest(
+      'POST',
+      '/api/jobscout/apply/batches',
+      { limit: 5 },
+      false,
+      false,
+      'trackly-test/1.0.0',
+      { 'Idempotency-Key': 'batch-test-key-0001' },
+    );
+    assert.equal(receivedKey, 'batch-test-key-0001');
+
+    await assert.rejects(
+      client.apiRequest(
+        'POST',
+        '/api/jobscout/apply/batches',
+        { limit: 5 },
+        false,
+        false,
+        'trackly-test/1.0.0',
+        { Authorization: 'forbidden' },
+      ),
+      /Only a valid Idempotency-Key/,
+    );
+  });
+});
+
 test('apiRequest aborts oversized response body (PR v0.2.4)', async (t) => {
   // The 10 MB body cap prevents a malicious TRACKLY_BASE_URL from OOM'ing the long-lived
   // MCP process via unbounded streaming. We simulate by returning chunks that exceed the

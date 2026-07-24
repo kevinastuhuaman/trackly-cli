@@ -103,7 +103,11 @@ API-key creation attempts.
 - **trackly_get_application_profile** — Get the versioned, scoped application profile.
 - **trackly_get_profile_onboarding** — Get backend-owned questions plus only missing/unconfirmed answers.
 - **trackly_update_application_profile** — Save explicit answer states with optimistic concurrency and global/provider/company scope.
-- **trackly_start_apply_run** — Start a manual-submit browser run for a queued job.
+- **trackly_create_apply_batch** — Freeze an exact recent-first set of approved jobs with an idempotency key.
+- **trackly_get_apply_batch** — Page a server-owned frozen batch without reordering or replacing members.
+- **trackly_claim_apply_batch** — Acquire or renew the optimistic browser-mutation lease.
+- **trackly_checkpoint_apply_batch** — Bulk-record up to 20 value-free inspection checkpoints, typed human actions, and per-member conflicts.
+- **trackly_start_apply_run** — Start or reuse a manual-submit browser run, optionally bound to a frozen batch member.
 - **trackly_get_apply_evidence** — Get the authenticated user's aggregate beta evidence and release gate without returning profile answers or contact values.
 - **trackly_get_apply_protocol** — Get the current ATS support, browser integrity rules, and compatible skill version.
 - **trackly_report_apply_observation** — Report redacted ATS mechanics and actual scenario coverage without answer values or page text.

@@ -20,6 +20,21 @@ stop before its next private-data mutation.
 Read large batches through opaque continuation tokens. Do not recreate ordering
 or pagination in the prompt.
 
+## Backend tool sequence
+
+For a new multi-job request:
+
+1. call `trackly_create_apply_batch` once with the requested size and a fresh
+   idempotency key;
+2. page only that batch with `trackly_get_apply_batch`;
+3. acquire or renew ownership with `trackly_claim_apply_batch`;
+4. start or reuse each run with the complete batch/member/lease binding; and
+5. send browser findings in groups of at most 20 through
+   `trackly_checkpoint_apply_batch`.
+
+Do not recreate a batch after maintenance. Refetch the existing batch, reclaim
+its lease with the latest revision, and resume its existing run bindings.
+
 ## Ownership and replay safety
 
 Acquire the renewable lease before browser mutation. Every batch or member
@@ -56,6 +71,17 @@ Action records contain only value-free type, stage, blocking scope,
 continuation flags, status, and redacted fingerprints. Credentials, OTPs,
 CAPTCHA answers, raw question text, and private answer values never enter
 Trackly observations.
+
+Each checkpoint includes the expected member version, prior inspection epoch,
+new inspection epoch, lease token, typed action code, continuation flag,
+known-fields-committed flag, optional redacted field fingerprint, packet phase,
+and its own idempotency key. Never add raw labels, options, answers, or page
+text to this packet.
+
+Use `packetPhase: first_pass` while inventorying the frozen set. Use
+`packetPhase: delta` only for a conditional question or action that became
+visible after the first grouped packet. A per-member conflict does not cancel
+successful siblings; refresh only the conflicted member before retrying it.
 
 ## Challenge placement
 

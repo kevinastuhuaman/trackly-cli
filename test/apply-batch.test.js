@@ -73,3 +73,16 @@ test('batch handoff separates grouped actions from per-run review evidence', () 
   assert.match(reviewHandoff, /raw tab identifiers/i);
   assert.match(reviewHandoff, /Never include.*credentials.*OTP.*CAPTCHA/is);
 });
+
+test('batch orchestration uses bounded server-owned checkpoint tools', () => {
+  assert.match(reference, /`trackly_create_apply_batch`/);
+  assert.match(reference, /`trackly_get_apply_batch`/);
+  assert.match(reference, /`trackly_claim_apply_batch`/);
+  assert.match(reference, /`trackly_checkpoint_apply_batch`/);
+  assert.match(reference, /groups of at most 20/i);
+  assert.match(reference, /prior inspection epoch.*new inspection epoch/is);
+  assert.match(reference, /Never add raw labels, options, answers, or page\s+text/i);
+  assert.match(reference, /`packetPhase: first_pass`/);
+  assert.match(reference, /`packetPhase: delta`/);
+  assert.match(reference, /per-member conflict does not\s+cancel\s+successful siblings/i);
+});

@@ -68,6 +68,64 @@ test('versioned contract owns the exact Apply scenario and browser-surface enums
   assert.match(source, /const APPLY_BROWSER_SURFACES = APPLY_CONTRACT\.constants\.applyBrowserSurfaces/);
 });
 
+test('Apply contract owns value-free bulk checkpoint semantics', () => {
+  assert.deepEqual(contract.constants.applyCheckpointActionCodes, [
+    'answer/unknown',
+    'auth/sign_in',
+    'auth/otp',
+    'captcha/before_form',
+    'captcha/at_submit',
+    'artifact/upload_required',
+    'legal/decision_required',
+    'consent/decision_required',
+    'review/manual_submit',
+    'trust/origin_mismatch',
+    'observability/unverifiable_state',
+  ]);
+  assert.deepEqual(contract.constants.applyCheckpointPacketPhases, ['first_pass', 'delta']);
+  const schema = normalizeSchema(toolArguments('trackly_checkpoint_apply_batch')[2]);
+  assert.match(schema, /checkpoints:z\.array\(z\.object\(/);
+  assert.match(schema, /\.min\(1\)\.max\(20\)/);
+  assert.match(schema, /expectedMemberVersion/);
+  assert.match(schema, /expectedInspectionEpoch/);
+  assert.match(schema, /inspectionEpoch/);
+  assert.match(schema, /continuationAllowed/);
+  assert.match(schema, /fieldFingerprint/);
+  assert.match(schema, /knownFieldsCommitted/);
+  assert.match(schema, /idempotencyKey/);
+  assert.doesNotMatch(
+    schema,
+    /questionLabel|fieldLabel|rawLabel|options|answerValue|credential|captchaText|pageText/i,
+  );
+  assert.match(source, /\/api\/jobscout\/apply\/batches\/\$\{batchId\}\/checkpoints/);
+});
+
+test('local MCP freezes, reads, claims, and binds server-owned batches', () => {
+  const createRegion = source.slice(
+    source.indexOf("'trackly_create_apply_batch'"),
+    source.indexOf("'trackly_get_apply_batch'"),
+  );
+  const claimRegion = source.slice(
+    source.indexOf("'trackly_claim_apply_batch'"),
+    source.indexOf("'trackly_checkpoint_apply_batch'"),
+  );
+  const runSchema = normalizeSchema(toolArguments('trackly_start_apply_run')[2]);
+
+  assert.match(createRegion, /\/api\/jobscout\/apply\/batches/);
+  assert.match(createRegion, /'Idempotency-Key': idempotencyKey/);
+  assert.match(claimRegion, /expectedRevision/);
+  assert.match(claimRegion, /leaseToken/);
+  for (const key of [
+    'batchId',
+    'memberId',
+    'expectedMemberVersion',
+    'expectedInspectionEpoch',
+    'leaseToken',
+  ]) {
+    assert.match(runSchema, new RegExp(`${key}:`));
+  }
+});
+
 test('Apply skill emits value-free beta evidence for contact integrity and the manual-submit boundary', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const coverage = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'scenario-coverage.md'), 'utf8');

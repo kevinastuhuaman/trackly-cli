@@ -18,7 +18,10 @@ const AUTH_HINT =
   'New members need a private invite during the limited rollout; request access at https://usetrackly.app/early-access.';
 const APPLY_BROWSER_SURFACES = APPLY_CONTRACT.constants.applyBrowserSurfaces;
 const APPLY_SCENARIO_CODES = APPLY_CONTRACT.constants.applyScenarioCodes;
+const APPLY_CHECKPOINT_ACTION_CODES = APPLY_CONTRACT.constants.applyCheckpointActionCodes;
+const APPLY_CHECKPOINT_PACKET_PHASES = APPLY_CONTRACT.constants.applyCheckpointPacketPhases;
 const SAFE_OBSERVATION_CODE = /^[a-z0-9][a-z0-9_:-]{0,99}$/;
+const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
 
 // Mirrors `granola-followup-app/src/services/region-classifier.ts:8` REGION_TAGS.
 // Keep in sync when the backend enum changes.
@@ -467,10 +470,16 @@ function createServer() {
   server.tool(
     'trackly_get_apply_queue',
     'Get the deterministic queue of jobs the user already approved by saving as check later. Do not rescore or veto these jobs.',
-    { limit: z.number().int().min(1).max(100).optional() },
-    wrapTool(async ({ limit }) => {
-      const qs = limit ? `?limit=${limit}` : '';
-      return apiRequest('GET', `/api/jobscout/apply/queue${qs}`, null, false, false, MCP_USER_AGENT);
+    {
+      limit: z.number().int().min(1).max(100).optional(),
+      cursor: z.string().min(1).max(2048).optional(),
+    },
+    wrapTool(async ({ limit, cursor }) => {
+      const qs = new URLSearchParams();
+      if (limit !== undefined) qs.set('limit', String(limit));
+      if (cursor) qs.set('cursor', cursor);
+      const query = qs.toString();
+      return apiRequest('GET', `/api/jobscout/apply/queue${query ? `?${query}` : ''}`, null, false, false, MCP_USER_AGENT);
     }, 'Failed to fetch apply queue')
   );
 
@@ -541,9 +550,109 @@ function createServer() {
   );
 
   server.tool(
+    'trackly_create_apply_batch',
+    'Freeze an exact recent-first set of approved Check Later jobs before browser work. New queue entries never change this batch.',
+    {
+      limit: z.number().int().min(1).max(100),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ limit, idempotencyKey }) => apiRequest(
+      'POST',
+      '/api/jobscout/apply/batches',
+      { limit },
+      false,
+      false,
+      MCP_USER_AGENT,
+      { 'Idempotency-Key': idempotencyKey }
+    ), 'Failed to create apply batch')
+  );
+
+  server.tool(
+    'trackly_get_apply_batch',
+    'Read an existing frozen Apply batch by opaque server pagination. Do not reorder, replace, or rescore members.',
+    {
+      batchId: z.number().int().min(1),
+      limit: z.number().int().min(1).max(100).optional(),
+      cursor: z.string().min(1).max(2048).optional(),
+    },
+    wrapTool(async ({ batchId, limit, cursor }) => {
+      const qs = new URLSearchParams();
+      if (limit !== undefined) qs.set('limit', String(limit));
+      if (cursor) qs.set('cursor', cursor);
+      const query = qs.toString();
+      return apiRequest(
+        'GET',
+        `/api/jobscout/apply/batches/${batchId}${query ? `?${query}` : ''}`,
+        null,
+        false,
+        false,
+        MCP_USER_AGENT
+      );
+    }, 'Failed to fetch apply batch')
+  );
+
+  server.tool(
+    'trackly_claim_apply_batch',
+    'Acquire or renew the optimistic lease required before mutating browser-bound batch members.',
+    {
+      batchId: z.number().int().min(1),
+      expectedRevision: z.number().int().min(1),
+      leaseOwner: z.string().min(1).max(1024),
+      leaseToken: z.string().min(1).max(1024),
+      leaseDurationMs: z.number().int().min(15000).max(300000),
+    },
+    wrapTool(async ({ batchId, ...body }) => apiRequest(
+      'POST',
+      `/api/jobscout/apply/batches/${batchId}/claim`,
+      body,
+      false,
+      false,
+      MCP_USER_AGENT
+    ), 'Failed to claim apply batch')
+  );
+
+  server.tool(
+    'trackly_checkpoint_apply_batch',
+    'Bulk-checkpoint up to 20 browser inspections. Persist only typed actions and redacted fingerprints; never send labels, options, answers, credentials, OTPs, CAPTCHA text, or page content.',
+    {
+      batchId: z.number().int().min(1),
+      leaseToken: z.string().min(1).max(1024),
+      checkpoints: z.array(z.object({
+        memberId: z.number().int().min(1),
+        runId: z.number().int().min(1),
+        expectedMemberVersion: z.number().int().min(1),
+        expectedInspectionEpoch: z.number().int().min(0),
+        inspectionEpoch: z.number().int().min(1),
+        actionCode: z.enum(APPLY_CHECKPOINT_ACTION_CODES),
+        continuationAllowed: z.boolean(),
+        fieldFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+        packetPhase: z.enum(APPLY_CHECKPOINT_PACKET_PHASES).optional(),
+        knownFieldsCommitted: z.boolean(),
+        idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+      })).min(1).max(20),
+    },
+    wrapTool(async ({ batchId, ...body }) => apiRequest(
+      'POST',
+      `/api/jobscout/apply/batches/${batchId}/checkpoints`,
+      body,
+      false,
+      false,
+      MCP_USER_AGENT
+    ), 'Failed to checkpoint apply batch')
+  );
+
+  server.tool(
     'trackly_start_apply_run',
     'Start a manual-submit browser run for a job already in the approved queue. If maintenance interrupts an existing run, do not call this tool again: wait, refetch protocol/profile state, and resume that same run.',
-    { jobId: z.number().int().min(1), clientName: z.string().max(100).optional() },
+    {
+      jobId: z.number().int().min(1),
+      clientName: z.string().max(100).optional(),
+      batchId: z.number().int().min(1).optional(),
+      memberId: z.number().int().min(1).optional(),
+      expectedMemberVersion: z.number().int().min(1).optional(),
+      expectedInspectionEpoch: z.number().int().min(0).optional(),
+      leaseToken: z.string().min(1).max(1024).optional(),
+    },
     wrapTool(async (params) => apiRequest('POST', '/api/jobscout/apply/runs', params, false, false, MCP_USER_AGENT), 'Failed to start apply run')
   );
 
