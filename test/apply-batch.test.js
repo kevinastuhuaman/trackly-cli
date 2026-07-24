@@ -61,6 +61,9 @@ test('batch resume approval and truth certification are separate', () => {
   assert.match(reference, /truth certification.*after final answers/is);
   assert.match(reference, /never.*reusable profile answer/is);
   assert.match(reference, /membership.*profile revision.*resume hash.*answer snapshot.*wording.*inspection epoch change invalidates/is);
+  assert.match(reference, /`trackly_approve_apply_batch_resume`/);
+  assert.match(reference, /`trackly_verify_prepared_resume`/);
+  assert.match(reference, /`trackly_certify_apply_batch_truth`/);
 });
 
 test('batch handoff separates grouped actions from per-run review evidence', () => {
@@ -83,7 +86,7 @@ test('batch orchestration uses bounded server-owned checkpoint tools', () => {
   assert.match(reference, /prior inspection epoch.*new inspection epoch/is);
   assert.match(reference, /one to 25 typed actions/i);
   assert.match(reference, /epoch\/version advances once/i);
-  assert.match(reference, /Never add raw labels, options, answers, or page\s+text/i);
+  assert.match(reference, /Never add raw labels, options, answers,\s+or\s+page\s+text/i);
   assert.match(reference, /`packetPhase: first_pass`/);
   assert.match(reference, /`packetPhase: delta`/);
   assert.match(reference, /per-member conflict does not\s+cancel\s+successful siblings/i);

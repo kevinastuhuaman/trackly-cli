@@ -535,6 +535,7 @@ test('resume materialization binds exact bytes, path, filename, permissions, and
       contentType: 'application/pdf',
       fileName,
       sha256,
+      resumeId: 70,
     }, {
       runId: 91,
       now,
@@ -545,6 +546,8 @@ test('resume materialization binds exact bytes, path, filename, permissions, and
     assert.equal(path.basename(prepared.path), fileName);
     assert.equal(path.basename(path.dirname(prepared.path)), `${now}-aaaaaaaa`);
     assert.equal(prepared.fileName, fileName);
+    assert.equal(prepared.resumeId, 70);
+    assert.equal(prepared.confirmation.resumeId, 70);
     assert.deepEqual(fs.readFileSync(prepared.path), buffer);
     assert.equal(fs.statSync(prepared.path).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.dirname(prepared.path)).mode & 0o777, 0o700);
@@ -569,10 +572,12 @@ test('pre-attach verification rehashes the confirmed file and locks it read-only
       contentType: 'application/pdf',
       fileName: 'Resume - Candidate Name.pdf',
       sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      resumeId: 70,
     }, { runId: 91, now, nonce: 'aaaaaaaa', confirmationId: 'proof-123' });
 
     const result = agent.verifyPreparedResume({
       runId: prepared.confirmation.runId,
+      resumeId: prepared.resumeId,
       confirmationId: prepared.confirmation.confirmationId,
       exactLocalPath: prepared.path,
       sha256: prepared.sha256,
@@ -581,6 +586,7 @@ test('pre-attach verification rehashes the confirmed file and locks it read-only
     }, now + 1000);
 
     assert.equal(result.verified, true);
+    assert.equal(result.resumeId, 70);
     assert.equal(result.sha256, prepared.sha256);
     assert.equal(result.exactLocalPath, prepared.path);
     assert.equal(result.permissions, '400');
@@ -597,9 +603,11 @@ test('pre-attach verification rejects changed or expired resume proof', () => {
       contentType: 'application/pdf',
       fileName: 'Resume - Candidate Name.pdf',
       sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      resumeId: 70,
     }, { runId: 91, now, nonce: 'aaaaaaaa', confirmationId: 'proof-123' });
     const proof = {
       runId: 91,
+      resumeId: 70,
       confirmationId: 'proof-123',
       exactLocalPath: prepared.path,
       sha256: prepared.sha256,
@@ -608,6 +616,7 @@ test('pre-attach verification rejects changed or expired resume proof', () => {
     };
 
     assert.throws(() => agent.verifyPreparedResume({ ...proof, runId: 92 }, now + 1000), /does not match the confirmed run/i);
+    assert.throws(() => agent.verifyPreparedResume({ ...proof, resumeId: 71 }, now + 1000), /does not match the confirmed run/i);
     assert.throws(() => agent.verifyPreparedResume({ ...proof, confirmationId: 'different-proof' }, now + 1000), /does not match the confirmed run/i);
 
     fs.writeFileSync(prepared.path, Buffer.from('%PDF-1.7\nchanged resume content'));

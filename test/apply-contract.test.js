@@ -87,6 +87,7 @@ test('Apply contract owns value-free bulk checkpoint semantics', () => {
   assert.match(schema, /checkpoints:z\.array\(z\.object\(/);
   assert.match(schema, /actions:z\.array\(z\.object\(/);
   assert.match(schema, /actions:.*\.min\(1\)\.max\(25\)/);
+  assert.match(schema, /inspectionEpoch:.*packetPhase:.*knownFieldsCommitted:.*actions:/);
   assert.match(schema, /\.min\(1\)\.max\(20\)/);
   assert.match(schema, /expectedMemberVersion/);
   assert.match(schema, /expectedInspectionEpoch/);
@@ -100,6 +101,26 @@ test('Apply contract owns value-free bulk checkpoint semantics', () => {
     /questionLabel|fieldLabel|rawLabel|options|answerValue|credential|captchaText|pageText/i,
   );
   assert.match(source, /\/api\/jobscout\/apply\/batches\/\$\{batchId\}\/checkpoints/);
+});
+
+test('Apply contract separates exact resume approval from late truth certification', () => {
+  const resumeSchema = normalizeSchema(toolArguments('trackly_approve_apply_batch_resume')[2]);
+  assert.match(resumeSchema, /membershipHash/);
+  assert.match(resumeSchema, /resumeId/);
+  assert.match(resumeSchema, /resumeSha256/);
+  assert.match(resumeSchema, /resumeFilename/);
+  assert.match(resumeSchema, /resumeSizeBytes/);
+  assert.match(resumeSchema, /memberRuns:z\.array\(z\.object\(/);
+  assert.doesNotMatch(resumeSchema, /answerSnapshotHash|wordingFingerprint/);
+
+  const truthSchema = normalizeSchema(toolArguments('trackly_certify_apply_batch_truth')[2]);
+  assert.match(truthSchema, /answerSnapshotHash/);
+  assert.match(truthSchema, /wordingFingerprint/);
+  assert.match(truthSchema, /inspectionEpoch/);
+  assert.doesNotMatch(truthSchema, /resumeFilename|resumeSizeBytes/);
+  assert.match(source, /\/resume-approval/);
+  assert.match(source, /\/truth-certification/);
+  assert.match(source, /never becomes a profile answer/i);
 });
 
 test('local MCP freezes, reads, claims, and binds server-owned batches', () => {

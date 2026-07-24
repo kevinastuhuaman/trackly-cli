@@ -623,13 +623,13 @@ function createServer() {
         expectedMemberVersion: z.number().int().min(1),
         expectedInspectionEpoch: z.number().int().min(0),
         inspectionEpoch: z.number().int().min(1),
+        packetPhase: z.enum(APPLY_CHECKPOINT_PACKET_PHASES).optional(),
+        knownFieldsCommitted: z.boolean(),
         idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
         actions: z.array(z.object({
           actionCode: z.enum(APPLY_CHECKPOINT_ACTION_CODES),
           continuationAllowed: z.boolean(),
           fieldFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-          packetPhase: z.enum(APPLY_CHECKPOINT_PACKET_PHASES).optional(),
-          knownFieldsCommitted: z.boolean(),
         })).min(1).max(25),
       })).min(1).max(20),
     },
@@ -641,6 +641,70 @@ function createServer() {
       false,
       MCP_USER_AGENT
     ), 'Failed to checkpoint apply batch')
+  );
+
+  server.tool(
+    'trackly_approve_apply_batch_resume',
+    'Record one explicit approval for the exact default-resume identity and immutable current run set. Every local attachment still requires immediate path/hash verification.',
+    {
+      batchId: z.number().int().min(1),
+      leaseToken: z.string().min(1).max(1024),
+      membershipHash: z.string().regex(/^[a-f0-9]{64}$/),
+      profileRevision: z.number().int().min(0),
+      resumeId: z.number().int().min(1),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      resumeFilename: z.string().min(1).max(255),
+      resumeSizeBytes: z.number().int().min(1),
+      memberRuns: z.array(z.object({
+        memberId: z.number().int().min(1),
+        runId: z.number().int().min(1),
+        memberVersion: z.number().int().min(1),
+        inspectionEpoch: z.number().int().min(0),
+      })).min(1).max(100),
+      expiresAt: z.string().datetime(),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ batchId, idempotencyKey, ...body }) => apiRequest(
+      'POST',
+      `/api/jobscout/apply/batches/${batchId}/resume-approval`,
+      body,
+      false,
+      false,
+      MCP_USER_AGENT,
+      { 'Idempotency-Key': idempotencyKey }
+    ), 'Failed to approve batch resume')
+  );
+
+  server.tool(
+    'trackly_certify_apply_batch_truth',
+    'Record a late, expiring truthfulness certification over final answer and wording fingerprints for the exact current review-ready run set. This never becomes a profile answer.',
+    {
+      batchId: z.number().int().min(1),
+      leaseToken: z.string().min(1).max(1024),
+      membershipHash: z.string().regex(/^[a-f0-9]{64}$/),
+      profileRevision: z.number().int().min(0),
+      resumeId: z.number().int().min(1),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      memberRuns: z.array(z.object({
+        memberId: z.number().int().min(1),
+        runId: z.number().int().min(1),
+        memberVersion: z.number().int().min(1),
+        inspectionEpoch: z.number().int().min(0),
+      })).min(1).max(100),
+      answerSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+      wordingFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      expiresAt: z.string().datetime(),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ batchId, idempotencyKey, ...body }) => apiRequest(
+      'POST',
+      `/api/jobscout/apply/batches/${batchId}/truth-certification`,
+      body,
+      false,
+      false,
+      MCP_USER_AGENT,
+      { 'Idempotency-Key': idempotencyKey }
+    ), 'Failed to certify batch truthfulness')
   );
 
   server.tool(
@@ -733,6 +797,7 @@ function createServer() {
     'Immediately before attachment, recompute the prepared resume fingerprint, validate its run and expiration, and lock the confirmed file read-only.',
     {
       runId: z.number().int().min(1),
+      resumeId: z.number().int().min(1),
       confirmationId: z.string().min(1).max(200),
       exactLocalPath: z.string().min(1).max(4096),
       sha256: z.string().regex(/^[a-f0-9]{64}$/i),

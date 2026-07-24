@@ -73,12 +73,12 @@ CAPTCHA answers, raw question text, and private answer values never enter
 Trackly observations.
 
 Each checkpoint includes the expected member version, prior inspection epoch,
-new inspection epoch, lease token, one to 25 typed actions, and its own
-idempotency key. Each action carries its continuation flag,
-known-fields-committed flag, optional redacted field fingerprint, and optional
-packet phase. All actions in one checkpoint share one member lifecycle and the
-member's epoch/version advances once. Never add raw labels, options, answers, or page
-text to this packet.
+new inspection epoch, lease token, one to 25 typed actions, the shared
+known-fields-committed flag, optional packet phase, and its own idempotency key.
+Each action carries its continuation flag and optional redacted field
+fingerprint. All actions in one checkpoint share one member lifecycle and the
+member's epoch/version advances once. Never add raw labels, options, answers, or
+page text to this packet.
 
 Use `packetPhase: first_pass` while inventorying the frozen set. Use
 `packetPhase: delta` only for a conditional question or action that became
@@ -104,10 +104,24 @@ membership, default-resume identity, exact content hash, user-facing filename,
 size, profile revision, and expiry. Each upload still needs its own immediate
 per-run local path proof for the exact bytes.
 
+Prepare the resume for every run that exposes a real Resume or CV control. Show
+one consolidated proof with every run/path plus the shared resume identity,
+filename, size, and SHA-256. After explicit user approval, call
+`trackly_approve_apply_batch_resume` for the complete current run set. Reuse that
+content approval only while every returned dependency remains exact. Immediately
+before each attachment, call `trackly_verify_prepared_resume` with that run's
+resume ID and signed local proof.
+
 Truth certification is late. Ask only after final answers and any conditional
 wording are known. Bind it to the run set, answer snapshot, wording
 fingerprints, profile revision, resume hash, inspection epochs, and expiry.
 It is ephemeral evidence and never a reusable profile answer.
+
+After all conditional questions and certification wording are visible, show one
+final truthfulness prompt. Only after explicit user confirmation, compute the
+value-free answer-snapshot and wording fingerprints and call
+`trackly_certify_apply_batch_truth` for the complete current review-ready run
+set. Never place the certification or its wording in the application profile.
 
 A membership, profile revision, resume hash, answer snapshot, certification
 wording, or inspection epoch change invalidates the affected approval or

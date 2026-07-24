@@ -376,6 +376,8 @@ test('resume preparation requires backend confirmation for the exact active run'
   );
   assert.match(prepareRegion, /default-resume\?runId=\$\{normalizedRunId\}/);
   assert.match(prepareRegion, /Number\(download\.applyRunId\) !== normalizedRunId/);
+  assert.match(prepareRegion, /Number\(download\.resumeId\)/);
+  assert.match(prepareRegion, /default resume identity/);
 });
 
 test('CLI + MCP use new /jobscout/tracker/jobs/:id/stage endpoint (not removed /jobscout-tracker/status)', () => {
