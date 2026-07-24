@@ -81,6 +81,8 @@ test('batch orchestration uses bounded server-owned checkpoint tools', () => {
   assert.match(reference, /`trackly_checkpoint_apply_batch`/);
   assert.match(reference, /groups of at most 20/i);
   assert.match(reference, /prior inspection epoch.*new inspection epoch/is);
+  assert.match(reference, /one to 25 typed actions/i);
+  assert.match(reference, /epoch\/version advances once/i);
   assert.match(reference, /Never add raw labels, options, answers, or page\s+text/i);
   assert.match(reference, /`packetPhase: first_pass`/);
   assert.match(reference, /`packetPhase: delta`/);

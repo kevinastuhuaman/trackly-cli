@@ -73,9 +73,11 @@ CAPTCHA answers, raw question text, and private answer values never enter
 Trackly observations.
 
 Each checkpoint includes the expected member version, prior inspection epoch,
-new inspection epoch, lease token, typed action code, continuation flag,
-known-fields-committed flag, optional redacted field fingerprint, packet phase,
-and its own idempotency key. Never add raw labels, options, answers, or page
+new inspection epoch, lease token, one to 25 typed actions, and its own
+idempotency key. Each action carries its continuation flag,
+known-fields-committed flag, optional redacted field fingerprint, and optional
+packet phase. All actions in one checkpoint share one member lifecycle and the
+member's epoch/version advances once. Never add raw labels, options, answers, or page
 text to this packet.
 
 Use `packetPhase: first_pass` while inventorying the frozen set. Use

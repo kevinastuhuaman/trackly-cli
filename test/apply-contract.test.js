@@ -85,6 +85,8 @@ test('Apply contract owns value-free bulk checkpoint semantics', () => {
   assert.deepEqual(contract.constants.applyCheckpointPacketPhases, ['first_pass', 'delta']);
   const schema = normalizeSchema(toolArguments('trackly_checkpoint_apply_batch')[2]);
   assert.match(schema, /checkpoints:z\.array\(z\.object\(/);
+  assert.match(schema, /actions:z\.array\(z\.object\(/);
+  assert.match(schema, /actions:.*\.min\(1\)\.max\(25\)/);
   assert.match(schema, /\.min\(1\)\.max\(20\)/);
   assert.match(schema, /expectedMemberVersion/);
   assert.match(schema, /expectedInspectionEpoch/);
