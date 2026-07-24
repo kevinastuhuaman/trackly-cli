@@ -31,6 +31,12 @@ Before resuming, handing off, or closing a tab:
 5. Reclaim a matching tab only after employer, role, requisition, HTTPS origin,
    ATS tenant when applicable, run ID, and browser binding all revalidate.
 
+For every initial tab and every recovery, call `trackly_bind_apply_surface`
+with the existing frozen member and run. Use `initial_binding` for the first
+surface and `recovery_binding` after a missing tab or handoff. The returned URL
+is the only URL recovery may open. Treat its returned member version and
+inspection epoch as authoritative; do not reuse evidence from the prior epoch.
+
 The Sola failure mode is the regression model: a handed-off tab can disappear
 from the controller inventory while remaining visible in the user inventory.
 Never make a closure claim from one inventory surface.
@@ -43,6 +49,12 @@ epoch:
 - the adapter declares both available controller and user inventories complete;
 - the exact bound tab receives an explicit close receipt; and
 - the tab is absent from the complete post-close union.
+
+Record these facts separately with `trackly_record_apply_surface_evidence`:
+`surface_inventory_reconciled`, `surface_close_receipt`, and
+`surface_post_close_absent`. A post-close absence event is invalid unless it
+explicitly covers the complete controller+user union. The backend, not the
+agent's prose, derives `closed_verified` from all three current-epoch facts.
 
 If the close request succeeds but a complete union is unavailable or still
 contains the tab, the agent must not claim `closed_verified`; record
@@ -60,7 +72,8 @@ When an incomplete member's tab is missing:
 
 1. Preserve the frozen member and reuse the existing run. Never create a
    replacement run for browser recovery.
-2. Reopen only the exact backend-stored requisition URL. Do not use search,
+2. Call `trackly_bind_apply_surface` with `recovery_binding`; reopen only its
+   exact backend-stored requisition URL. Do not use search,
    company careers navigation, redirects remembered from chat, or an invented
    URL.
 3. Revalidate HTTPS origin, ATS tenant policy, employer, role, requisition, and

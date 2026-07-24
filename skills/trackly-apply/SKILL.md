@@ -19,6 +19,12 @@ Use Trackly as the source of truth for profile answers, documents, queue decisio
 
 ## Start every run
 
+Before selecting or resuming work, read
+[references/batch-orchestration.md](references/batch-orchestration.md) and
+[references/browser-lifecycle.md](references/browser-lifecycle.md). Those
+references define the server-frozen batch, grouped-question, tab-reconciliation,
+and missing-surface recovery contract; they are mandatory even for a one-job batch.
+
 1. Call `trackly_get_apply_protocol`. Skill 4.1 requires protocol major 3 (version 3.1.0 or newer) and `compatibleSkillMajor: 4`. Reject an older or incompatible version and report that the backend must finish updating or `trackly agent setup` must update the skill. This gate prevents a pre-evidence skill or run from being reused under the stronger cross-ATS contract. Protocol 3.2 adds exact-origin trust for jobs Trackly ingested directly from employer careers sources; do not recreate the retired ownership-timestamp gate in the client.
 2. Call `trackly_get_profile_onboarding` or fetch both the profile schema and application profile. Treat `completeness.percent` as required onboarding readiness only. Use `coverage.missingReusableKeys` to explain reusable optional gaps, while `coverage.contextualKeys` are intentionally asked only on the relevant employer form. Do not claim that 100% required completeness answers every possible application question.
 3. Save answers with `trackly_update_application_profile`:

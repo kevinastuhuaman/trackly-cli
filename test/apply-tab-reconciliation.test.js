@@ -20,6 +20,11 @@ test('tab closure requires complete controller and user inventories plus a close
   assert.match(lifecycle, /complete.*inventory/i);
   assert.match(lifecycle, /explicit close receipt/i);
   assert.match(lifecycle, /post-close union/i);
+  assert.match(lifecycle, /`trackly_record_apply_surface_evidence`/);
+  assert.match(lifecycle, /`surface_inventory_reconciled`/);
+  assert.match(lifecycle, /`surface_close_receipt`/);
+  assert.match(lifecycle, /`surface_post_close_absent`/);
+  assert.match(lifecycle, /backend.*derives `closed_verified`/is);
   assert.match(lifecycle, /must not claim `closed_verified`/i);
   assert.match(lifecycle, /`closure_unverified`/);
   assert.match(lifecycle, /`missing`/);
@@ -27,6 +32,7 @@ test('tab closure requires complete controller and user inventories plus a close
 
 test('a missing incomplete tab reuses its run and exact requisition URL', () => {
   assert.match(lifecycle, /exact backend-stored requisition URL/i);
+  assert.match(lifecycle, /`trackly_bind_apply_surface`.*`recovery_binding`/is);
   assert.match(lifecycle, /reuse the existing run/i);
   assert.match(lifecycle, /never create a\s+replacement run/i);
   assert.match(lifecycle, /revalidate.*origin.*job identity/is);

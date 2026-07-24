@@ -5,6 +5,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const skill = fs.readFileSync(path.join(
+  __dirname,
+  '..',
+  'skills',
+  'trackly-apply',
+  'SKILL.md',
+), 'utf8');
 const reference = fs.readFileSync(path.join(
   __dirname,
   '..',
@@ -21,6 +28,12 @@ const reviewHandoff = fs.readFileSync(path.join(
   'references',
   'review-handoff.md',
 ), 'utf8');
+
+test('main skill requires batch and browser lifecycle contracts on every run', () => {
+  assert.match(skill, /references\/batch-orchestration\.md/);
+  assert.match(skill, /references\/browser-lifecycle\.md/);
+  assert.match(skill, /mandatory even for a one-job batch/i);
+});
 
 test('batch orchestration freezes recent-first server membership', () => {
   assert.match(reference, /active.*first/is);

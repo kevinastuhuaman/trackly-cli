@@ -20,6 +20,9 @@ const APPLY_BROWSER_SURFACES = APPLY_CONTRACT.constants.applyBrowserSurfaces;
 const APPLY_SCENARIO_CODES = APPLY_CONTRACT.constants.applyScenarioCodes;
 const APPLY_CHECKPOINT_ACTION_CODES = APPLY_CONTRACT.constants.applyCheckpointActionCodes;
 const APPLY_CHECKPOINT_PACKET_PHASES = APPLY_CONTRACT.constants.applyCheckpointPacketPhases;
+const APPLY_SURFACE_BINDING_REASONS = APPLY_CONTRACT.constants.applySurfaceBindingReasons;
+const APPLY_SURFACE_EVIDENCE_TYPES = APPLY_CONTRACT.constants.applySurfaceEvidenceTypes;
+const APPLY_SURFACE_OWNERSHIP_STATES = APPLY_CONTRACT.constants.applySurfaceOwnershipStates;
 const SAFE_OBSERVATION_CODE = /^[a-z0-9][a-z0-9_:-]{0,99}$/;
 const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
 
@@ -673,6 +676,62 @@ function createServer() {
       MCP_USER_AGENT,
       { 'Idempotency-Key': idempotencyKey }
     ), 'Failed to approve batch resume')
+  );
+
+  server.tool(
+    'trackly_bind_apply_surface',
+    'Bind an initial or recovered browser surface to an existing frozen member and run. This increments the inspection epoch and returns only the exact backend-stored requisition URL; it never creates a replacement run.',
+    {
+      batchId: z.number().int().min(1),
+      memberId: z.number().int().min(1),
+      runId: z.number().int().min(1),
+      expectedMemberVersion: z.number().int().min(1),
+      expectedInspectionEpoch: z.number().int().min(0),
+      leaseToken: z.string().min(1).max(1024),
+      browserBindingHash: z.string().regex(/^[a-f0-9]{64}$/),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+      adapterCode: z.string().regex(SAFE_OBSERVATION_CODE),
+      bindingReason: z.enum(APPLY_SURFACE_BINDING_REASONS),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ batchId, memberId, idempotencyKey, ...body }) => apiRequest(
+      'POST',
+      `/api/jobscout/apply/batches/${batchId}/members/${memberId}/surface-binding`,
+      body,
+      false,
+      false,
+      MCP_USER_AGENT,
+      { 'Idempotency-Key': idempotencyKey }
+    ), 'Failed to bind apply browser surface')
+  );
+
+  server.tool(
+    'trackly_record_apply_surface_evidence',
+    'Record value-free current-epoch inventory, missing-tab, close-receipt, post-close absence, or close-failure evidence. closed_verified requires complete controller+user union inventory, an explicit close receipt, and post-close union absence.',
+    {
+      batchId: z.number().int().min(1),
+      memberId: z.number().int().min(1),
+      runId: z.number().int().min(1),
+      expectedMemberVersion: z.number().int().min(1),
+      expectedInspectionEpoch: z.number().int().min(1),
+      leaseToken: z.string().min(1).max(1024),
+      browserBindingHash: z.string().regex(/^[a-f0-9]{64}$/),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+      adapterCode: z.string().regex(SAFE_OBSERVATION_CODE),
+      ownershipState: z.enum(APPLY_SURFACE_OWNERSHIP_STATES),
+      completeInventory: z.boolean(),
+      evidenceType: z.enum(APPLY_SURFACE_EVIDENCE_TYPES),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ batchId, memberId, idempotencyKey, ...body }) => apiRequest(
+      'POST',
+      `/api/jobscout/apply/batches/${batchId}/members/${memberId}/surface-evidence`,
+      body,
+      false,
+      false,
+      MCP_USER_AGENT,
+      { 'Idempotency-Key': idempotencyKey }
+    ), 'Failed to record apply browser surface evidence')
   );
 
   server.tool(

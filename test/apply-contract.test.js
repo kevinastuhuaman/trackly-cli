@@ -103,6 +103,41 @@ test('Apply contract owns value-free bulk checkpoint semantics', () => {
   assert.match(source, /\/api\/jobscout\/apply\/batches\/\$\{batchId\}\/checkpoints/);
 });
 
+test('Apply contract binds recovered surfaces and proves close from three current-epoch facts', () => {
+  assert.deepEqual(contract.constants.applySurfaceBindingReasons, [
+    'initial_binding', 'recovery_binding',
+  ]);
+  assert.deepEqual(contract.constants.applySurfaceEvidenceTypes, [
+    'surface_inventory_reconciled',
+    'surface_missing',
+    'surface_close_attempted',
+    'surface_close_receipt',
+    'surface_post_close_absent',
+    'surface_close_failed',
+  ]);
+  assert.deepEqual(contract.constants.applySurfaceOwnershipStates, [
+    'controller_owned', 'user_owned', 'controller_user_union', 'unresolved',
+  ]);
+
+  const bindingSchema = normalizeSchema(toolArguments('trackly_bind_apply_surface')[2]);
+  assert.match(bindingSchema, /memberId/);
+  assert.match(bindingSchema, /runId/);
+  assert.match(bindingSchema, /expectedMemberVersion/);
+  assert.match(bindingSchema, /expectedInspectionEpoch/);
+  assert.match(bindingSchema, /browserBindingHash/);
+  assert.match(bindingSchema, /bindingReason:z\.enum\(APPLY_SURFACE_BINDING_REASONS\)/);
+
+  const evidenceSchema = normalizeSchema(
+    toolArguments('trackly_record_apply_surface_evidence')[2],
+  );
+  assert.match(evidenceSchema, /ownershipState:z\.enum\(APPLY_SURFACE_OWNERSHIP_STATES\)/);
+  assert.match(evidenceSchema, /completeInventory:z\.boolean\(\)/);
+  assert.match(evidenceSchema, /evidenceType:z\.enum\(APPLY_SURFACE_EVIDENCE_TYPES\)/);
+  assert.doesNotMatch(evidenceSchema, /rawTabId|tabUrl|pageText|questionText|answerValue/i);
+  assert.match(source, /never creates a replacement run/i);
+  assert.match(source, /complete controller\+user union inventory/i);
+});
+
 test('Apply contract separates exact resume approval from late truth certification', () => {
   const resumeSchema = normalizeSchema(toolArguments('trackly_approve_apply_batch_resume')[2]);
   assert.match(resumeSchema, /membershipHash/);

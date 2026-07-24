@@ -107,6 +107,8 @@ API-key creation attempts.
 - **trackly_get_apply_batch** — Page a server-owned frozen batch without reordering or replacing members.
 - **trackly_claim_apply_batch** — Acquire or renew the optimistic browser-mutation lease.
 - **trackly_checkpoint_apply_batch** — Bulk-record up to 20 value-free inspection checkpoints, typed human actions, and per-member conflicts.
+- **trackly_bind_apply_surface** — Bind an initial or recovered browser surface to the existing frozen member/run, increment its inspection epoch, and return the exact stored requisition URL.
+- **trackly_record_apply_surface_evidence** — Record current-epoch, value-free inventory, missing-tab, close-receipt, post-close absence, or close-failure evidence.
 - **trackly_approve_apply_batch_resume** — Approve one exact default-resume identity and content hash for the complete current frozen run set.
 - **trackly_certify_apply_batch_truth** — Record an expiring late truthfulness certification over final answer and wording fingerprints for review-ready runs.
 - **trackly_start_apply_run** — Start or reuse a manual-submit browser run, optionally bound to a frozen batch member.
