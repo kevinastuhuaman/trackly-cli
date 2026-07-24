@@ -1,6 +1,6 @@
 # Review handoff
 
-Provide this compact block and stop:
+For one application, provide this compact block and stop:
 
 ```text
 Ready for your review — not submitted
@@ -26,4 +26,42 @@ Items requiring your attention:
 Please review the live form and click Submit manually.
 ```
 
-Do not include restricted answers in chat unless needed for the user’s review. Never include an OTP or CAPTCHA response.
+For a frozen batch, first summarize unresolved human actions, then provide one
+review block per run that reached `review_ready`. Continue processing other
+members before presenting the first-pass handoff.
+
+## Grouped actions
+
+Group recoverable actions in this order:
+
+1. company;
+2. role;
+3. run;
+4. action type.
+
+Show the stage and what the user must do, without copying raw form questions or
+private values into Trackly observations. Separate credentials, legal choices,
+artifacts, and unknown reusable answers. Later handoffs contain only newly
+revealed conditional deltas.
+
+## Batch review table
+
+Include one row per frozen member:
+
+```text
+Job ID | Run ID | Browser label | ATS | State | Human actions | Evidence
+```
+
+The browser label may help the user find a visible tab, but raw tab identifiers
+stay local and out of Trackly. For each review-ready run, include its current
+inspection epoch, resume-content approval status, per-run attachment proof,
+truth certification status, required scenario coverage, and integrity result.
+Submission evidence and closure evidence remain separate and are normally
+empty until after the user's manual Submit.
+
+Do not claim the batch is ready until every frozen member is either
+`review_ready`, has an explicit resumable human action, is user-revoked, or has
+a terminal trust/observability blocker.
+
+Do not include restricted answers in chat unless needed for the user’s review.
+Never include credentials, an OTP, or a CAPTCHA response.

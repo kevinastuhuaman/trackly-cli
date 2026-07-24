@@ -13,6 +13,14 @@ const reference = fs.readFileSync(path.join(
   'references',
   'batch-orchestration.md',
 ), 'utf8');
+const reviewHandoff = fs.readFileSync(path.join(
+  __dirname,
+  '..',
+  'skills',
+  'trackly-apply',
+  'references',
+  'review-handoff.md',
+), 'utf8');
 
 test('batch orchestration freezes recent-first server membership', () => {
   assert.match(reference, /active.*first/is);
@@ -53,4 +61,15 @@ test('batch resume approval and truth certification are separate', () => {
   assert.match(reference, /truth certification.*after final answers/is);
   assert.match(reference, /never.*reusable profile answer/is);
   assert.match(reference, /membership.*profile revision.*resume hash.*answer snapshot.*wording.*inspection epoch change invalidates/is);
+});
+
+test('batch handoff separates grouped actions from per-run review evidence', () => {
+  assert.match(reviewHandoff, /Grouped actions/i);
+  assert.match(reviewHandoff, /company.*role.*run.*action type/is);
+  assert.match(reviewHandoff, /one\s+review block per run/i);
+  assert.match(reviewHandoff, /inspection epoch/i);
+  assert.match(reviewHandoff, /truth certification/i);
+  assert.match(reviewHandoff, /closure evidence/i);
+  assert.match(reviewHandoff, /raw tab identifiers/i);
+  assert.match(reviewHandoff, /Never include.*credentials.*OTP.*CAPTCHA/is);
 });
