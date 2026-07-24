@@ -1,4 +1,4 @@
 interface:
   display_name: "Trackly Apply"
   short_description: "Fill queued job applications for manual review"
-  default_prompt: "Use $trackly-apply to fill my next approved Trackly job application and stop before Submit."
+  default_prompt: "Use $trackly-apply. Resume my active frozen batch, or create a one-job batch from my next approved Trackly job. Keep the browser visible, verify every committed field, and stop before Submit."

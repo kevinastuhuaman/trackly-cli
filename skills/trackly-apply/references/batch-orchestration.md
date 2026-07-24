@@ -1,7 +1,8 @@
 # Batch orchestration
 
-Use the backend batch contract whenever the user asks for multiple queued jobs.
-The batch is an execution ledger, not a fit-ranking exercise.
+Use the backend batch contract for every new protocol 3.3 run, including a
+one-job request. The batch is an execution ledger, not a fit-ranking exercise.
+Protocol 3.2 is retained only for resuming an already-active legacy single run.
 
 ## Freeze before browser work
 
@@ -11,18 +12,19 @@ then job ID ascending. Never replace, rescore, or expand frozen membership
 because a form is difficult or another job looks easier. A job saved after the
 snapshot belongs only to a future batch.
 
-Static exclusions may remove an inactive posting, insecure URL, or
-protocol-declared manual-only job. Credentials, CAPTCHA placement, attachment
-controls, semantic observability, and review reachability are browser findings;
-they do not change membership. If the user removes or discards a frozen member,
-stop before its next private-data mutation.
+Static planning keeps an inactive posting, insecure URL, or protocol-declared
+manual-only job in frozen membership with a non-executable exclusion reason.
+Never replenish or replace it with another queued job. Credentials, CAPTCHA
+placement, attachment controls, semantic observability, and review reachability
+are browser findings; they do not change membership. If the user removes or
+discards a frozen member, stop before its next private-data mutation.
 
 Read large batches through opaque continuation tokens. Do not recreate ordering
 or pagination in the prompt.
 
 ## Backend tool sequence
 
-For a new multi-job request:
+For every new protocol 3.3 request:
 
 1. call `trackly_create_apply_batch` once with the requested size and a fresh
    idempotency key;
@@ -34,6 +36,16 @@ For a new multi-job request:
 
 Do not recreate a batch after maintenance. Refetch the existing batch, reclaim
 its lease with the latest revision, and resume its existing run bindings.
+
+### Request budget
+
+For a 20-member batch, keep planning, initial binding, one bulk checkpoint,
+resume approval, truth certification, and final batch refresh within 47
+non-resume MCP/HTTP requests: one create, one page, one claim, 20 run starts, 20
+surface bindings, one bulk checkpoint, one resume approval, one truth
+certification, and one final refresh. Do not replace bulk checkpoints with
+per-member checkpoint requests. Resume download and exact local verification
+are excluded from this count.
 
 ## Ownership and replay safety
 
@@ -104,6 +116,10 @@ membership, default-resume identity, exact content hash, user-facing filename,
 size, profile revision, and expiry. Each upload still needs its own immediate
 per-run local path proof for the exact bytes.
 
+Exact local paths and content hashes are user-visible local proof only. Never
+send them to the backend, application answers, observations, analytics, or
+logs.
+
 Prepare the resume for every run that exposes a real Resume or CV control. Show
 one consolidated proof with every run/path plus the shared resume identity,
 filename, size, and SHA-256. After explicit user approval, call
@@ -120,8 +136,9 @@ It is ephemeral evidence and never a reusable profile answer.
 After all conditional questions and certification wording are visible, show one
 final truthfulness prompt. Only after explicit user confirmation, compute the
 value-free answer-snapshot and wording fingerprints and call
-`trackly_certify_apply_batch_truth` for the complete current review-ready run
-set. Never place the certification or its wording in the application profile.
+`trackly_certify_apply_batch_truth` for the complete current run set that has
+passed every other review-readiness gate. Never place the certification or its
+wording in the application profile.
 
 A membership, profile revision, resume hash, answer snapshot, certification
 wording, or inspection epoch change invalidates the affected approval or
@@ -135,5 +152,9 @@ one compact table mapping job ID, run ID, browser surface/tab label, ATS, state,
 actions, and evidence status. Raw tab identifiers stay local.
 
 Never submit a member. After manual submission, mark Applied only from an
-observable success page or explicit user confirmation, then reconcile tab
-closure separately using the browser-lifecycle gate.
+observable success page or explicit user confirmation. Record the submit
+request, success page or `user_confirmation`, and any provider receipt with
+`trackly_record_apply_submission_evidence`; store only the redacted fingerprint
+and typed source. Then reconcile tab closure separately using the
+browser-lifecycle gate. Submission, receipt, and closure never substitute for
+one another.

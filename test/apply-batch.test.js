@@ -42,6 +42,8 @@ test('batch orchestration freezes recent-first server membership', () => {
   assert.match(reference, /server-frozen/i);
   assert.match(reference, /never replace, rescore, or expand/i);
   assert.match(reference, /saved after the\s+snapshot.*future batch/is);
+  assert.match(reference, /keeps an inactive posting, insecure URL, or protocol-declared\s+manual-only job in frozen membership/is);
+  assert.match(reference, /Never replenish or replace it/i);
 });
 
 test('batch first pass fills known fields before one grouped question packet', () => {
@@ -71,7 +73,10 @@ test('batch mutations require concurrency and replay guards', () => {
 test('batch resume approval and truth certification are separate', () => {
   assert.match(reference, /resume approval.*exact content hash/is);
   assert.match(reference, /per-run local path proof/i);
+  assert.match(reference, /local paths and content hashes are user-visible local proof only/i);
+  assert.match(reference, /Never\s+send them to the backend, application answers, observations, analytics, or\s+logs/i);
   assert.match(reference, /truth certification.*after final answers/is);
+  assert.match(reference, /complete current run set that has\s+passed every other review-readiness gate/i);
   assert.match(reference, /never.*reusable profile answer/is);
   assert.match(reference, /membership.*profile revision.*resume hash.*answer snapshot.*wording.*inspection epoch change invalidates/is);
   assert.match(reference, /`trackly_approve_apply_batch_resume`/);
@@ -103,4 +108,24 @@ test('batch orchestration uses bounded server-owned checkpoint tools', () => {
   assert.match(reference, /`packetPhase: first_pass`/);
   assert.match(reference, /`packetPhase: delta`/);
   assert.match(reference, /per-member conflict does not\s+cancel\s+successful siblings/i);
+});
+
+test('a deterministic 20-member first pass stays inside the request budget', () => {
+  const members = 20;
+  const nonResumeRequests = (
+    1 // create
+    + 1 // page
+    + 1 // claim
+    + members // start or reuse runs
+    + members // bind browser surfaces
+    + 1 // bulk checkpoint
+    + 1 // batch resume approval
+    + 1 // truth certification
+    + 1 // final refresh
+  );
+
+  assert.equal(nonResumeRequests, 47);
+  assert.ok(nonResumeRequests <= 60);
+  assert.match(reference, /within 47\s+non-resume MCP\/HTTP requests/i);
+  assert.match(reference, /Do not replace bulk checkpoints with\s+per-member checkpoint requests/i);
 });

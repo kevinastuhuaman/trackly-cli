@@ -23,6 +23,8 @@ const APPLY_CHECKPOINT_PACKET_PHASES = APPLY_CONTRACT.constants.applyCheckpointP
 const APPLY_SURFACE_BINDING_REASONS = APPLY_CONTRACT.constants.applySurfaceBindingReasons;
 const APPLY_SURFACE_EVIDENCE_TYPES = APPLY_CONTRACT.constants.applySurfaceEvidenceTypes;
 const APPLY_SURFACE_OWNERSHIP_STATES = APPLY_CONTRACT.constants.applySurfaceOwnershipStates;
+const APPLY_SUBMISSION_EVIDENCE_TYPES = APPLY_CONTRACT.constants.applySubmissionEvidenceTypes;
+const APPLY_SUBMISSION_EVIDENCE_SOURCES = APPLY_CONTRACT.constants.applySubmissionEvidenceSources;
 const SAFE_OBSERVATION_CODE = /^[a-z0-9][a-z0-9_:-]{0,99}$/;
 const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
 
@@ -735,8 +737,35 @@ function createServer() {
   );
 
   server.tool(
+    'trackly_record_apply_submission_evidence',
+    'Record redacted request, success-page, explicit user-confirmation, or provider-receipt evidence for the current batch member and inspection epoch. Never send page text, receipt identifiers, or external references.',
+    {
+      batchId: z.number().int().min(1),
+      memberId: z.number().int().min(1),
+      runId: z.number().int().min(1),
+      expectedMemberVersion: z.number().int().min(1),
+      expectedInspectionEpoch: z.number().int().min(1),
+      leaseToken: z.string().min(1).max(1024),
+      browserBindingHash: z.string().regex(/^[a-f0-9]{64}$/),
+      evidenceType: z.enum(APPLY_SUBMISSION_EVIDENCE_TYPES),
+      evidenceSource: z.enum(APPLY_SUBMISSION_EVIDENCE_SOURCES),
+      evidenceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ batchId, memberId, idempotencyKey, ...body }) => apiRequest(
+      'POST',
+      `/api/jobscout/apply/batches/${batchId}/members/${memberId}/submission-evidence`,
+      body,
+      false,
+      false,
+      MCP_USER_AGENT,
+      { 'Idempotency-Key': idempotencyKey }
+    ), 'Failed to record apply submission evidence')
+  );
+
+  server.tool(
     'trackly_certify_apply_batch_truth',
-    'Record a late, expiring truthfulness certification over final answer and wording fingerprints for the exact current review-ready run set. This never becomes a profile answer.',
+    'Record a late, expiring truthfulness certification over final answer and wording fingerprints for the exact current run set after every other review-readiness gate has passed. This never becomes a profile answer.',
     {
       batchId: z.number().int().min(1),
       leaseToken: z.string().min(1).max(1024),
@@ -874,7 +903,13 @@ function createServer() {
       role: 'user',
       content: {
         type: 'text',
-        text: 'Compatibility gate: before starting a new run, require the fetched Trackly Apply protocol to be version 3.1.0 or newer. After trackly_start_apply_run returns, or before resuming an existing run, require the returned or stored run.protocolVersion to be version 3.1.0 or newer. Never continue or replace a pre-evidence 3.0.x run; preserve it, record it blocked when possible, and stop for supported lifecycle cleanup.',
+        text: 'Compatibility gate: require Trackly Apply protocol 3.3.0 or newer and skill 4.2.0 or newer for every new frozen batch. Protocol 3.2 remains valid only for resuming an already-active legacy single run. Never continue or replace a pre-evidence 3.0.x run; preserve it, record it blocked when possible, and stop for supported lifecycle cleanup.',
+      },
+    }, {
+      role: 'user',
+      content: {
+        type: 'text',
+        text: 'Batch workflow: resume the active frozen batch or create one exact recent-first batch, including for a one-job request. Claim its lease, keep membership and order fixed, inspect all members before asking one grouped packet of questions, bind each initial or recovered browser surface to the same run and exact backend URL, and discard older-epoch evidence. Require one exact batch resume approval plus immediate local proof before each attachment, then a late truth certification before review. After manual Submit, keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted.',
       },
     }, {
       role: 'user',

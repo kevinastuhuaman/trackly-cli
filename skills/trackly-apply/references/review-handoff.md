@@ -59,6 +59,13 @@ truth certification status, required scenario coverage, and integrity result.
 Submission evidence and closure evidence remain separate and are normally
 empty until after the user's manual Submit.
 
+After the user submits, record one typed `user_confirmation` only when the user
+explicitly says they submitted. Prefer a current-epoch `success_page` proof when
+the controlled browser visibly shows success. Record a provider receipt only
+from the application surface itself; never search email or a mailbox. Hash the
+proof locally and never send confirmation text, page text, receipt identifiers,
+or URLs as evidence.
+
 Do not claim the batch is ready until every frozen member is either
 `review_ready`, has an explicit resumable human action, is user-revoked, or has
 a terminal trust/observability blocker.

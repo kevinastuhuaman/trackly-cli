@@ -109,8 +109,9 @@ API-key creation attempts.
 - **trackly_checkpoint_apply_batch** — Bulk-record up to 20 value-free inspection checkpoints, typed human actions, and per-member conflicts.
 - **trackly_bind_apply_surface** — Bind an initial or recovered browser surface to the existing frozen member/run, increment its inspection epoch, and return the exact stored requisition URL.
 - **trackly_record_apply_surface_evidence** — Record current-epoch, value-free inventory, missing-tab, close-receipt, post-close absence, or close-failure evidence.
+- **trackly_record_apply_submission_evidence** — Record typed, redacted submit-request, success-page, explicit user-confirmation, or provider-receipt evidence without page text or external references.
 - **trackly_approve_apply_batch_resume** — Approve one exact default-resume identity and content hash for the complete current frozen run set.
-- **trackly_certify_apply_batch_truth** — Record an expiring late truthfulness certification over final answer and wording fingerprints for review-ready runs.
+- **trackly_certify_apply_batch_truth** — Record an expiring late truthfulness certification over final answer and wording fingerprints after every other review-readiness gate has passed.
 - **trackly_start_apply_run** — Start or reuse a manual-submit browser run, optionally bound to a frozen batch member.
 - **trackly_get_apply_evidence** — Get the authenticated user's aggregate beta evidence and release gate without returning profile answers or contact values.
 - **trackly_get_apply_protocol** — Get the current ATS support, browser integrity rules, and compatible skill version.

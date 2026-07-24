@@ -183,8 +183,9 @@ Then use natural language in any of these clients:
 | trackly_checkpoint_apply_batch | Bulk-record redacted inspection checkpoints and human actions |
 | trackly_bind_apply_surface | Bind an initial or recovered browser surface to the existing run and exact requisition URL |
 | trackly_record_apply_surface_evidence | Record current-epoch inventory, missing-tab, close-receipt, and post-close absence evidence |
+| trackly_record_apply_submission_evidence | Record redacted submit-request, success-page, user-confirmation, or provider-receipt evidence |
 | trackly_approve_apply_batch_resume | Approve one exact default resume for the current frozen run set |
-| trackly_certify_apply_batch_truth | Certify final answer and wording fingerprints for review-ready runs |
+| trackly_certify_apply_batch_truth | Certify final answer and wording fingerprints after every other review-readiness gate |
 | trackly_start_apply_run | Start or reuse a manual-submit browser run |
 | trackly_get_apply_evidence | Get aggregate, value-free beta evidence and release readiness |
 | trackly_get_apply_protocol | Get current workflow and compatibility rules |
@@ -271,7 +272,7 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 **What MCP servers exist for job searching?**
 
-trackly-cli includes a built-in MCP server with 32 tools for job search, company lookup, discovery preferences, application tracking, frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
+trackly-cli includes a built-in MCP server with 33 tools for job search, company lookup, discovery preferences, application tracking, frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
 
 **How do I use Claude Code for job hunting?**
 

@@ -47,7 +47,7 @@ function toolArguments(name) {
 const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.2.0');
+  assert.equal(contract.contractVersion, '3.3.0');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     assert.equal(normalizeSchema(toolArguments(name)[2]), localSchema, `${name} schema drifted`);
@@ -244,12 +244,14 @@ test('Apply skill maps boolean answers semantically and verifies the canonical v
 test('Apply skill freezes and completes every member of an explicitly requested batch', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
 
-  assert.match(skill, /freeze the deterministic ordered set of exactly `N` job IDs/);
-  assert.match(skill, /Do not replace, rescore, or expand that approved batch/);
+  assert.match(skill, /freeze up to `N` available saved jobs/i);
+  assert.match(skill, /returned server membership and order are authoritative/i);
+  assert.match(skill, /do not replenish, replace, rescore, or expand the batch/i);
   assert.match(skill, /job ID -> application run ID -> browser tab mapping/);
   assert.match(skill, /conditional resume preparation\/confirmation\/verification when an upload control exists/);
   assert.match(skill, /for every member/);
   assert.match(skill, /show and verify each member's exact path, size, hash, run ID, and expiration/);
+  assert.match(skill, /never send them in backend observations, logs, application answers, or remote evidence/i);
   assert.match(skill, /only for the frozen job\/run\/tab set/);
   assert.match(skill, /a run falls outside the frozen batch/);
   assert.match(skill, /preserve the current review-ready tab and continue the same lifecycle for the next mapped batch member/);
@@ -341,7 +343,7 @@ test('Apply MCP prompt gates resume preparation on the same browser binding', ()
   assert.match(source.slice(browserGate, prepare), /browser_ready attestation/);
 });
 
-test('Apply MCP evidence preserves custom bounds and prompt rejects pre-3.1 protocols', () => {
+test('Apply MCP evidence preserves custom bounds and prompt gates new batches on protocol 3.3', () => {
   const evidenceRegion = source.slice(
     source.indexOf("'trackly_get_apply_evidence'"),
     source.indexOf("'trackly_get_apply_protocol'"),
@@ -353,16 +355,18 @@ test('Apply MCP evidence preserves custom bounds and prompt rejects pre-3.1 prot
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /before starting a new run, require the fetched Trackly Apply protocol to be version 3\.1\.0 or newer/);
-  assert.match(promptRegion, /After trackly_start_apply_run returns, or before resuming an existing run, require the returned or stored run\.protocolVersion to be version 3\.1\.0 or newer/);
+  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.0 or newer and skill 4\.2\.0 or newer/);
+  assert.match(promptRegion, /Protocol 3\.2 remains valid only for resuming an already-active legacy single run/);
+  assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
 });
 
-test('Apply skill 4.1 requires protocol 3.1 or newer and skill major 4', () => {
+test('Apply skill 4.2 requires protocol 3.3 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.1 requires protocol major 3 \(version 3\.1\.0 or newer\)/);
+  assert.match(skill, /Skill 4\.2 requires protocol major 3/);
+  assert.match(skill, /Protocol 3\.3 or newer is required for frozen-batch execution/);
+  assert.match(skill, /protocol 3\.2 remains valid only for an already-active legacy single-run workflow/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /pre-evidence skill or run/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.1/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 
