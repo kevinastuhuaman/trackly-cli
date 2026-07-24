@@ -33,6 +33,30 @@ function withTempAgentHome(run) {
   }
 }
 
+async function withTempAgentHomeAsync(run) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-agent-test-'));
+  const previous = {
+    TRACKLY_CONFIG_DIR: process.env.TRACKLY_CONFIG_DIR,
+    CODEX_HOME: process.env.CODEX_HOME,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+    PATH: process.env.PATH,
+  };
+  process.env.TRACKLY_CONFIG_DIR = path.join(root, '.trackly');
+  process.env.CODEX_HOME = path.join(root, '.codex');
+  process.env.CLAUDE_CONFIG_DIR = path.join(root, '.claude');
+  process.env.PATH = path.join(root, 'empty-bin');
+  fs.mkdirSync(process.env.PATH, { recursive: true });
+  try {
+    return await run(root);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 test('agent setup installs one canonical skill and links both clients', () => {
   withTempAgentHome(() => {
     const result = agent.setupAgent('both');
@@ -43,6 +67,65 @@ test('agent setup installs one canonical skill and links both clients', () => {
       assert.ok(fs.existsSync(path.join(client.target, 'SKILL.md')));
       assert.equal(client.mcp.status, 'missing_client');
     }
+  });
+});
+
+test('agent setup records a deterministic full-pack content digest', () => {
+  withTempAgentHome(() => {
+    const first = agent.setupAgent('codex');
+    const metadataPath = path.join(first.canonical, '.trackly-managed.json');
+    const firstMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+
+    assert.equal(firstMetadata.skillManifestVersion, 1);
+    assert.match(firstMetadata.skillContentDigest, /^[a-f0-9]{64}$/);
+    assert.ok(firstMetadata.skillFileCount > 1);
+    assert.equal(agent.inspectClient('codex').skillIntegrity, 'verified');
+
+    const second = agent.setupAgent('codex');
+    const secondMetadata = JSON.parse(fs.readFileSync(
+      path.join(second.canonical, '.trackly-managed.json'),
+      'utf8',
+    ));
+    assert.equal(secondMetadata.skillContentDigest, firstMetadata.skillContentDigest);
+    assert.equal(secondMetadata.skillFileCount, firstMetadata.skillFileCount);
+  });
+});
+
+test('agent doctor inspection fails closed on modified, missing, or extra managed skill content', () => {
+  for (const mutation of ['modified', 'missing', 'extra']) {
+    withTempAgentHome(() => {
+      const setup = agent.setupAgent('codex');
+      const target = setup.clients[0].target;
+      if (mutation === 'modified') {
+        fs.appendFileSync(
+          path.join(target, 'references', 'form-integrity.md'),
+          '\nfixture mutation\n',
+        );
+      } else if (mutation === 'missing') {
+        fs.unlinkSync(path.join(target, 'references', 'form-integrity.md'));
+      } else {
+        fs.writeFileSync(path.join(target, 'unexpected-managed-file.txt'), 'unexpected');
+      }
+
+      const inspection = agent.inspectClient('codex');
+      assert.equal(inspection.installedSkillVersion, '4.1.1', mutation);
+      assert.equal(inspection.installed, false, mutation);
+      assert.equal(inspection.skillIntegrity, 'content_mismatch', mutation);
+    });
+  }
+});
+
+test('agent doctor reports managed skill integrity failures even when metadata version is current', async () => {
+  await withTempAgentHomeAsync(async () => {
+    const setup = agent.setupAgent('codex');
+    fs.appendFileSync(path.join(setup.clients[0].target, 'SKILL.md'), '\nfixture mutation\n');
+
+    const report = await agent.doctorAgent();
+    assert.deepEqual(report.skillPackIntegrity, {
+      ok: false,
+      failures: [{ client: 'codex', integrity: 'content_mismatch' }],
+    });
+    assert.equal(report.ok, false);
   });
 });
 
@@ -331,12 +414,59 @@ test('agent doctor compatibility requires protocol 3.1 or newer', () => {
   assert.equal(agent.protocolAtLeast('invalid'), false);
 });
 
+test('agent doctor compatibility enforces the protocol minimum installed skill version', () => {
+  const installed = [{
+    client: 'codex',
+    installed: true,
+    installedSkillVersion: '4.1.1',
+  }];
+  const current = agent.evaluateApplyCompatibility({
+    version: '3.2.0',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.1.1',
+  }, installed);
+  assert.equal(current.compatible, true);
+  assert.equal(current.skillMinimumSatisfied, true);
+  assert.deepEqual(current.compatibleClientSkills, ['codex']);
+
+  const future = agent.evaluateApplyCompatibility({
+    version: '3.2.0',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.2.0',
+  }, installed);
+  assert.equal(future.compatible, false);
+  assert.equal(future.skillMinimumSatisfied, false);
+  assert.deepEqual(future.compatibleClientSkills, []);
+
+  const missingMinimum = agent.evaluateApplyCompatibility({
+    version: '3.2.0',
+    compatibleSkillMajor: 4,
+  }, installed);
+  assert.equal(missingMinimum.compatible, false);
+  assert.equal(missingMinimum.skillMinimumSatisfied, false);
+});
+
 test('agent doctor fails browser readiness closed unless a full semantic surface exists', () => {
   assert.equal(agent.liveBrowserReady({ codex: false, codexComputerUse: false, claude: null }), false);
   assert.equal(agent.liveBrowserReady({ codex: true, codexComputerUse: false, claude: null }), false);
   assert.equal(agent.liveBrowserReady({ codex: false, codexComputerUse: true, claude: null }), false);
   assert.equal(agent.liveBrowserReady({ codex: true, codexComputerUse: true, claude: null }), true);
   assert.equal(agent.liveBrowserReady({ codex: false, codexComputerUse: false, claude: true }), true);
+});
+
+test('agent doctor does not infer controller and user tab union inventory from plugin presence', async () => {
+  await withTempAgentHomeAsync(async () => {
+    const report = await agent.doctorAgent();
+    assert.deepEqual(report.browserControl.tabInventory, {
+      controllerOwnedTabs: 'runtime_verification_required',
+      userOwnedTabs: 'runtime_verification_required',
+      unionReconciliation: 'runtime_verification_required',
+      detectedSurfaces: [],
+      unionInventoryDetected: false,
+      requiredForClosedClaim: true,
+      note: 'Installed plugins do not prove controller-owned and user-owned tab union inventory. The active browser client must verify both inventories before claiming a tab is closed.',
+    });
+  });
 });
 
 test('resume preparation keeps CLI and MCP attribution distinct', () => {
