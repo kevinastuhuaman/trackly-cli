@@ -29,7 +29,7 @@ lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies()
 mcp/server.js        # MCP server: 24 tools, launched via `trackly mcp`
 contracts/           # Versioned hosted/local Trackly Apply MCP schema contract
 skills/trackly-apply/  # Sanitized public browser-mechanics skill bundled with the CLI
-scripts/             # Maintainer-only verification scripts; excluded from the public npm package
+scripts/             # Maintainer checks; the packaged audit verifier is the named exception
 docs/trackly-tools.md  # MCP tool reference (for embedding in AI contexts)
 server.json          # MCP Registry manifest (io.github.trackly-app/trackly)
 ```
@@ -121,6 +121,10 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 4. **OAuth callback binds to 127.0.0.1 only.** Port is OS-assigned (ephemeral via `listen(0)`, validated to 1024-65535 — the backend's accepted range). 5-minute timeout. A single `cmdLogin`-scoped SIGINT handler closes the callback server on Ctrl-C.
 5. **`--json` flag or non-TTY stdout** triggers JSON output mode on all commands.
 6. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).
-7. **No dependencies beyond `@modelcontextprotocol/sdk` and `zod`.** Keep it minimal. The HTTP client uses raw `node:https`/`node:http`.
+7. **Keep dependencies minimal.** Direct runtime dependencies are
+   `@modelcontextprotocol/sdk`, `zod`, and a direct Hono declaration that
+   guarantees the SDK's audited patched resolution. The local MCP transport
+   remains stdio-only; do not add or initialize an HTTP server. The CLI HTTP
+   client uses raw `node:https`/`node:http`.
 8. **Token refresh is automatic.** On 401, `apiRequest()` tries one refresh via `/api/auth/refresh` before failing. The `_isRetry` flag prevents infinite loops.
 9. **`/ask` backend drift is tracked outside this repo.** The CLI and MCP use DB-backed job function values directly. Backend PR #112 (`trackly-app/close-ai`) tracks the `/ask` prompt/URL migration to those same public values; verify production before claiming `/ask` round-trips are fixed.

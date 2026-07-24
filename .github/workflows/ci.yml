@@ -28,6 +28,12 @@ jobs:
 
       - run: npm audit --audit-level=high
 
+      # The current MCP SDK carries @hono/node-server for optional HTTP
+      # transports. Trackly uses stdio only. Permit exactly the one documented
+      # moderate advisory while failing any advisory, severity, range, or path
+      # change. See security/audit-exceptions.json.
+      - run: npm run security:audit
+
       - run: npm test
 
       - name: Package smoke test

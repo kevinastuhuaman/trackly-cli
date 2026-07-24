@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "test:hosted-contract": "node scripts/verify-hosted-contract.js"
+    "test:hosted-contract": "node scripts/verify-hosted-contract.js",
+    "security:audit": "node scripts/verify-audit-exceptions.js"
   },
   "files": [
     "bin/",
@@ -17,6 +18,8 @@
     "skills/",
     "contracts/",
     "docs/",
+    "scripts/verify-audit-exceptions.js",
+    "security/audit-exceptions.json",
     "server.json",
     "README.md",
     "LICENSE"

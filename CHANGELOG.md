@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Added an exact-shape npm audit gate for the temporarily unreachable
+  `GHSA-frvp-7c67-39w9` transitive advisory. CI rejects every additional
+  advisory or change to its severity, affected range, or dependency path, and
+  real stdio initialization verifies that Trackly never loads the affected
+  HTTP/static-file code.
+- Added a packed-consumer smoke test so release validation executes the CLI
+  from the actual npm tarball rather than only from the repository checkout.
+
 ## [0.7.3] - 2026-07-22
 
 ### Added
