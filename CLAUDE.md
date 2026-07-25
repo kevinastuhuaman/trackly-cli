@@ -26,10 +26,10 @@ bin/trackly          # CLI entrypoint (shebang script). All CLI commands + arg p
 lib/agent.js         # Agent setup, doctor, private resume cache, and public skill installation
 lib/client.js        # HTTP client: config loading, token refresh, apiRequest()
 lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies(), outputStats(), outputContacts(), outputReferralCampaign(), outputNetworkBrief()
-mcp/server.js        # MCP server: 24 tools, launched via `trackly mcp`
+mcp/server.js        # MCP server: 36 tools, launched via `trackly mcp`
 contracts/           # Versioned hosted/local Trackly Apply MCP schema contract
 skills/trackly-apply/  # Sanitized public browser-mechanics skill bundled with the CLI
-scripts/             # Maintainer-only verification scripts; excluded from the public npm package
+scripts/             # Maintainer checks; the packaged audit verifier is the named exception
 docs/trackly-tools.md  # MCP tool reference (for embedding in AI contexts)
 server.json          # MCP Registry manifest (io.github.trackly-app/trackly)
 ```
@@ -48,7 +48,7 @@ There is a small Node test suite (`npm test`), but no linter and no build step. 
 
 1. User runs `trackly mcp` (or AI agent spawns it via stdio)
 2. `bin/trackly` delegates to `mcp/server.js`
-3. `mcp/server.js` creates an `McpServer` with 24 tools, connects via `StdioServerTransport`
+3. `mcp/server.js` creates an `McpServer` with 36 tools, connects via `StdioServerTransport`
 4. Each tool calls `apiRequest()` from `lib/client.js` with a `trackly-mcp/<version>` User-Agent derived from `package.json`
 5. CLI commands use `trackly-cli/<version>` User-Agent derived from `package.json` (separate channel attribution)
 
@@ -57,7 +57,7 @@ MCP setup for Claude Code:
 claude mcp add --scope user trackly -- trackly mcp
 ```
 
-The 24 MCP tools: `trackly_search_jobs`, `trackly_get_job`, `trackly_search_companies`, `trackly_list_companies`, `trackly_get_stats`, `trackly_get_preferences`, `trackly_update_experience_limits`, `trackly_update_status`, `trackly_ask`, `trackly_get_job_brief`, `trackly_contacts_at_company`, `trackly_get_company_workspace`, `trackly_request_company`, `trackly_get_apply_queue`, `trackly_get_application_profile`, `trackly_get_profile_onboarding`, `trackly_update_application_profile`, `trackly_start_apply_run`, `trackly_get_apply_evidence`, `trackly_get_apply_protocol`, `trackly_report_apply_observation`, `trackly_record_application_outcome`, `trackly_prepare_resume`, `trackly_verify_prepared_resume`
+The 36 MCP tools include the complete search, network, profile, and Trackly Apply set documented in `docs/trackly-tools.md`. Keep this count synchronized with `mcp/server.js`, `README.md`, and the docs-drift tests.
 
 Job function values — **14 canonical values** that match backend `ALL_JOB_FUNCTIONS` at `granola-followup-app/src/routes/jobscout-filter-utils.ts:17-21`, the backend `job_function` DB column, and the local mirror `JOB_FUNCTIONS` in `mcp/server.js`: `product`, `engineering`, `design`, `data`, `marketing`, `sales`, `partnerships`, `finance`, `strategy`, `operations`, `people`, `legal`, `support`, `other`. `partnerships` is documented in CHANGELOG `0.2.1`; any doc still listing 13 values is stale. The MCP test at `test/mcp-schema.test.js` locks this local/backend mapping.
 
@@ -121,6 +121,10 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 4. **OAuth callback binds to 127.0.0.1 only.** Port is OS-assigned (ephemeral via `listen(0)`, validated to 1024-65535 — the backend's accepted range). 5-minute timeout. A single `cmdLogin`-scoped SIGINT handler closes the callback server on Ctrl-C.
 5. **`--json` flag or non-TTY stdout** triggers JSON output mode on all commands.
 6. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).
-7. **No dependencies beyond `@modelcontextprotocol/sdk` and `zod`.** Keep it minimal. The HTTP client uses raw `node:https`/`node:http`.
+7. **Keep dependencies minimal.** Direct runtime dependencies are
+   `@modelcontextprotocol/sdk`, `zod`, and a direct Hono declaration that
+   guarantees the SDK's audited patched resolution. The local MCP transport
+   remains stdio-only; do not add or initialize an HTTP server. The CLI HTTP
+   client uses raw `node:https`/`node:http`.
 8. **Token refresh is automatic.** On 401, `apiRequest()` tries one refresh via `/api/auth/refresh` before failing. The `_isRetry` flag prevents infinite loops.
 9. **`/ask` backend drift is tracked outside this repo.** The CLI and MCP use DB-backed job function values directly. Backend PR #112 (`trackly-app/close-ai`) tracks the `/ask` prompt/URL migration to those same public values; verify production before claiming `/ask` round-trips are fixed.

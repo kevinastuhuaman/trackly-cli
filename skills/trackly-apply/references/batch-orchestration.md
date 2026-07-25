@@ -1,0 +1,187 @@
+# Batch orchestration
+
+Use the backend batch contract for every new protocol 3.3 run, including a
+one-job request. The batch is an execution ledger, not a fit-ranking exercise.
+Protocol 3.2 is retained for the explicit legacy single-run workflow.
+
+## Freeze before browser work
+
+Create one server-frozen batch before opening or mutating application forms.
+Use the backend order exactly: active jobs first, then `savedAt` descending,
+then job ID ascending. Never replace, rescore, or expand frozen membership
+because a form is difficult or another job looks easier. A job saved after the
+snapshot belongs only to a future batch.
+
+Static planning keeps an inactive posting, insecure URL, or protocol-declared
+manual-only job in frozen membership with a non-executable exclusion reason.
+Never replenish or replace it with another queued job. Credentials, CAPTCHA
+placement, attachment controls, semantic observability, and review reachability
+are browser findings; they do not change membership. If the user removes or
+discards a frozen member, stop before its next private-data mutation.
+
+Read large batches through opaque continuation tokens. Do not recreate ordering
+or pagination in the prompt.
+
+## Backend tool sequence
+
+For every protocol 3.3.1 request:
+
+1. call `trackly_get_active_apply_batch` before any create call;
+2. resume the returned active batch, or, only when none exists, call
+   `trackly_create_apply_batch` once with the requested size and a fresh
+   idempotency key;
+3. page only that batch with `trackly_get_apply_batch`;
+4. acquire or renew ownership with `trackly_claim_apply_batch`;
+5. start or reuse each run with the complete batch/member/lease binding; and
+6. send browser findings in groups of at most 20 through
+   `trackly_checkpoint_apply_batch`.
+
+Do not recreate a batch after maintenance. Refetch the existing batch, reclaim
+its lease with the latest revision, and resume its existing run bindings.
+
+### Request budget
+
+For a new 20-member batch, keep recovery, planning, initial binding, evidence,
+two bulk checkpoints, resume approval, truth certification, outcomes, and the
+final batch refresh within 52 non-resume MCP/HTTP requests: one active-batch
+lookup, one create, one page, one claim, 20 run starts, 20 surface bindings, one
+`trackly_report_apply_observations` call before resume preparation, a second
+bulk observation call for final scenario coverage, two bulk checkpoints, one
+resume approval, one truth certification, one
+`trackly_record_application_outcomes` call, and one final refresh. An existing
+active batch omits the create call. Do not replace bulk observations,
+checkpoints, or outcomes with per-member requests. Resume download and exact
+local verification are excluded from this count.
+
+## Ownership and replay safety
+
+Acquire the renewable lease before browser mutation. Each mutation supplies
+only the guards exposed by its tool schema: lease token when the schema exposes
+it, optimistic version when the schema exposes it, inspection epoch when the
+schema exposes it, and idempotency key when the schema exposes it. Never invent
+or attach an uncontracted guard.
+
+Renew before expiry and stop mutation if ownership is lost. For operations
+documented as idempotent, a same-key, same-payload replay returns the original
+result. A same key with a different payload is a conflict (`409`), never
+permission to retry under a new run. Do not blindly retry a mutation without an
+idempotency key after an ambiguous response; recover through the documented
+read or lookup operation first. Reclaiming a browser tab increments the
+inspection epoch; earlier-epoch review, attachment, certification, or close
+evidence cannot satisfy the current gate.
+
+## First pass
+
+Process every frozen member even when another needs user input:
+
+1. Create or reuse its bound application run.
+2. Reclaim or open its exact stored requisition URL and validate origin and job
+   identity.
+3. Inventory the accessible form.
+4. Fill and verify every known field before checkpointing an unknown.
+5. Record typed human actions and continue to the next frozen member.
+
+Recoverable actions keep the run in `needs_input`. Group the first interruption
+into one grouped first-pass packet organized by company, role, run, and action
+type. After answers reveal conditional fields, send a delta packet containing
+only newly revealed items.
+
+Action records contain only value-free type, stage, blocking scope,
+continuation flags, status, and redacted fingerprints. Credentials, OTPs,
+CAPTCHA answers, raw question text, and private answer values never enter
+Trackly observations.
+
+Each checkpoint includes the expected member version, unchanged current
+inspection epoch in both epoch fields, lease token, one to 25 typed actions, the shared
+known-fields-committed flag, optional packet phase, and its own idempotency key.
+Each action carries its continuation flag and optional redacted field
+fingerprint. All actions in one checkpoint share one member lifecycle. The
+member version advances once, but only a browser bind or reclaim may advance the
+inspection epoch. Never add raw labels, options, answers, or page text to this
+packet.
+
+Use `packetPhase: first_pass` while inventorying the frozen set. Use
+`packetPhase: delta` only for a conditional question or action that became
+visible after the first grouped packet. A per-member conflict does not cancel
+successful siblings; refresh only the conflicted member before retrying it.
+When the user has completed or answered a prior human action, include its exact
+server-returned ID in `resolvedActionIds` on the next checkpoint for that same
+member and current inspection epoch. Never infer, fabricate, or resolve an
+action from another member; an unknown or stale action ID must conflict.
+
+## Challenge placement
+
+An access CAPTCHA or verification wall that hides the semantic form must be
+recorded before private data is entered. Create a human action and continue the
+batch.
+
+A submit-time CAPTCHA beside an otherwise complete final form stays
+`review_ready` with an `at_submit` human action because the user owns Submit.
+Never solve, store, or bypass the challenge. Reserve terminal `blocked` for an
+unrecoverable trust or observability failure, not for an answer the user can
+provide.
+
+## Resume approval and truth
+
+Resume approval is early and content-bound. It covers only immutable batch/run
+membership, default-resume identity, exact content hash, user-facing filename,
+size, profile revision, and expiry. Each upload still needs its own immediate
+per-run local path proof for the exact bytes.
+
+Exact local paths are user-visible local proof only and never leave the
+machine. Content hashes may be sent only to authenticated Trackly resume
+approval, prepared-resume verification, and truth-certification endpoints.
+Never send either value to observations, application answers, analytics, logs,
+or employer form fields.
+
+Prepare the resume for every run that exposes a real Resume or CV control. Show
+one consolidated proof with every run/path plus the shared resume identity,
+filename, size, and SHA-256. After explicit user approval, call
+`trackly_approve_apply_batch_resume` for the complete current run set. Reuse that
+content approval only while every returned immutable dependency remains exact.
+Ordinary checkpoints may advance member versions without invalidating approval
+for unchanged resume bytes and run membership. Immediately before each
+attachment, call `trackly_verify_prepared_resume` with that run's resume ID and
+signed local proof.
+
+Truth certification is late. Ask only after final answers and any conditional
+wording are known. Bind it to the run set, answer snapshot, wording
+fingerprints, profile revision, inspection epochs, and expiry. When at least
+one form used a resume attachment, use `resumeDependency: approved` and bind
+the exact approved resume identity. When no form in the batch exposes a resume
+control, use `resumeDependency: not_applicable` with no resume ID or hash. It
+is ephemeral evidence and never a reusable profile answer.
+
+After all conditional questions and certification wording are visible, show one
+final truthfulness prompt. Only after explicit user confirmation, compute the
+value-free answer-snapshot and wording fingerprints and call
+`trackly_certify_apply_batch_truth` for the exact complete subset that is
+currently `review_ready`. A `needs_input` member does not block certification
+or handoff of ready siblings. Never certify an arbitrary subset. When another
+member becomes ready later, obtain a fresh certification for the then-current
+complete `review_ready` subset. Never place the certification or its wording in
+the application profile.
+
+A membership, profile revision, resume identity or hash, answer snapshot,
+certification wording, or affected inspection epoch change invalidates the
+affected approval or attestation. An ordinary member-version checkpoint does
+not invalidate an unchanged resume-content approval. Recompute and ask again
+only for the invalidated scope.
+
+## Finish
+
+Bring every accessible member to `review_ready`, preserving each browser tab
+for manual submission. Certify, record, and hand off the exact current
+`review_ready` subset without waiting for unrelated members. Members with
+actions remain frozen and resumable, and require a fresh certification after
+they later become ready. Report one compact table mapping job ID, run ID,
+browser surface/tab label, ATS, state, actions, and evidence status. Raw tab
+identifiers stay local.
+
+Never submit a member. After manual submission, mark Applied only from an
+observable success page or explicit user confirmation. Record the submit
+request, success page or `user_confirmation`, and any provider receipt with
+`trackly_record_apply_submission_evidence`; store only the redacted fingerprint
+and typed source. Then reconcile tab closure separately using the
+browser-lifecycle gate. Submission, receipt, and closure never substitute for
+one another.

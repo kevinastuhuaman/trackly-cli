@@ -15,6 +15,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createTempConfigDir, seedApiKey, startMockServer, runCli } = require('./helpers');
 
+test('published package version has a dated changelog section', () => {
+  const packageVersion = require('../package.json').version;
+  const changelog = fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
+
+  assert.match(changelog, new RegExp(
+    `^## \\[${packageVersion.replace(/\./g, '\\.')}\\] - 2026-07-24$`,
+    'm',
+  ));
+});
+
 // Spin up a temp config (seeded API key) + mock server, run the CLI, return the
 // captured requests and the child result. `respond(req)` may return {status, json}.
 async function runAgainstMock(t, args, respond, childEnv = {}) {
@@ -579,6 +589,8 @@ test('agent doctor explains that exact resume validation is deferred to a real A
   });
 
   assert.equal(result.stderr, '');
+  assert.match(result.stdout, /CLI: 0\.8\.1; MCP contract: 3\.3\.1/);
+  assert.match(result.stdout, /Skill: 4\.2\.1; digest: [a-f0-9]{64}/);
   assert.match(result.stdout, /Resume validation: available \(exact bytes are verified during an active Apply run\)/);
 });
 

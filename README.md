@@ -35,7 +35,7 @@ trackly jobs --function product
 
 ## At a Glance
 
-1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 24 local MCP tools
+1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 36 local MCP tools
 
 ## CLI Commands
 
@@ -177,11 +177,23 @@ Then use natural language in any of these clients:
 | trackly_get_application_profile | Get versioned profile answers and provenance |
 | trackly_get_profile_onboarding | Get schema plus missing questions |
 | trackly_update_application_profile | Save scoped answers with optimistic concurrency |
-| trackly_start_apply_run | Start a manual-submit browser run |
+| trackly_create_apply_batch | Freeze an exact recent-first approved batch |
+| trackly_get_active_apply_batch | Recover the newest unexpired active batch after context loss |
+| trackly_get_apply_batch | Read frozen membership with opaque pagination |
+| trackly_claim_apply_batch | Acquire or renew a batch mutation lease |
+| trackly_checkpoint_apply_batch | Bulk-record redacted inspection checkpoints and human actions |
+| trackly_bind_apply_surface | Bind an initial or recovered browser surface to the existing run and exact requisition URL |
+| trackly_record_apply_surface_evidence | Record current-epoch inventory, missing-tab, close-receipt, and post-close absence evidence |
+| trackly_record_apply_submission_evidence | Record redacted submit-request, success-page, user-confirmation, or provider-receipt evidence |
+| trackly_approve_apply_batch_resume | Approve one exact default resume for the current frozen run set |
+| trackly_certify_apply_batch_truth | Certify final answer and wording fingerprints after every other review-readiness gate |
+| trackly_start_apply_run | Start or reuse a manual-submit browser run |
 | trackly_get_apply_evidence | Get aggregate, value-free beta evidence and release readiness |
 | trackly_get_apply_protocol | Get current workflow and compatibility rules |
 | trackly_report_apply_observation | Send redacted ATS mechanics feedback |
+| trackly_report_apply_observations | Bulk-send up to 20 leased, batch-bound redacted observations |
 | trackly_record_application_outcome | Record review or confirmed submission outcome |
+| trackly_record_application_outcomes | Bulk-record up to 20 leased batch outcomes with per-member conflicts |
 | trackly_prepare_resume | Prepare a private expiring resume file for upload |
 | trackly_verify_prepared_resume | Recheck the confirmed resume immediately before attachment |
 
@@ -249,7 +261,7 @@ trackly config --base-url http://127.0.0.1:3000  # Point at a different backend
 | Job search + filters | Yes | Yes | Yes |
 | Apply/save/dismiss | Yes | Yes | Yes |
 | AI-powered search | Yes (trackly ask) | Yes | Yes |
-| MCP integration | Yes (20 local tools) | -- | -- |
+| MCP integration | Yes (36 local tools) | -- | -- |
 | Browser required | No | Yes | No |
 | Best for | Terminal + AI agents | Visual browsing | Custom integrations |
 
@@ -263,7 +275,7 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 **What MCP servers exist for job searching?**
 
-trackly-cli includes a built-in MCP server with 24 tools for job search, company lookup, discovery preferences, application tracking, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
+trackly-cli includes a built-in MCP server with 36 tools for job search, company lookup, discovery preferences, application tracking, frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
 
 **How do I use Claude Code for job hunting?**
 

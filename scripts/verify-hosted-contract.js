@@ -17,6 +17,8 @@ const localContractPath = path.join(cliRoot, 'contracts', 'trackly-apply-tools.j
 const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'contracts', 'trackly-apply-tools.json')))
   || backendCandidates[0];
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
+const localApplySourcePath = path.join(cliRoot, 'mcp', 'apply-tools.js');
+const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
 
 if (!fs.existsSync(hostedContractPath)) {
   throw new Error(`Hosted contract not found at ${hostedContractPath}. Set TRACKLY_BACKEND_DIR to the close-ai checkout.`);
@@ -25,4 +27,53 @@ if (!fs.existsSync(hostedContractPath)) {
 const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
 assert.deepEqual(hosted, local, 'Hosted and local Trackly Apply MCP contracts drifted');
-console.log(`Trackly Apply MCP contracts match at ${local.contractVersion}.`);
+
+function schemaDefinition(source, name, sourcePath) {
+  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*`).exec(source);
+  assert.ok(declaration, `${name} is missing from ${sourcePath}`);
+  const start = declaration.index + declaration[0].length;
+  let parens = 0;
+  let braces = 0;
+  let brackets = 0;
+  let quote = '';
+  let escaped = false;
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
+    if (char === '(') parens++;
+    else if (char === ')') parens--;
+    else if (char === '{') braces++;
+    else if (char === '}') braces--;
+    else if (char === '[') brackets++;
+    else if (char === ']') brackets--;
+    else if (char === ';' && parens === 0 && braces === 0 && brackets === 0) {
+      return source.slice(start, index).trim();
+    }
+  }
+  assert.fail(`${name} is unterminated in ${sourcePath}`);
+}
+
+const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
+const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
+const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
+for (const schemaName of [
+  'truthCertificationCommon',
+  'truthCertificationSchema',
+  'startApplyRunSchema',
+]) {
+  assert.equal(
+    normalizeSchema(schemaDefinition(localApplySource, schemaName, localApplySourcePath)),
+    normalizeSchema(schemaDefinition(hostedApplySource, schemaName, hostedApplySourcePath)),
+    `${schemaName} executable constraints drifted between hosted and local MCP`,
+  );
+}
+
+console.log(
+  `Trackly Apply MCP contracts and named executable schemas match at ${local.contractVersion}.`,
+);

@@ -49,6 +49,25 @@ environment variables by default.
 trackly-cli refuses to send authentication credentials over insecure transport
 unless the destination is localhost for local development.
 
+## Dependency Audit Policy
+
+CI retains `npm audit --audit-level=high` and also runs a stricter
+allowlist-based audit gate. The temporary exception is limited to
+[`GHSA-frvp-7c67-39w9`](https://github.com/advisories/GHSA-frvp-7c67-39w9),
+which reaches Trackly through `@modelcontextprotocol/sdk` and
+`@hono/node-server`.
+
+Trackly's local MCP server uses the SDK's stdio transport. It does not load the
+affected Windows `serveStatic` code, `@hono/node-server`, or Streamable HTTP
+transport. Tests verify that boundary during a real MCP initialize and from
+the packed CLI artifact. The audit gate permits only the advisory's exact
+package, severity, affected range, and dependency path; any change fails CI
+for review.
+
+This exception is temporary and tracks the upstream SDK fix in
+[modelcontextprotocol/typescript-sdk#2531](https://github.com/modelcontextprotocol/typescript-sdk/issues/2531).
+It must be removed when the SDK upgrades or removes the affected adapter.
+
 ## Scope
 
 ### Security issues (please report)

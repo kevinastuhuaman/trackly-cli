@@ -33,16 +33,101 @@ function withTempAgentHome(run) {
   }
 }
 
+async function withTempAgentHomeAsync(run) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-agent-test-'));
+  const previous = {
+    TRACKLY_CONFIG_DIR: process.env.TRACKLY_CONFIG_DIR,
+    CODEX_HOME: process.env.CODEX_HOME,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+    PATH: process.env.PATH,
+  };
+  process.env.TRACKLY_CONFIG_DIR = path.join(root, '.trackly');
+  process.env.CODEX_HOME = path.join(root, '.codex');
+  process.env.CLAUDE_CONFIG_DIR = path.join(root, '.claude');
+  process.env.PATH = path.join(root, 'empty-bin');
+  fs.mkdirSync(process.env.PATH, { recursive: true });
+  try {
+    return await run(root);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 test('agent setup installs one canonical skill and links both clients', () => {
   withTempAgentHome(() => {
     const result = agent.setupAgent('both');
-    assert.equal(result.skillVersion, '4.1.1');
+    assert.equal(result.skillVersion, '4.2.1');
     assert.ok(fs.existsSync(path.join(result.canonical, 'SKILL.md')));
     assert.equal(result.clients.length, 2);
     for (const client of result.clients) {
       assert.ok(fs.existsSync(path.join(client.target, 'SKILL.md')));
       assert.equal(client.mcp.status, 'missing_client');
     }
+  });
+});
+
+test('agent setup records a deterministic full-pack content digest', () => {
+  withTempAgentHome(() => {
+    const first = agent.setupAgent('codex');
+    const metadataPath = path.join(first.canonical, '.trackly-managed.json');
+    const firstMetadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+
+    assert.equal(firstMetadata.skillManifestVersion, 1);
+    assert.match(firstMetadata.skillContentDigest, /^[a-f0-9]{64}$/);
+    assert.ok(firstMetadata.skillFileCount > 1);
+    assert.equal(agent.inspectClient('codex').skillIntegrity, 'verified');
+
+    const second = agent.setupAgent('codex');
+    const secondMetadata = JSON.parse(fs.readFileSync(
+      path.join(second.canonical, '.trackly-managed.json'),
+      'utf8',
+    ));
+    assert.equal(secondMetadata.skillContentDigest, firstMetadata.skillContentDigest);
+    assert.equal(secondMetadata.skillFileCount, firstMetadata.skillFileCount);
+  });
+});
+
+test('agent doctor inspection fails closed on modified, missing, or extra managed skill content', () => {
+  for (const mutation of ['modified', 'missing', 'extra']) {
+    withTempAgentHome(() => {
+      const setup = agent.setupAgent('codex');
+      const target = setup.clients[0].target;
+      if (mutation === 'modified') {
+        fs.appendFileSync(
+          path.join(target, 'references', 'form-integrity.md'),
+          '\nfixture mutation\n',
+        );
+      } else if (mutation === 'missing') {
+        fs.unlinkSync(path.join(target, 'references', 'form-integrity.md'));
+      } else {
+        fs.writeFileSync(path.join(target, 'unexpected-managed-file.txt'), 'unexpected');
+      }
+
+      const inspection = agent.inspectClient('codex');
+      assert.equal(inspection.installedSkillVersion, '4.2.1', mutation);
+      assert.equal(inspection.installed, false, mutation);
+      assert.equal(inspection.skillIntegrity, 'content_mismatch', mutation);
+    });
+  }
+});
+
+test('agent doctor reports managed skill integrity failures even when metadata version is current', async () => {
+  await withTempAgentHomeAsync(async () => {
+    const setup = agent.setupAgent('codex');
+    fs.appendFileSync(path.join(setup.clients[0].target, 'SKILL.md'), '\nfixture mutation\n');
+
+    const report = await agent.doctorAgent();
+    assert.equal(report.skillPackIntegrity.ok, false);
+    assert.match(report.skillPackIntegrity.expectedDigest, /^[a-f0-9]{64}$/);
+    assert.deepEqual(
+      report.skillPackIntegrity.failures,
+      [{ client: 'codex', integrity: 'content_mismatch' }],
+    );
+    assert.equal(report.ok, false);
   });
 });
 
@@ -59,7 +144,7 @@ test('clean temporary homes install Codex, Claude, and both client targets', () 
   }
 });
 
-test('Apply evidence mode makes managed skill 4.0.0 stale and setup installs 4.1.1', () => {
+test('Apply batch mode makes managed skill 4.0.0 stale and setup installs 4.2.1', () => {
   withTempAgentHome(() => {
     const target = agent.clientSkillDir('codex');
     fs.mkdirSync(target, { recursive: true });
@@ -75,13 +160,14 @@ test('Apply evidence mode makes managed skill 4.0.0 stale and setup installs 4.1
     assert.equal(before.installedSkillVersion, '4.0.0');
 
     const setup = agent.setupAgent('codex');
-    assert.equal(setup.skillVersion, '4.1.1');
+    assert.equal(setup.skillVersion, '4.2.1');
     const after = agent.inspectClient('codex');
     assert.equal(after.installed, true);
-    assert.equal(after.installedSkillVersion, '4.1.1');
+    assert.equal(after.installedSkillVersion, '4.2.1');
     const installedSkill = fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8');
     assert.match(installedSkill, /Resume after maintenance/);
-    assert.match(installedSkill, /Do not call `trackly_start_apply_run` again/);
+    assert.match(installedSkill, /sanctioned idempotent lookup/);
+    assert.match(installedSkill, /Never create a replacement run/);
     assert.match(installedSkill, /browser readiness gate/);
   });
 });
@@ -320,15 +406,96 @@ test('agent doctor distinguishes missing resumes from failed validation', () => 
   );
 });
 
-test('agent doctor compatibility requires protocol 3.1 or newer', () => {
+test('agent doctor compatibility requires protocol 3.3.1 or newer', () => {
   assert.equal(agent.protocolAtLeast('2.0.9'), false);
   assert.equal(agent.protocolAtLeast('2.1.0'), false);
   assert.equal(agent.protocolAtLeast('2.99.9'), false);
   assert.equal(agent.protocolAtLeast('3.0.0'), false);
   assert.equal(agent.protocolAtLeast('3.0.9'), false);
-  assert.equal(agent.protocolAtLeast('3.1.0'), true);
+  assert.equal(agent.protocolAtLeast('3.1.0'), false);
+  assert.equal(agent.protocolAtLeast('3.2.9'), false);
+  assert.equal(agent.protocolAtLeast('3.3.0'), false);
+  assert.equal(agent.protocolAtLeast('3.3.1'), true);
   assert.equal(agent.protocolAtLeast('1.99.0'), false);
   assert.equal(agent.protocolAtLeast('invalid'), false);
+});
+
+test('agent doctor compatibility enforces the protocol minimum installed skill version', () => {
+  const installed = [{
+    client: 'codex',
+    installed: true,
+    installedSkillVersion: '4.2.1',
+  }];
+  const current = agent.evaluateApplyCompatibility({
+    version: '3.3.1',
+    mcpContractVersion: '3.3.1',
+    compatibleCliMinimumVersion: '0.8.1',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.2.1',
+  }, installed);
+  assert.equal(current.compatible, true);
+  assert.equal(current.mcpContractCompatible, true);
+  assert.equal(current.cliMinimumSatisfied, true);
+  assert.equal(current.skillMinimumSatisfied, true);
+  assert.deepEqual(current.compatibleClientSkills, ['codex']);
+
+  const future = agent.evaluateApplyCompatibility({
+    version: '3.3.1',
+    mcpContractVersion: '3.3.1',
+    compatibleCliMinimumVersion: '0.8.1',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.3.0',
+  }, installed);
+  assert.equal(future.compatible, false);
+  assert.equal(future.skillMinimumSatisfied, false);
+  assert.deepEqual(future.compatibleClientSkills, []);
+
+  const missingMinimum = agent.evaluateApplyCompatibility({
+    version: '3.3.1',
+    mcpContractVersion: '3.3.1',
+    compatibleCliMinimumVersion: '0.8.1',
+    compatibleSkillMajor: 4,
+  }, installed);
+  assert.equal(missingMinimum.compatible, false);
+  assert.equal(missingMinimum.skillMinimumSatisfied, false);
+});
+
+test('agent doctor compatibility rejects stale CLI and MCP contract versions', () => {
+  const clients = [{
+    client: 'codex',
+    installed: true,
+    installedSkillVersion: '4.2.1',
+  }];
+  const base = {
+    version: '3.3.1',
+    mcpContractVersion: '3.3.1',
+    compatibleCliMinimumVersion: '0.8.1',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.2.1',
+  };
+
+  const staleCli = agent.evaluateApplyCompatibility({
+    ...base,
+    compatibleCliMinimumVersion: '0.9.0',
+  }, clients);
+  assert.equal(staleCli.cliMinimumSatisfied, false);
+  assert.equal(staleCli.compatible, false);
+
+  const staleContract = agent.evaluateApplyCompatibility({
+    ...base,
+    mcpContractVersion: '3.2.0',
+  }, clients);
+  assert.equal(staleContract.mcpContractCompatible, false);
+  assert.equal(staleContract.compatible, false);
+
+  const missingVersions = agent.evaluateApplyCompatibility({
+    version: '3.3.1',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.2.1',
+  }, clients);
+  assert.equal(missingVersions.cliMinimumSatisfied, false);
+  assert.equal(missingVersions.mcpContractCompatible, false);
+  assert.equal(missingVersions.compatible, false);
 });
 
 test('agent doctor fails browser readiness closed unless a full semantic surface exists', () => {
@@ -337,6 +504,24 @@ test('agent doctor fails browser readiness closed unless a full semantic surface
   assert.equal(agent.liveBrowserReady({ codex: false, codexComputerUse: true, claude: null }), false);
   assert.equal(agent.liveBrowserReady({ codex: true, codexComputerUse: true, claude: null }), true);
   assert.equal(agent.liveBrowserReady({ codex: false, codexComputerUse: false, claude: true }), true);
+});
+
+test('agent doctor does not infer controller and user tab union inventory from plugin presence', async () => {
+  await withTempAgentHomeAsync(async () => {
+    const report = await agent.doctorAgent();
+    assert.equal(report.cliVersion, '0.8.1');
+    assert.equal(report.mcpContractVersion, '3.3.1');
+    assert.match(report.skillPackIntegrity.expectedDigest, /^[a-f0-9]{64}$/);
+    assert.deepEqual(report.browserControl.tabInventory, {
+      controllerOwnedTabs: 'runtime_verification_required',
+      userOwnedTabs: 'runtime_verification_required',
+      unionReconciliation: 'runtime_verification_required',
+      detectedSurfaces: [],
+      unionInventoryDetected: false,
+      requiredForClosedClaim: true,
+      note: 'Installed plugins do not prove controller-owned and user-owned tab union inventory. The active browser client must verify both inventories before claiming a tab is closed.',
+    });
+  });
 });
 
 test('resume preparation keeps CLI and MCP attribution distinct', () => {
@@ -405,6 +590,7 @@ test('resume materialization binds exact bytes, path, filename, permissions, and
       contentType: 'application/pdf',
       fileName,
       sha256,
+      resumeId: 70,
     }, {
       runId: 91,
       now,
@@ -415,6 +601,8 @@ test('resume materialization binds exact bytes, path, filename, permissions, and
     assert.equal(path.basename(prepared.path), fileName);
     assert.equal(path.basename(path.dirname(prepared.path)), `${now}-aaaaaaaa`);
     assert.equal(prepared.fileName, fileName);
+    assert.equal(prepared.resumeId, 70);
+    assert.equal(prepared.confirmation.resumeId, 70);
     assert.deepEqual(fs.readFileSync(prepared.path), buffer);
     assert.equal(fs.statSync(prepared.path).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.dirname(prepared.path)).mode & 0o777, 0o700);
@@ -439,10 +627,12 @@ test('pre-attach verification rehashes the confirmed file and locks it read-only
       contentType: 'application/pdf',
       fileName: 'Resume - Candidate Name.pdf',
       sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      resumeId: 70,
     }, { runId: 91, now, nonce: 'aaaaaaaa', confirmationId: 'proof-123' });
 
     const result = agent.verifyPreparedResume({
       runId: prepared.confirmation.runId,
+      resumeId: prepared.resumeId,
       confirmationId: prepared.confirmation.confirmationId,
       exactLocalPath: prepared.path,
       sha256: prepared.sha256,
@@ -451,6 +641,7 @@ test('pre-attach verification rehashes the confirmed file and locks it read-only
     }, now + 1000);
 
     assert.equal(result.verified, true);
+    assert.equal(result.resumeId, 70);
     assert.equal(result.sha256, prepared.sha256);
     assert.equal(result.exactLocalPath, prepared.path);
     assert.equal(result.permissions, '400');
@@ -467,9 +658,11 @@ test('pre-attach verification rejects changed or expired resume proof', () => {
       contentType: 'application/pdf',
       fileName: 'Resume - Candidate Name.pdf',
       sha256: crypto.createHash('sha256').update(buffer).digest('hex'),
+      resumeId: 70,
     }, { runId: 91, now, nonce: 'aaaaaaaa', confirmationId: 'proof-123' });
     const proof = {
       runId: 91,
+      resumeId: 70,
       confirmationId: 'proof-123',
       exactLocalPath: prepared.path,
       sha256: prepared.sha256,
@@ -478,6 +671,7 @@ test('pre-attach verification rejects changed or expired resume proof', () => {
     };
 
     assert.throws(() => agent.verifyPreparedResume({ ...proof, runId: 92 }, now + 1000), /does not match the confirmed run/i);
+    assert.throws(() => agent.verifyPreparedResume({ ...proof, resumeId: 71 }, now + 1000), /does not match the confirmed run/i);
     assert.throws(() => agent.verifyPreparedResume({ ...proof, confirmationId: 'different-proof' }, now + 1000), /does not match the confirmed run/i);
 
     fs.writeFileSync(prepared.path, Buffer.from('%PDF-1.7\nchanged resume content'));

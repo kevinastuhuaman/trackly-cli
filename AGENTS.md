@@ -45,6 +45,20 @@ Publishing is fully automated via GitHub Actions:
 
 **Do not run `npm publish` locally.** Manual publishes from a laptop have no OIDC context and would ship without provenance (this is what created the v0.2.7 unattested-release gap). If a manual publish is ever absolutely required as a break-glass measure, document why on the next CHANGELOG entry and plan a cosmetic version bump immediately after to restore the attestation chain via CI.
 
+### Coordinated Trackly Apply release gate
+
+The standalone CLI CI validates its checked-in hosted-tool contract fixture with
+`npm run test:contract-fixture`. Before merging any release that changes Trackly
+Apply schemas, also run the cross-repository comparison against the final backend
+candidate:
+
+```bash
+TRACKLY_BACKEND_DIR=/absolute/path/to/granola-followup-app npm run test:hosted-contract
+```
+
+This coordinated check belongs in the release evidence. Standalone CLI CI must
+not depend on a sibling private checkout that does not exist on its runner.
+
 ## Key Patterns
 
 ### Auth
@@ -89,4 +103,8 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 3. **Auth tokens at `~/.trackly/config.json`.** File permissions are 0600. Do not change.
 4. **No dependencies beyond `@modelcontextprotocol/sdk` and `zod`.** Keep it minimal. HTTP uses raw `node:https`/`node:http`.
 5. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).
-6. **Do not modify the backend.** This repo is a consumer of the Close AI API. Backend changes go in the `granola-followup-app` repo.
+6. **Direct dependencies stay minimal.** The CLI uses the MCP SDK and Zod.
+   Hono is declared directly to guarantee the audited patched resolution used
+   by the SDK, but the local MCP transport is stdio-only and does not initialize
+   an HTTP server.
+7. **Do not modify the backend.** This repo is a consumer of the Close AI API. Backend changes go in the `granola-followup-app` repo.

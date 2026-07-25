@@ -1,6 +1,6 @@
 {
   "name": "trackly-cli",
-  "version": "0.7.3",
+  "version": "0.8.1",
   "mcpName": "io.github.trackly-app/trackly",
   "description": "AI job search CLI + hosted MCP server with OAuth. 128K+ jobs, 1,900+ companies, 40+ ATS. Works with Claude, ChatGPT, Cursor, Windsurf, Codex via hosted streamable-http or local stdio.",
   "bin": {
@@ -8,7 +8,9 @@
   },
   "scripts": {
     "test": "node --test",
-    "test:hosted-contract": "node scripts/verify-hosted-contract.js"
+    "test:contract-fixture": "node --test test/apply-contract.test.js",
+    "test:hosted-contract": "node scripts/verify-hosted-contract.js",
+    "security:audit": "node scripts/verify-audit-exceptions.js"
   },
   "files": [
     "bin/",
@@ -17,6 +19,9 @@
     "skills/",
     "contracts/",
     "docs/",
+    "scripts/verify-audit-exceptions.js",
+    "security/audit-exceptions.json",
+    "npm-shrinkwrap.json",
     "server.json",
     "README.md",
     "LICENSE"

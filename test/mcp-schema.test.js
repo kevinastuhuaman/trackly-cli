@@ -29,6 +29,10 @@ const SERVER_SRC = fs.readFileSync(
   path.join(__dirname, '..', 'mcp', 'server.js'),
   'utf8'
 );
+const APPLY_SRC = fs.readFileSync(
+  path.join(__dirname, '..', 'mcp', 'apply-tools.js'),
+  'utf8'
+);
 const AGENT_SRC = fs.readFileSync(path.join(__dirname, '..', 'lib', 'agent.js'), 'utf8');
 
 // Tiny extractor: pull the enum values as JSON-ish literals.
@@ -51,6 +55,12 @@ test('MCP JOB_FUNCTIONS has 14 canonical values including partnerships', () => {
   for (const v of ['product', 'engineering', 'design', 'data', 'marketing', 'sales', 'partnerships', 'finance', 'strategy', 'operations', 'people', 'legal', 'support', 'other']) {
     assert.ok(fns.includes(v), `missing canonical function value: ${v}`);
   }
+});
+
+test('MCP server delegates the focused Apply surface below 1,000 lines', () => {
+  assert.ok(SERVER_SRC.split('\n').length < 1000);
+  assert.match(SERVER_SRC, /registerApplyTools\(server,/);
+  assert.match(APPLY_SRC, /function registerApplyTools\(/);
 });
 
 test('local MCP preference tools use the authoritative V2 and revision contracts', () => {
@@ -224,6 +234,143 @@ test('local MCP projects preference reads and refuses unavailable V2 updates bef
   });
 });
 
+test('truth certification publishes concrete inputs and enforces both resume branches', async (t) => {
+  const requests = [];
+  const httpServer = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      requests.push({
+        method: req.method,
+        url: req.url,
+        body: JSON.parse(body),
+        idempotencyKey: req.headers['idempotency-key'],
+      });
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ success: true }));
+    });
+  });
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => httpServer.close());
+
+  const originalApiKey = process.env.TRACKLY_API_KEY;
+  const originalBaseUrl = process.env.TRACKLY_BASE_URL;
+  process.env.TRACKLY_API_KEY = 'trk_test_truth_schema';
+  process.env.TRACKLY_BASE_URL = `http://127.0.0.1:${httpServer.address().port}`;
+  t.after(() => {
+    if (originalApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = originalApiKey;
+    if (originalBaseUrl === undefined) delete process.env.TRACKLY_BASE_URL;
+    else process.env.TRACKLY_BASE_URL = originalBaseUrl;
+  });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer();
+  const client = new Client({ name: 'truth-schema-test', version: '1.0.0' });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+  });
+
+  const { tools } = await client.listTools();
+  const truthTool = tools.find((tool) => tool.name === 'trackly_certify_apply_batch_truth');
+  assert.equal(truthTool.inputSchema.type, 'object');
+  assert.deepEqual(
+    Object.keys(truthTool.inputSchema.properties).sort(),
+    [
+      'answerSnapshotHash',
+      'batchId',
+      'expiresAt',
+      'idempotencyKey',
+      'leaseToken',
+      'memberRuns',
+      'membershipHash',
+      'profileRevision',
+      'resumeDependency',
+      'resumeId',
+      'resumeSha256',
+      'wordingFingerprint',
+    ],
+  );
+  assert.deepEqual(truthTool.inputSchema.properties.resumeDependency.enum, [
+    'approved',
+    'not_applicable',
+  ]);
+
+  const common = {
+    batchId: 44,
+    leaseToken: 'lease-token',
+    membershipHash: 'a'.repeat(64),
+    profileRevision: 9,
+    memberRuns: [{
+      memberId: 91,
+      runId: 701,
+      memberVersion: 2,
+      inspectionEpoch: 1,
+    }],
+    answerSnapshotHash: 'b'.repeat(64),
+    wordingFingerprint: 'c'.repeat(64),
+    expiresAt: '2026-07-25T20:00:00.000Z',
+    idempotencyKey: 'truth-certification-0001',
+  };
+  const approved = await client.callTool({
+    name: 'trackly_certify_apply_batch_truth',
+    arguments: {
+      ...common,
+      resumeDependency: 'approved',
+      resumeId: 17,
+      resumeSha256: 'd'.repeat(64),
+    },
+  });
+  assert.equal(approved.isError, undefined);
+
+  const notApplicable = await client.callTool({
+    name: 'trackly_certify_apply_batch_truth',
+    arguments: {
+      ...common,
+      idempotencyKey: 'truth-certification-0002',
+      resumeDependency: 'not_applicable',
+    },
+  });
+  assert.equal(notApplicable.isError, undefined);
+
+  for (const arguments_ of [
+    {
+      ...common,
+      idempotencyKey: 'truth-certification-0003',
+      resumeDependency: 'approved',
+      resumeId: null,
+      resumeSha256: null,
+    },
+    {
+      ...common,
+      idempotencyKey: 'truth-certification-0004',
+      resumeDependency: 'not_applicable',
+      resumeId: 17,
+      resumeSha256: 'd'.repeat(64),
+    },
+  ]) {
+    const invalid = await client.callTool({
+      name: 'trackly_certify_apply_batch_truth',
+      arguments: arguments_,
+    });
+    assert.equal(invalid.isError, true);
+    assert.match(invalid.content[0].text, /resume(Id|Sha256)|invalid/i);
+  }
+
+  assert.equal(requests.length, 2, 'invalid mixed resume inputs must not reach the backend');
+  assert.deepEqual(requests.map(({ idempotencyKey }) => idempotencyKey), [
+    'truth-certification-0001',
+    'truth-certification-0002',
+  ]);
+  assert.deepEqual(requests.map(({ body }) => body.resumeDependency), [
+    'approved',
+    'not_applicable',
+  ]);
+});
+
 test('MCP JOB_MODALITIES matches backend is_internship column semantics', () => {
   const mods = extractArrayLiteral(SERVER_SRC, 'JOB_MODALITIES');
   assert.deepEqual(mods, ['full_time', 'internship', 'all']);
@@ -313,9 +460,9 @@ test('CLI help exposes no retired Applying pipeline state', () => {
 });
 
 test('local MCP exposes a pre-attach resume integrity verifier', () => {
-  const verifyRegion = SERVER_SRC.slice(
-    SERVER_SRC.indexOf("'trackly_verify_prepared_resume'"),
-    SERVER_SRC.indexOf("server.registerPrompt('trackly-apply'"),
+  const verifyRegion = APPLY_SRC.slice(
+    APPLY_SRC.indexOf("'trackly_verify_prepared_resume'"),
+    APPLY_SRC.indexOf("server.registerPrompt('trackly-apply'"),
   );
   assert.match(verifyRegion, /runId:\s*z\.number\(\)\.int\(\)\.min\(1\)/);
   assert.match(verifyRegion, /confirmationId:\s*z\.string\(\)\.min\(1\)/);
@@ -327,18 +474,18 @@ test('local MCP exposes a pre-attach resume integrity verifier', () => {
 });
 
 test('local MCP requires committed-state evidence on every apply observation', () => {
-  const observationRegion = SERVER_SRC.slice(
-    SERVER_SRC.indexOf("'trackly_report_apply_observation'"),
-    SERVER_SRC.indexOf("'trackly_record_application_outcome'"),
+  const observationRegion = APPLY_SRC.slice(
+    APPLY_SRC.indexOf("'trackly_report_apply_observation'"),
+    APPLY_SRC.indexOf("'trackly_record_application_outcome'"),
   );
   assert.match(observationRegion, /committed:\s*z\.boolean\(\)/);
   assert.doesNotMatch(observationRegion, /committed:\s*z\.boolean\(\)\.optional\(\)/);
 });
 
 test('local MCP prompt includes the complete run-bound resume proof gate', () => {
-  const promptRegion = SERVER_SRC.slice(
-    SERVER_SRC.indexOf("server.registerPrompt('trackly-apply'"),
-    SERVER_SRC.indexOf("server.registerResource('trackly-apply-protocol'"),
+  const promptRegion = APPLY_SRC.slice(
+    APPLY_SRC.indexOf("server.registerPrompt('trackly-apply'"),
+    APPLY_SRC.indexOf("server.registerResource('trackly-apply-protocol'"),
   );
   assert.match(promptRegion, /major\(run\.protocolVersion\) === major\(protocol\.version\)/);
   assert.match(promptRegion, /protocol\.compatibleSkillMajor === 4/);
@@ -376,6 +523,8 @@ test('resume preparation requires backend confirmation for the exact active run'
   );
   assert.match(prepareRegion, /default-resume\?runId=\$\{normalizedRunId\}/);
   assert.match(prepareRegion, /Number\(download\.applyRunId\) !== normalizedRunId/);
+  assert.match(prepareRegion, /Number\(download\.resumeId\)/);
+  assert.match(prepareRegion, /default resume identity/);
 });
 
 test('CLI + MCP use new /jobscout/tracker/jobs/:id/stage endpoint (not removed /jobscout-tracker/status)', () => {
