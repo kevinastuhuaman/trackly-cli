@@ -57,7 +57,7 @@ MCP setup for Claude Code:
 claude mcp add --scope user trackly -- trackly mcp
 ```
 
-The 24 MCP tools: `trackly_search_jobs`, `trackly_get_job`, `trackly_search_companies`, `trackly_list_companies`, `trackly_get_stats`, `trackly_get_preferences`, `trackly_update_experience_limits`, `trackly_update_status`, `trackly_ask`, `trackly_get_job_brief`, `trackly_contacts_at_company`, `trackly_get_company_workspace`, `trackly_request_company`, `trackly_get_apply_queue`, `trackly_get_application_profile`, `trackly_get_profile_onboarding`, `trackly_update_application_profile`, `trackly_start_apply_run`, `trackly_get_apply_evidence`, `trackly_get_apply_protocol`, `trackly_report_apply_observation`, `trackly_record_application_outcome`, `trackly_prepare_resume`, `trackly_verify_prepared_resume`
+The 36 MCP tools include the complete search, network, profile, and Trackly Apply set documented in `docs/trackly-tools.md`. Keep this count synchronized with `mcp/server.js`, `README.md`, and the docs-drift tests.
 
 Job function values — **14 canonical values** that match backend `ALL_JOB_FUNCTIONS` at `granola-followup-app/src/routes/jobscout-filter-utils.ts:17-21`, the backend `job_function` DB column, and the local mirror `JOB_FUNCTIONS` in `mcp/server.js`: `product`, `engineering`, `design`, `data`, `marketing`, `sales`, `partnerships`, `finance`, `strategy`, `operations`, `people`, `legal`, `support`, `other`. `partnerships` is documented in CHANGELOG `0.2.1`; any doc still listing 13 values is stale. The MCP test at `test/mcp-schema.test.js` locks this local/backend mapping.
 
