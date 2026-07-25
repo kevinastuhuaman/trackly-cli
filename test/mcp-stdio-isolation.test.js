@@ -44,6 +44,21 @@ function waitForInitialize(child) {
   });
 }
 
+async function terminateChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exit = once(child, 'exit');
+  child.kill('SIGTERM');
+  await exit;
+}
+
+test('stdio cleanup does not wait for an exit event that already fired', async () => {
+  const child = spawn(process.execPath, ['-e', 'process.exit(0)'], {
+    stdio: 'ignore',
+  });
+  await once(child, 'exit');
+  await terminateChild(child);
+});
+
 test('stdio MCP initialize never loads HTTP transport or static-file modules', { timeout: 20_000 }, async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-stdio-isolation-'));
   const hookPath = path.join(tempDir, 'trace-forbidden-loads.cjs');
@@ -78,12 +93,7 @@ test('stdio MCP initialize never loads HTTP transport or static-file modules', {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  t.after(async () => {
-    if (!child.killed) {
-      child.kill('SIGTERM');
-      await once(child, 'exit').catch(() => {});
-    }
-  });
+  t.after(() => terminateChild(child));
 
   child.stdin.write(`${JSON.stringify({
     jsonrpc: '2.0',

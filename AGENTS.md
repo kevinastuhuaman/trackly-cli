@@ -45,6 +45,20 @@ Publishing is fully automated via GitHub Actions:
 
 **Do not run `npm publish` locally.** Manual publishes from a laptop have no OIDC context and would ship without provenance (this is what created the v0.2.7 unattested-release gap). If a manual publish is ever absolutely required as a break-glass measure, document why on the next CHANGELOG entry and plan a cosmetic version bump immediately after to restore the attestation chain via CI.
 
+### Coordinated Trackly Apply release gate
+
+The standalone CLI CI validates its checked-in hosted-tool contract fixture with
+`npm run test:contract-fixture`. Before merging any release that changes Trackly
+Apply schemas, also run the cross-repository comparison against the final backend
+candidate:
+
+```bash
+TRACKLY_BACKEND_DIR=/absolute/path/to/granola-followup-app npm run test:hosted-contract
+```
+
+This coordinated check belongs in the release evidence. Standalone CLI CI must
+not depend on a sibling private checkout that does not exist on its runner.
+
 ## Key Patterns
 
 ### Auth

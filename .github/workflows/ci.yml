@@ -34,6 +34,11 @@ jobs:
       # change. See security/audit-exceptions.json.
       - run: npm run security:audit
 
+      # Standalone CLI CI validates the checked-in provider-neutral contract.
+      # Release coordination additionally compares this fixture with the
+      # backend checkout through `npm run test:hosted-contract`.
+      - run: npm run test:contract-fixture
+
       - run: npm test
 
       - name: Package smoke test

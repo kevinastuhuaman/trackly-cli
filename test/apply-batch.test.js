@@ -64,10 +64,12 @@ test('batch keeps recoverable actions distinct from terminal blockers', () => {
 
 test('batch mutations require concurrency and replay guards', () => {
   assert.match(reference, /renewable lease/i);
-  assert.match(reference, /optimistic.*version/i);
-  assert.match(reference, /inspection epoch/i);
-  assert.match(reference, /idempotency key/i);
-  assert.match(reference, /same key.*different\s+payload.*409/is);
+  assert.match(reference, /Each mutation supplies\s+only the guards exposed by its tool schema/is);
+  assert.match(reference, /optimistic.*version.*when the schema exposes/is);
+  assert.match(reference, /inspection epoch.*when the\s+schema exposes/is);
+  assert.match(reference, /idempotency key.*when the schema exposes/is);
+  assert.match(reference, /Never invent\s+or attach an uncontracted guard/is);
+  assert.match(reference, /documented as idempotent.*same-key.*same-payload replay/is);
 });
 
 test('batch resume approval and truth certification are separate', () => {

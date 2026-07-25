@@ -2,7 +2,7 @@
 
 Use the backend batch contract for every new protocol 3.3 run, including a
 one-job request. The batch is an execution ledger, not a fit-ranking exercise.
-Protocol 3.2 is retained only for resuming an already-active legacy single run.
+Protocol 3.2 is retained for the explicit legacy single-run workflow.
 
 ## Freeze before browser work
 
@@ -55,19 +55,20 @@ local verification are excluded from this count.
 
 ## Ownership and replay safety
 
-Acquire the renewable lease before browser mutation. Every batch or member
-mutation supplies:
+Acquire the renewable lease before browser mutation. Each mutation supplies
+only the guards exposed by its tool schema: lease token when the schema exposes
+it, optimistic version when the schema exposes it, inspection epoch when the
+schema exposes it, and idempotency key when the schema exposes it. Never invent
+or attach an uncontracted guard.
 
-- the lease token;
-- the current optimistic batch/member version;
-- the current inspection epoch; and
-- a unique idempotency key.
-
-Renew before expiry and stop mutation if ownership is lost. A same-key,
-same-payload replay returns the original result. A same key with a different
-payload is a conflict (`409`), never permission to retry under a new run.
-Reclaiming a browser tab increments the inspection epoch; earlier-epoch review,
-attachment, certification, or close evidence cannot satisfy the current gate.
+Renew before expiry and stop mutation if ownership is lost. For operations
+documented as idempotent, a same-key, same-payload replay returns the original
+result. A same key with a different payload is a conflict (`409`), never
+permission to retry under a new run. Do not blindly retry a mutation without an
+idempotency key after an ambiguous response; recover through the documented
+read or lookup operation first. Reclaiming a browser tab increments the
+inspection epoch; earlier-epoch review, attachment, certification, or close
+evidence cannot satisfy the current gate.
 
 ## First pass
 

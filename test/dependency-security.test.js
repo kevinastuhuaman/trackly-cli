@@ -10,6 +10,8 @@ const {
 } = require('../scripts/verify-audit-exceptions');
 
 const POLICY_PATH = path.join(__dirname, '..', 'security', 'audit-exceptions.json');
+const PACKAGE_LOCK_PATH = path.join(__dirname, '..', 'package-lock.json');
+const SHRINKWRAP_PATH = path.join(__dirname, '..', 'npm-shrinkwrap.json');
 
 function currentAuditReport() {
   return {
@@ -81,6 +83,13 @@ function currentAuditReport() {
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test('published shrinkwrap exactly matches the repository dependency lock', () => {
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(SHRINKWRAP_PATH, 'utf8')),
+    JSON.parse(fs.readFileSync(PACKAGE_LOCK_PATH, 'utf8')),
+  );
+});
 
 test('audit policy documents the one temporary unreachable advisory', () => {
   const policy = JSON.parse(fs.readFileSync(POLICY_PATH, 'utf8'));

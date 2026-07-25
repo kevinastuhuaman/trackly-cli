@@ -8,6 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
+    "test:contract-fixture": "node --test test/apply-contract.test.js",
     "test:hosted-contract": "node scripts/verify-hosted-contract.js",
     "security:audit": "node scripts/verify-audit-exceptions.js"
   },
@@ -20,6 +21,7 @@
     "docs/",
     "scripts/verify-audit-exceptions.js",
     "security/audit-exceptions.json",
+    "npm-shrinkwrap.json",
     "server.json",
     "README.md",
     "LICENSE"

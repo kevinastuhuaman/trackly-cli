@@ -191,7 +191,7 @@ Then use natural language in any of these clients:
 | trackly_get_apply_evidence | Get aggregate, value-free beta evidence and release readiness |
 | trackly_get_apply_protocol | Get current workflow and compatibility rules |
 | trackly_report_apply_observation | Send redacted ATS mechanics feedback |
-| trackly_report_apply_observations | Bulk-send up to 200 batch-bound redacted observations |
+| trackly_report_apply_observations | Bulk-send up to 20 leased, batch-bound redacted observations |
 | trackly_record_application_outcome | Record review or confirmed submission outcome |
 | trackly_record_application_outcomes | Bulk-record up to 20 leased batch outcomes with per-member conflicts |
 | trackly_prepare_resume | Prepare a private expiring resume file for upload |

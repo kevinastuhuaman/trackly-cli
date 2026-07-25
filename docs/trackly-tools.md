@@ -117,7 +117,7 @@ API-key creation attempts.
 - **trackly_get_apply_evidence** — Get the authenticated user's aggregate beta evidence and release gate without returning profile answers or contact values.
 - **trackly_get_apply_protocol** — Get the current ATS support, browser integrity rules, and compatible skill version.
 - **trackly_report_apply_observation** — Report redacted ATS mechanics and actual scenario coverage without answer values or page text.
-- **trackly_report_apply_observations** — Bulk-report up to 200 current-epoch, batch-bound redacted observations in one request.
+- **trackly_report_apply_observations** — Bulk-report up to 20 leased, current-epoch, batch-bound redacted observations in one request.
 - **trackly_record_application_outcome** — Record review readiness or a confirmed manual submission.
 - **trackly_record_application_outcomes** — Bulk-record up to 20 leased, batch-bound outcomes while returning per-member conflicts explicitly.
 - **trackly_prepare_resume** — Local MCP only: materialize the default resume in a private, expiring mode-0600 cache and return filename, size, SHA-256, exact local path, and visual-confirmation metadata. Hosted MCP returns a manual/local-agent requirement.
