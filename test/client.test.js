@@ -173,6 +173,71 @@ test('apiRequest permits only a bounded Idempotency-Key additional header', asyn
   });
 });
 
+test('apiRequest preserves Idempotency-Key across OAuth refresh retry', async (t) => {
+  const mutationRequests = [];
+  let refreshCount = 0;
+  const idempotencyKey = 'batch-oauth-retry-key-0001';
+  const { configDir, port } = await setupRefreshTestHarness(t, (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/api/auth/refresh') {
+      refreshCount++;
+      res.end(JSON.stringify({
+        success: true,
+        token: 'jwt_new',
+        refreshToken: 'rt_new',
+      }));
+      return;
+    }
+    if (req.url === '/api/jobscout/apply/batches' && req.method === 'POST') {
+      mutationRequests.push({
+        authorization: req.headers.authorization,
+        idempotencyKey: req.headers['idempotency-key'],
+      });
+      if (mutationRequests.length === 1) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Expired access token' }));
+        return;
+      }
+      res.end(JSON.stringify({ success: true, batch: { id: 44 } }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+    TRACKLY_HTTP_TIMEOUT_MS: '1000',
+  }, async () => {
+    client.saveConfig({ token: 'jwt_old', refreshToken: 'rt_old' });
+
+    const result = await client.apiRequest(
+      'POST',
+      '/api/jobscout/apply/batches',
+      { limit: 5 },
+      false,
+      false,
+      'trackly-test/1.0.0',
+      { 'Idempotency-Key': idempotencyKey },
+    );
+
+    assert.equal(result.batch.id, 44);
+    assert.equal(refreshCount, 1, 'the 401 should trigger exactly one OAuth refresh');
+    assert.deepEqual(mutationRequests, [
+      {
+        authorization: 'Bearer jwt_old',
+        idempotencyKey,
+      },
+      {
+        authorization: 'Bearer jwt_new',
+        idempotencyKey,
+      },
+    ]);
+  });
+});
+
 test('apiRequest aborts oversized response body (PR v0.2.4)', async (t) => {
   // The 10 MB body cap prevents a malicious TRACKLY_BASE_URL from OOM'ing the long-lived
   // MCP process via unbounded streaming. We simulate by returning chunks that exceed the
@@ -835,6 +900,41 @@ test('downloadFile propagates maintenance during token refresh and preserves OAu
     assert.equal(caught.code, 'maintenance_mode');
     assert.equal(client.getToken(), 'jwt_keep');
     assert.equal(client.getRefreshToken(), 'rt_keep');
+  });
+});
+
+test('downloadFile returns exact resume proof headers and PDF metadata', async (t) => {
+  const pdf = Buffer.from('%PDF-1.7\ntrackly-resume-proof\n%%EOF\n');
+  const sha256 = 'a'.repeat(64);
+  const { configDir, port } = await setupRefreshTestHarness(t, (req, res) => {
+    assert.equal(req.url, '/api/jobscout/application-profile/default-resume');
+    assert.equal(req.method, 'GET');
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/pdf; charset=binary');
+    res.setHeader('Content-Disposition', 'attachment; filename="Resume - Candidate.pdf"');
+    res.setHeader('X-Trackly-File-Sha256', sha256);
+    res.setHeader('X-Trackly-Apply-Run-Id', '166');
+    res.setHeader('X-Trackly-Resume-Id', '70');
+    res.end(pdf);
+  });
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: 'trk_download_proof_test',
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+    TRACKLY_HTTP_TIMEOUT_MS: '1000',
+  }, async () => {
+    const downloaded = await client.downloadFile(
+      '/api/jobscout/application-profile/default-resume',
+      'trackly-test/1.0.0',
+    );
+
+    assert.deepEqual(downloaded.buffer, pdf);
+    assert.equal(downloaded.contentType, 'application/pdf');
+    assert.equal(downloaded.fileName, 'Resume - Candidate.pdf');
+    assert.equal(downloaded.sha256, sha256);
+    assert.equal(downloaded.applyRunId, '166');
+    assert.equal(downloaded.resumeId, '70');
   });
 });
 

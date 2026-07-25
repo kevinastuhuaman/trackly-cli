@@ -6,7 +6,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const contract = require('../contracts/trackly-apply-tools.json');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
+const allMcpSources = `${serverSource}\n${source}`;
+const LOCAL_VALIDATION_SCHEMAS = {
+  trackly_certify_apply_batch_truth: 'truthCertificationSchema',
+  trackly_start_apply_run: 'startApplyRunSchema',
+};
 
 function toolArguments(name) {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -53,8 +59,39 @@ function toolArguments(name) {
 
 const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
 
+function schemaDefinition(name) {
+  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*`).exec(source);
+  assert.ok(declaration, `${name} schema definition is missing`);
+  const start = declaration.index + declaration[0].length;
+  let parens = 0;
+  let braces = 0;
+  let brackets = 0;
+  let quote = '';
+  let escaped = false;
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
+    if (char === '(') parens++;
+    else if (char === ')') parens--;
+    else if (char === '{') braces++;
+    else if (char === '}') braces--;
+    else if (char === '[') brackets++;
+    else if (char === ']') brackets--;
+    else if (char === ';' && parens === 0 && braces === 0 && brackets === 0) {
+      return source.slice(start, index).trim();
+    }
+  }
+  assert.fail(`${name} schema definition is unterminated`);
+}
+
 test('documented local MCP tool count matches every registered tool', () => {
-  const registeredTools = [...source.matchAll(
+  const registeredTools = [...allMcpSources.matchAll(
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
@@ -66,17 +103,33 @@ test('local MCP Apply schemas match each complete versioned input schema', () =>
   assert.equal(contract.contractVersion, '3.3.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
-    assert.equal(normalizeSchema(toolArguments(name)[2]), localSchema, `${name} schema drifted`);
+    const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
+    assert.equal(normalizeSchema(executableSchema), localSchema, `${name} schema drifted`);
+  }
+});
+
+test('named Apply contract aliases resolve to executed schema definitions', () => {
+  for (const [toolName, schemaName] of Object.entries(LOCAL_VALIDATION_SCHEMAS)) {
+    assert.equal(contract.tools[toolName], schemaName);
+    assert.notEqual(normalizeSchema(schemaDefinition(schemaName)), schemaName);
+    const registration = source.slice(
+      source.indexOf(`'${toolName}'`),
+      source.indexOf('\n  );', source.indexOf(`'${toolName}'`)) + 5,
+    );
+    assert.match(
+      registration,
+      new RegExp(`${schemaName}\\.parse\\(params\\)`),
+      `${toolName} does not execute its contracted validation schema`,
+    );
   }
 });
 
 test('truth certification schema binds exact resume identity only when approved', () => {
-  const truthStart = source.indexOf('const truthCertificationCommon');
-  const truthEnd = source.indexOf(
-    "server.registerTool(\n    'trackly_certify_apply_batch_truth'",
-    truthStart
-  );
-  const truthSchema = source.slice(truthStart, truthEnd);
+  const truthSchema = [
+    schemaDefinition('truthCertificationCommon'),
+    schemaDefinition('truthCertificationInputSchema'),
+    schemaDefinition('truthCertificationSchema'),
+  ].join('\n');
 
   assert.match(truthSchema, /z\.discriminatedUnion\('resumeDependency'/);
   assert.match(truthSchema, /resumeDependency: z\.literal\('approved'\)/);
@@ -88,7 +141,7 @@ test('truth certification schema binds exact resume identity only when approved'
 test('MCP prompt orders durable review checkpoints before truth and outcomes', () => {
   assert.match(
     source,
-    /After durable review-ready checkpoints, create the late truth certification before recording review-ready outcomes\./
+    /After durable review-ready checkpoints, truth-certify and hand off the exact complete subset that is currently review-ready without waiting for needs-input members\./
   );
 });
 
@@ -192,12 +245,11 @@ test('Apply contract separates exact resume approval from late truth certificati
   assert.match(resumeSchema, /memberRuns:z\.array\(z\.object\(/);
   assert.doesNotMatch(resumeSchema, /answerSnapshotHash|wordingFingerprint/);
 
-  const truthStart = source.indexOf('const truthCertificationCommon');
-  const truthEnd = source.indexOf(
-    "server.registerTool(\n    'trackly_certify_apply_batch_truth'",
-    truthStart
-  );
-  const truthSchema = normalizeSchema(source.slice(truthStart, truthEnd));
+  const truthSchema = normalizeSchema([
+    schemaDefinition('truthCertificationCommon'),
+    schemaDefinition('truthCertificationInputSchema'),
+    schemaDefinition('truthCertificationSchema'),
+  ].join('\n'));
   assert.match(truthSchema, /answerSnapshotHash/);
   assert.match(truthSchema, /wordingFingerprint/);
   assert.match(truthSchema, /inspectionEpoch/);
@@ -216,15 +268,10 @@ test('local MCP freezes, reads, claims, and binds server-owned batches', () => {
     source.indexOf("'trackly_claim_apply_batch'"),
     source.indexOf("'trackly_checkpoint_apply_batch'"),
   );
-  const runSchemaName = toolArguments('trackly_start_apply_run')[2];
-  assert.equal(runSchemaName, 'startApplyRunSchema');
-  const runSchema = normalizeSchema(source.slice(
-    source.indexOf(`const ${runSchemaName}`),
-    source.indexOf(
-      "server.registerTool(\n    'trackly_start_apply_run'",
-      source.indexOf(`const ${runSchemaName}`),
-    ),
-  ));
+  const runInputSchemaName = toolArguments('trackly_start_apply_run')[2];
+  assert.equal(runInputSchemaName, 'startApplyRunInputSchema');
+  const runInputSchema = normalizeSchema(schemaDefinition(runInputSchemaName));
+  const runSchema = normalizeSchema(schemaDefinition('startApplyRunSchema'));
 
   assert.match(createRegion, /\/api\/jobscout\/apply\/batches/);
   assert.match(createRegion, /'Idempotency-Key': idempotencyKey/);
@@ -237,10 +284,11 @@ test('local MCP freezes, reads, claims, and binds server-owned batches', () => {
     'expectedInspectionEpoch',
     'leaseToken',
   ]) {
-    assert.match(runSchema, new RegExp(`${key}:`));
+    assert.match(runInputSchema, new RegExp(`${key}:`));
   }
   assert.match(runSchema, /\.superRefine\(/);
-  assert.match(runSchema, /supplied\.length>0&&supplied\.length!==batchFields\.length/);
+  assert.match(runSchema, /batchValues\.some\(\(item\)=>item!==undefined\)/);
+  assert.match(runSchema, /batchValues\.some\(\(item\)=>item===undefined\)/);
 });
 
 test('Apply skill emits value-free beta evidence for contact integrity and the manual-submit boundary', () => {
@@ -316,9 +364,10 @@ test('Apply skill freezes and completes every member of an explicitly requested 
   assert.match(skill, /never send either value in observations, logs, application answers, analytics, or employer form fields/i);
   assert.match(skill, /only for the frozen job\/run\/tab set/);
   assert.match(skill, /a run falls outside the frozen batch/);
-  assert.match(skill, /preserve the current review-ready tab and continue the same lifecycle for the next mapped batch member/);
-  assert.match(skill, /stop only after every frozen member is review-ready/);
-  assert.match(skill, /one review block per run/);
+  assert.match(skill, /preserve every review-ready tab/);
+  assert.match(skill, /hand off each certified review-ready subset without waiting on unrelated human actions/);
+  assert.match(skill, /members with unresolved actions stay frozen and resumable/i);
+  assert.match(skill, /provide the review block defined in/i);
 });
 
 test('Apply skill proves semantic browser readiness before preparing resume bytes', () => {

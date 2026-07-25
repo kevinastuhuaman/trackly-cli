@@ -138,9 +138,11 @@ Prepare the resume for every run that exposes a real Resume or CV control. Show
 one consolidated proof with every run/path plus the shared resume identity,
 filename, size, and SHA-256. After explicit user approval, call
 `trackly_approve_apply_batch_resume` for the complete current run set. Reuse that
-content approval only while every returned dependency remains exact. Immediately
-before each attachment, call `trackly_verify_prepared_resume` with that run's
-resume ID and signed local proof.
+content approval only while every returned immutable dependency remains exact.
+Ordinary checkpoints may advance member versions without invalidating approval
+for unchanged resume bytes and run membership. Immediately before each
+attachment, call `trackly_verify_prepared_resume` with that run's resume ID and
+signed local proof.
 
 Truth certification is late. Ask only after final answers and any conditional
 wording are known. Bind it to the run set, answer snapshot, wording
@@ -153,20 +155,28 @@ is ephemeral evidence and never a reusable profile answer.
 After all conditional questions and certification wording are visible, show one
 final truthfulness prompt. Only after explicit user confirmation, compute the
 value-free answer-snapshot and wording fingerprints and call
-`trackly_certify_apply_batch_truth` for the complete current run set that has
-passed every other review-readiness gate. Never place the certification or its
-wording in the application profile.
+`trackly_certify_apply_batch_truth` for the exact complete subset that is
+currently `review_ready`. A `needs_input` member does not block certification
+or handoff of ready siblings. Never certify an arbitrary subset. When another
+member becomes ready later, obtain a fresh certification for the then-current
+complete `review_ready` subset. Never place the certification or its wording in
+the application profile.
 
-A membership, profile revision, resume hash, answer snapshot, certification
-wording, or inspection epoch change invalidates the affected approval or
-attestation. Recompute and ask again only for the invalidated scope.
+A membership, profile revision, resume identity or hash, answer snapshot,
+certification wording, or affected inspection epoch change invalidates the
+affected approval or attestation. An ordinary member-version checkpoint does
+not invalidate an unchanged resume-content approval. Recompute and ask again
+only for the invalidated scope.
 
 ## Finish
 
 Bring every accessible member to `review_ready`, preserving each browser tab
-for manual submission. Members with actions remain frozen and resumable. Report
-one compact table mapping job ID, run ID, browser surface/tab label, ATS, state,
-actions, and evidence status. Raw tab identifiers stay local.
+for manual submission. Certify, record, and hand off the exact current
+`review_ready` subset without waiting for unrelated members. Members with
+actions remain frozen and resumable, and require a fresh certification after
+they later become ready. Report one compact table mapping job ID, run ID,
+browser surface/tab label, ATS, state, actions, and evidence status. Raw tab
+identifiers stay local.
 
 Never submit a member. After manual submission, mark Applied only from an
 observable success page or explicit user confirmation. Record the submit

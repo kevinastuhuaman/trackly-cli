@@ -80,9 +80,12 @@ test('batch resume approval and truth certification are separate', () => {
   assert.match(reference, /Never send either value to observations, application answers, analytics, logs/is);
   assert.match(reference, /truth certification.*after final answers/is);
   assert.match(reference, /`resumeDependency: not_applicable`/);
-  assert.match(reference, /complete current run set that has\s+passed every other review-readiness gate/i);
+  assert.match(reference, /exact complete subset that is\s+currently `review_ready`/i);
+  assert.match(reference, /`needs_input` member does not block certification/i);
+  assert.match(reference, /ordinary member-version checkpoint does\s+not invalidate/i);
+  assert.match(reference, /fresh certification for the then-current\s+complete `review_ready` subset/i);
   assert.match(reference, /never.*reusable profile answer/is);
-  assert.match(reference, /membership.*profile revision.*resume hash.*answer snapshot.*wording.*inspection epoch change invalidates/is);
+  assert.match(reference, /membership.*profile revision.*resume identity or hash.*answer snapshot.*certification wording.*affected inspection epoch change invalidates/is);
   assert.match(reference, /`trackly_approve_apply_batch_resume`/);
   assert.match(reference, /`trackly_verify_prepared_resume`/);
   assert.match(reference, /`trackly_certify_apply_batch_truth`/);
@@ -96,6 +99,8 @@ test('batch handoff separates grouped actions from per-run review evidence', () 
   assert.match(reviewHandoff, /truth certification/i);
   assert.match(reviewHandoff, /closure evidence/i);
   assert.match(reviewHandoff, /raw tab identifiers/i);
+  assert.match(reviewHandoff, /Do not make ready siblings wait/i);
+  assert.match(reviewHandoff, /list remaining human actions separately/i);
   assert.match(reviewHandoff, /Never include.*credentials.*OTP.*CAPTCHA/is);
 });
 

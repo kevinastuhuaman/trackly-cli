@@ -81,7 +81,10 @@ function toolCountClaims(readmeSrc) {
 
 // --- real-repo assertions ---
 
-const serverSrc = fs.readFileSync(path.join(ROOT, 'mcp/server.js'), 'utf8');
+const serverSrc = [
+  fs.readFileSync(path.join(ROOT, 'mcp/server.js'), 'utf8'),
+  fs.readFileSync(path.join(ROOT, 'mcp/apply-tools.js'), 'utf8'),
+].join('\n');
 const readmeSrc = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 const docsSrc = fs.readFileSync(path.join(ROOT, 'docs/trackly-tools.md'), 'utf8');
 
@@ -110,7 +113,7 @@ test('README "N tools" count claims all match the real tool count', () => {
   const claims = toolCountClaims(readmeSrc);
   assert.ok(claims.length > 0, 'expected at least one "N tools" claim in README');
   for (const c of claims) {
-    assert.equal(c, count, `README claims ${c} tools but mcp/server.js registers ${count}`);
+    assert.equal(c, count, `README claims ${c} tools but the MCP modules register ${count}`);
   }
 });
 

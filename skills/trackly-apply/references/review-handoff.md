@@ -70,5 +70,11 @@ Do not claim the batch is ready until every frozen member is either
 `review_ready`, has an explicit resumable human action, is user-revoked, or has
 a terminal trust/observability blocker.
 
+Do not make ready siblings wait for an unresolved member. Hand off every
+truth-certified `review_ready` subset as soon as it is durable, keep its tabs
+open for manual submission, and list remaining human actions separately.
+Members that become ready later require a new certification for the exact
+then-current `review_ready` subset.
+
 Do not include restricted answers in chat unless needed for the user’s review.
 Never include credentials, an OTP, or a CAPTCHA response.
