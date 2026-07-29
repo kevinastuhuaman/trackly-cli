@@ -505,6 +505,8 @@ test('Apply skill preserves frozen members across backend start failures', () =>
   assert.match(skill, /`backend_run_start_unavailable`/);
   assert.match(skill, /Do not call `trackly_checkpoint_apply_batch` for this condition/);
   assert.match(batchOrchestration, /Do not checkpoint\s+this condition: no run ID exists yet/);
+  assert.match(batchOrchestration, /bounded contingency budget is `52 \+ \(3 \* R\)`/);
+  assert.match(batchOrchestration, /`R` is the number of affected members and cannot exceed 20/);
   assert.match(skill, /Route canonical `maintenance_mode` or legacy `planned_maintenance`[\s\S]*without consuming this retry/);
   assert.ok(
     !contract.constants.applyCheckpointActionCodes.includes('backend_run_start_unavailable'),

@@ -52,7 +52,7 @@ resume point. Never detach that member into a legacy single run.
 
 ### Request budget
 
-For a new 20-member batch, keep recovery, planning, initial binding, evidence,
+For a failure-free new 20-member batch, keep planning, initial binding, evidence,
 two bulk checkpoints, resume approval, truth certification, outcomes, and the
 final batch refresh within 52 non-resume MCP/HTTP requests: one active-batch
 lookup, one create, one page, one claim, 20 run starts, 20 surface bindings, one
@@ -62,7 +62,12 @@ resume approval, one truth certification, one
 `trackly_record_application_outcomes` call, and one final refresh. An existing
 active batch omits the create call. Do not replace bulk observations,
 checkpoints, or outcomes with per-member requests. Resume download and exact
-local verification are excluded from this count.
+local verification are excluded from this count. Each member that encounters
+the one permitted retryable bound-start failure receives exactly three
+additional recovery calls: refetch the active batch, renew its lease, and retry
+the same binding. Therefore the bounded contingency budget is `52 + (3 * R)`,
+where `R` is the number of affected members and cannot exceed 20. Maintenance
+recovery is paced by the advertised window and is tracked separately.
 
 ## Ownership and replay safety
 
