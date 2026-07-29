@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-29
+
+### Fixed
+
+- Trackly Apply skill 4.2.3 now records the literal `review_ready` outcome and
+  verifies `awaiting_manual_submit` before handing forms to the user. After a
+  manual submission, it records the separate literal `submitted` outcome.
+- Local MCP prompts and tool descriptions now expose the same ordered
+  reconciliation contract, preventing split member/run state from stranding a
+  confirmed application.
+
 ## [0.9.0] - 2026-07-29
 
 ### Changed
