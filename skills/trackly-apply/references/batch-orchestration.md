@@ -38,6 +38,10 @@ For every protocol 3.3.1 request:
 
 Do not recreate a batch after maintenance. Refetch the existing batch, reclaim
 its lease with the latest revision, and resume its existing run bindings.
+When a bound run start returns a server error, refetch and renew, then retry the
+same complete binding once. A second failure becomes a resumable
+`backend_run_start_unavailable` action while siblings continue. Never detach
+that member into a legacy single run.
 
 ### Request budget
 
@@ -182,6 +186,10 @@ Never submit a member. After manual submission, mark Applied only from an
 observable success page or explicit user confirmation. Record the submit
 request, success page or `user_confirmation`, and any provider receipt with
 `trackly_record_apply_submission_evidence`; store only the redacted fingerprint
-and typed source. Then reconcile tab closure separately using the
-browser-lifecycle gate. Submission, receipt, and closure never substitute for
-one another.
+and typed source. The outcome call is not complete until a fresh batch read
+shows member lifecycle `submitted` and tracker state `applied_confirmed`.
+Preserve the success tab during one documented idempotent conflict recovery;
+if reconciliation remains unsuccessful, report the control-plane defect and
+do not claim completion. Only then reconcile tab closure separately using the
+browser-lifecycle gate. Submission, durable outcome, receipt, and closure never
+substitute for one another.

@@ -466,19 +466,50 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.1 or newer/);
+  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.2 or newer/);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
+  assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.1 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.2 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.1 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.2 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.1/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.2/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
+});
+
+test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills/trackly-apply/SKILL.md'), 'utf8');
+  const lifecycle = fs.readFileSync(
+    path.join(__dirname, '..', 'skills/trackly-apply/references/browser-lifecycle.md'),
+    'utf8',
+  );
+  assert.match(skill, /durable commit gate/i);
+  assert.match(skill, /member lifecycle `submitted`[\s\S]*job state `applied_confirmed`/i);
+  assert.match(skill, /leave the tab open/i);
+  assert.match(lifecycle, /do not begin tab closure[\s\S]*`applied_confirmed`/i);
+});
+
+test('Apply skill preserves frozen members across backend start failures', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills/trackly-apply/SKILL.md'), 'utf8');
+  assert.match(skill, /retry the same complete binding once/i);
+  assert.match(skill, /`backend_run_start_unavailable`/);
+  assert.match(skill, /Never switch that frozen member to an unbound legacy run/i);
+});
+
+test('Apply skill carries live-beta ATS mechanics without user-specific answers', () => {
+  const playbook = fs.readFileSync(
+    path.join(__dirname, '..', 'skills/trackly-apply/references/ats-playbook.md'),
+    'utf8',
+  );
+  assert.match(playbook, /visible file chooser/i);
+  assert.match(playbook, /row count to increase/i);
+  assert.match(playbook, /HiBob[\s\S]*two-step commit/i);
+  assert.doesNotMatch(playbook, /Kevin|Astuhuaman|berkeley\.edu/i);
 });
 
 test('Apply skill records typed submission evidence before exact canonical outcomes', () => {

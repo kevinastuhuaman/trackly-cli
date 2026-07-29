@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-07-28
+
+### Changed
+
+- Trackly Apply skill 4.2.2 treats submission outcome reconciliation as a
+  durable commit gate before closing confirmation tabs or claiming a job moved
+  to Applied.
+- Added one-retry frozen-member start recovery, explicit control-plane failure
+  routing, and a complete-known-fields comparison before review.
+- Added live-beta ATS mechanics for Greenhouse file/select controls, Ashby
+  binary and repeatable education controls, and HiBob two-step attachments.
+- Upgraded the MCP SDK and pinned the advisory-fixed Hono Node adapter. The CLI
+  now requires supported Node.js 20+ and ships with zero npm audit exceptions.
+
 ## [0.8.1] - 2026-07-24
 
 ### Added

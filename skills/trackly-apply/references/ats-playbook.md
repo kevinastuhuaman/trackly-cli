@@ -4,6 +4,8 @@
 
 - Accept employer-hosted Greenhouse forms and `job-boards.greenhouse.io` / `boards.greenhouse.io` application hosts after matching the employer and role.
 - Expect resume parsing, React selects, correction banners, demographic sections, and final consent checkboxes.
+- Use the visible file chooser or its semantic file input; never click a nearby decorative upload region by coordinates.
+- For custom selects and checkbox groups, verify the selected label or checked element in the live DOM after the real click. A displayed answer with a remaining required error is uncommitted.
 - Treat red required-field text as authoritative even when a value is visible.
 - A Greenhouse “Thank you for applying” page is a valid submission signal.
 
@@ -11,6 +13,9 @@
 
 - Accept `jobs.ashbyhq.com` only after matching the employer and role.
 - Expect rerenders, masked contact inputs, and controls whose visible text can differ from committed state.
+- Resolve binary button groups by the live selected/active state and semantic Yes/No label, never by button order or styling alone.
+- Treat education as repeatable structured rows. After activating `+ Add Education`, require the row count to increase before filling the new row. If Playwright reports a click but the submit-typed control does not add a row, retry with the visible semantic DOM control; stop if the row remains absent.
+- Select localized school suggestions by the exact intended institution and then verify the committed row value.
 - Best effort: stop when browser and accessibility state disagree.
 - An explicit application-success banner/page is a valid submission signal.
 
@@ -37,6 +42,7 @@ This group includes SmartRecruiters, Workable, BambooHR, Recruitee, Jobvite, Tea
 - Expect a mixture of native controls, custom widgets, employer subdomains, embedded frames, shared profile data, and optional resume parsing.
 - Match the live HTTPS origin, employer, role, and requisition before entering private data.
 - Use the same committed-state and required-error gate as Greenhouse. Familiar-looking controls do not lower the evidence requirement.
+- On HiBob, treat document upload as a two-step commit when the UI requires choosing the file and then confirming the upload. Verify the final filename/attachment state; a selected local file alone is not an attached resume.
 
 ## Unknown employer-hosted form
 
