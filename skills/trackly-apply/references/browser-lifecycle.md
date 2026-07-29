@@ -43,6 +43,14 @@ Never make a closure claim from one inventory surface.
 
 ## Close proof
 
+For a submitted application, do not begin tab closure until Trackly has
+durably reconciled both the batch member to `submitted` and the saved job to
+`applied_confirmed`. A success page or explicit user confirmation authorizes
+the outcome write; it does not prove that the write committed. On a conflict,
+keep the tab visible while the agent refreshes and performs the one documented
+idempotent replay. If reconciliation still fails, leave the tab open and
+report a control-plane defect.
+
 `closed_verified` requires all of the following for the current inspection
 epoch:
 

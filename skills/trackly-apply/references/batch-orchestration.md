@@ -38,10 +38,22 @@ For every protocol 3.3.1 request:
 
 Do not recreate a batch after maintenance. Refetch the existing batch, reclaim
 its lease with the latest revision, and resume its existing run bindings.
+When a bound run start returns a transport failure, a non-access HTTP 5xx
+response, or an error explicitly marked `retryable: true`, refetch and renew,
+then retry the same complete binding once. Classify the retry response
+independently with the same rules. Route `maintenance_mode` or the legacy
+`planned_maintenance` alias from either attempt through maintenance recovery.
+Surface controlled-access/request errors marked `retryable: false` and every
+other HTTP 4xx response unchanged, including when returned by the retry. Only a
+second transport failure, non-access HTTP 5xx response, or explicitly
+retryable error becomes `backend_run_start_unavailable` while siblings
+continue. Do not checkpoint this condition: no run ID exists yet, and the
+checkpoint contract requires one. The unchanged frozen member is the durable
+resume point. Never detach that member into a legacy single run.
 
 ### Request budget
 
-For a new 20-member batch, keep recovery, planning, initial binding, evidence,
+For a failure-free new 20-member batch, keep planning, initial binding, evidence,
 two bulk checkpoints, resume approval, truth certification, outcomes, and the
 final batch refresh within 52 non-resume MCP/HTTP requests: one active-batch
 lookup, one create, one page, one claim, 20 run starts, 20 surface bindings, one
@@ -51,7 +63,12 @@ resume approval, one truth certification, one
 `trackly_record_application_outcomes` call, and one final refresh. An existing
 active batch omits the create call. Do not replace bulk observations,
 checkpoints, or outcomes with per-member requests. Resume download and exact
-local verification are excluded from this count.
+local verification are excluded from this count. Each member that encounters
+the one permitted retryable bound-start failure receives exactly three
+additional recovery calls: refetch the active batch, renew its lease, and retry
+the same binding. Therefore the bounded contingency budget is `52 + (3 * R)`,
+where `R` is the number of affected members and cannot exceed 20. Maintenance
+recovery is paced by the advertised window and is tracked separately.
 
 ## Ownership and replay safety
 
@@ -182,6 +199,10 @@ Never submit a member. After manual submission, mark Applied only from an
 observable success page or explicit user confirmation. Record the submit
 request, success page or `user_confirmation`, and any provider receipt with
 `trackly_record_apply_submission_evidence`; store only the redacted fingerprint
-and typed source. Then reconcile tab closure separately using the
-browser-lifecycle gate. Submission, receipt, and closure never substitute for
-one another.
+and typed source. The outcome call is not complete until a fresh batch read
+shows member lifecycle `submitted` and tracker state `applied_confirmed`.
+Preserve the success tab during one documented idempotent conflict recovery;
+if reconciliation remains unsuccessful, report the control-plane defect and
+do not claim completion. Only then reconcile tab closure separately using the
+browser-lifecycle gate. Submission, durable outcome, receipt, and closure never
+substitute for one another.

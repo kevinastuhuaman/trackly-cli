@@ -70,21 +70,9 @@ function validatePolicy(policy) {
   assert.ok(Array.isArray(policy.exceptions));
   assert.equal(
     policy.exceptions.length,
-    1,
-    'Exactly one temporary npm audit exception is permitted',
+    0,
+    'No npm audit exceptions are permitted',
   );
-  const exception = policy.exceptions[0];
-  assert.equal(exception.advisory, 'GHSA-frvp-7c67-39w9');
-  assert.equal(exception.package, '@hono/node-server');
-  assert.equal(exception.dependencyOf, '@modelcontextprotocol/sdk');
-  assert.equal(exception.severity, 'moderate');
-  assert.equal(exception.vulnerableRange, '<2.0.5');
-  assert.equal(
-    exception.upstream,
-    'https://github.com/modelcontextprotocol/typescript-sdk/issues/2531',
-  );
-  assert.ok(exception.expectedAuditShape);
-  return exception;
 }
 
 function validateAuditReport(report, policy) {
@@ -106,7 +94,7 @@ function validateAuditReport(report, policy) {
     );
   }
   assert.equal(report?.auditReportVersion, 2, 'Unsupported npm audit report version');
-  const exception = validatePolicy(policy);
+  validatePolicy(policy);
 
   if (cleanAuditResult(report)) {
     return {
@@ -114,22 +102,9 @@ function validateAuditReport(report, policy) {
       propagatedVulnerabilities: [],
     };
   }
-
-  try {
-    assert.deepEqual(normalizedAuditShape(report), exception.expectedAuditShape);
-  } catch (error) {
-    const wrapped = new Error(
-      'npm audit report does not match the temporary exception. '
-      + 'Review every new advisory, severity, affected range, and dependency-path change.',
-    );
-    wrapped.cause = error;
-    throw wrapped;
-  }
-
-  return {
-    allowedAdvisories: [exception.advisory],
-    propagatedVulnerabilities: Object.keys(report.vulnerabilities).sort(),
-  };
+  throw new Error(
+    'npm audit reported a vulnerability; Trackly CLI permits no audit exceptions.',
+  );
 }
 
 function loadPolicy(policyPath = DEFAULT_POLICY_PATH) {

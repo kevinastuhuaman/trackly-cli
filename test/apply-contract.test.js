@@ -466,19 +466,82 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.1 or newer/);
+  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.2 or newer/);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
+  assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.1 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.2 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.1 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.2 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.1/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.2/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
+});
+
+test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills/trackly-apply/SKILL.md'), 'utf8');
+  const lifecycle = fs.readFileSync(
+    path.join(__dirname, '..', 'skills/trackly-apply/references/browser-lifecycle.md'),
+    'utf8',
+  );
+  assert.match(skill, /durable commit gate/i);
+  assert.match(skill, /member lifecycle `submitted`[\s\S]*job state `applied_confirmed`/i);
+  assert.match(skill, /leave the tab open/i);
+  assert.match(lifecycle, /do not begin tab closure[\s\S]*`applied_confirmed`/i);
+});
+
+test('Apply skill preserves frozen members across backend start failures', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills/trackly-apply/SKILL.md'), 'utf8');
+  const batchOrchestration = fs.readFileSync(
+    path.join(__dirname, '..', 'skills/trackly-apply/references/batch-orchestration.md'),
+    'utf8',
+  );
+  assert.match(skill, /transport failure, a non-access HTTP 5xx response, or an error explicitly marked `retryable: true`/);
+  assert.match(skill, /controlled-access\/request errors marked `retryable: false`[\s\S]*never relabel a permanent retry response as an outage/);
+  assert.match(skill, /Classify the retry response independently with these same rules/);
+  assert.match(skill, /never relabel a permanent retry response as an outage/);
+  assert.match(skill, /`backend_run_start_unavailable`/);
+  assert.match(skill, /Do not call `trackly_checkpoint_apply_batch` for this condition/);
+  assert.match(batchOrchestration, /Do not checkpoint\s+this condition: no run ID exists yet/);
+  assert.match(batchOrchestration, /bounded contingency budget is `52 \+ \(3 \* R\)`/);
+  assert.match(batchOrchestration, /`R` is the number of affected members and cannot exceed 20/);
+  assert.match(skill, /route canonical `maintenance_mode` or legacy `planned_maintenance`[\s\S]*Route maintenance on either attempt/);
+  assert.ok(
+    !contract.constants.applyCheckpointActionCodes.includes('backend_run_start_unavailable'),
+    'pre-run backend failure must not masquerade as a run-bound checkpoint action',
+  );
+  assert.match(skill, /Never switch that frozen member to an unbound legacy run/i);
+});
+
+test('MCP Apply prompt preserves safety-critical skill orchestration parity', () => {
+  const applyTools = fs.readFileSync(path.join(__dirname, '..', 'mcp/apply-tools.js'), 'utf8');
+  const promptRegion = applyTools.slice(applyTools.indexOf("server.registerPrompt('trackly-apply'"));
+
+  assert.match(promptRegion, /bound start returns a transport failure, a non-access HTTP 5xx response, or an error explicitly marked retryable true/);
+  assert.match(promptRegion, /controlled-access\/request errors marked retryable false[\s\S]*Never relabel a permanent retry response as an outage/);
+  assert.match(promptRegion, /Classify the retry response independently with the same rules/);
+  assert.match(promptRegion, /Never relabel a permanent retry response as an outage/);
+  assert.match(promptRegion, /maintenance_mode or planned_maintenance from either attempt through maintenance recovery/);
+  assert.match(promptRegion, /never checkpoint the pre-run failure or detach it into an unbound legacy run/);
+  assert.match(promptRegion, /Fill every visible field whose answer is already known, including optional fields/);
+  assert.match(promptRegion, /provider playbook for Greenhouse, Ashby, HiBob/);
+  assert.match(promptRegion, /verify the committed DOM or accessibility state/);
+  assert.match(promptRegion, /final consent control/);
+});
+
+test('Apply skill carries live-beta ATS mechanics without user-specific answers', () => {
+  const playbook = fs.readFileSync(
+    path.join(__dirname, '..', 'skills/trackly-apply/references/ats-playbook.md'),
+    'utf8',
+  );
+  assert.match(playbook, /visible file chooser/i);
+  assert.match(playbook, /row count to increase/i);
+  assert.match(playbook, /HiBob[\s\S]*two-step commit/i);
+  assert.doesNotMatch(playbook, /Kevin|Astuhuaman|berkeley\.edu/i);
 });
 
 test('Apply skill records typed submission evidence before exact canonical outcomes', () => {

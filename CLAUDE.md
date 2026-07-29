@@ -4,7 +4,7 @@ CLI + MCP server for the Trackly job tracker. Lets users search 128K+ jobs acros
 
 ## Tech Stack
 
-- **Runtime:** Node.js 18+ (pure JS, no build step, no TypeScript)
+- **Runtime:** Node.js 20+ (pure JS, no build step, no TypeScript)
 - **MCP SDK:** `@modelcontextprotocol/sdk` (stdio transport)
 - **Validation:** `zod` (MCP tool input schemas)
 - **Auth:** Google OAuth via local callback server, tokens stored in `~/.trackly/config.json`

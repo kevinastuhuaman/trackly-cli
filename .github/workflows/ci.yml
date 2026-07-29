@@ -28,10 +28,8 @@ jobs:
 
       - run: npm audit --audit-level=high
 
-      # The current MCP SDK carries @hono/node-server for optional HTTP
-      # transports. Trackly uses stdio only. Permit exactly the one documented
-      # moderate advisory while failing any advisory, severity, range, or path
-      # change. See security/audit-exceptions.json.
+      # The published dependency graph must remain free of known advisories.
+      # The checked-in policy intentionally permits zero audit exceptions.
       - run: npm run security:audit
 
       # Standalone CLI CI validates the checked-in provider-neutral contract.
