@@ -501,13 +501,15 @@ test('Apply skill preserves frozen members across backend start failures', () =>
     'utf8',
   );
   assert.match(skill, /transport failure, a non-access HTTP 5xx response, or an error explicitly marked `retryable: true`/);
-  assert.match(skill, /controlled-access\/request errors marked `retryable: false`[\s\S]*do not retry or relabel them as an outage/);
+  assert.match(skill, /controlled-access\/request errors marked `retryable: false`[\s\S]*never relabel a permanent retry response as an outage/);
+  assert.match(skill, /Classify the retry response independently with these same rules/);
+  assert.match(skill, /never relabel a permanent retry response as an outage/);
   assert.match(skill, /`backend_run_start_unavailable`/);
   assert.match(skill, /Do not call `trackly_checkpoint_apply_batch` for this condition/);
   assert.match(batchOrchestration, /Do not checkpoint\s+this condition: no run ID exists yet/);
   assert.match(batchOrchestration, /bounded contingency budget is `52 \+ \(3 \* R\)`/);
   assert.match(batchOrchestration, /`R` is the number of affected members and cannot exceed 20/);
-  assert.match(skill, /Route canonical `maintenance_mode` or legacy `planned_maintenance`[\s\S]*without consuming this retry/);
+  assert.match(skill, /route canonical `maintenance_mode` or legacy `planned_maintenance`[\s\S]*Route maintenance on either attempt/);
   assert.ok(
     !contract.constants.applyCheckpointActionCodes.includes('backend_run_start_unavailable'),
     'pre-run backend failure must not masquerade as a run-bound checkpoint action',
@@ -520,8 +522,10 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   const promptRegion = applyTools.slice(applyTools.indexOf("server.registerPrompt('trackly-apply'"));
 
   assert.match(promptRegion, /bound start returns a transport failure, a non-access HTTP 5xx response, or an error explicitly marked retryable true/);
-  assert.match(promptRegion, /controlled-access\/request errors marked retryable false[\s\S]*never retry or relabel them as an outage/);
-  assert.match(promptRegion, /maintenance_mode or planned_maintenance[\s\S]*without consuming that retry/);
+  assert.match(promptRegion, /controlled-access\/request errors marked retryable false[\s\S]*Never relabel a permanent retry response as an outage/);
+  assert.match(promptRegion, /Classify the retry response independently with the same rules/);
+  assert.match(promptRegion, /Never relabel a permanent retry response as an outage/);
+  assert.match(promptRegion, /maintenance_mode or planned_maintenance from either attempt through maintenance recovery/);
   assert.match(promptRegion, /never checkpoint the pre-run failure or detach it into an unbound legacy run/);
   assert.match(promptRegion, /Fill every visible field whose answer is already known, including optional fields/);
   assert.match(promptRegion, /provider playbook for Greenhouse, Ashby, HiBob/);
