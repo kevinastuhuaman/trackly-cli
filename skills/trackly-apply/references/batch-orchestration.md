@@ -38,10 +38,13 @@ For every protocol 3.3.1 request:
 
 Do not recreate a batch after maintenance. Refetch the existing batch, reclaim
 its lease with the latest revision, and resume its existing run bindings.
-When a bound run start returns a non-maintenance server error, refetch and
-renew, then retry the same complete binding once. Route `maintenance_mode` or
-the legacy `planned_maintenance` alias through the maintenance recovery
-sequence without consuming this retry. After a second non-maintenance failure,
+When a bound run start returns a transport failure, a non-access HTTP 5xx
+response, or an error explicitly marked `retryable: true`, refetch and renew,
+then retry the same complete binding once. Route `maintenance_mode` or the
+legacy `planned_maintenance` alias through the maintenance recovery sequence
+without consuming this retry. Surface controlled-access/request errors marked
+`retryable: false` and every other HTTP 4xx response unchanged; do not retry or
+relabel them as an outage. After the one retryable failure still fails,
 classify the member locally as `backend_run_start_unavailable` while siblings
 continue. Do not checkpoint this condition: no run ID exists yet, and the
 checkpoint contract requires one. The unchanged frozen member is the durable

@@ -500,7 +500,8 @@ test('Apply skill preserves frozen members across backend start failures', () =>
     path.join(__dirname, '..', 'skills/trackly-apply/references/batch-orchestration.md'),
     'utf8',
   );
-  assert.match(skill, /retry the same complete binding once/i);
+  assert.match(skill, /transport failure, a non-access HTTP 5xx response, or an error explicitly marked `retryable: true`/);
+  assert.match(skill, /controlled-access\/request errors marked `retryable: false`[\s\S]*do not retry or relabel them as an outage/);
   assert.match(skill, /`backend_run_start_unavailable`/);
   assert.match(skill, /Do not call `trackly_checkpoint_apply_batch` for this condition/);
   assert.match(batchOrchestration, /Do not checkpoint\s+this condition: no run ID exists yet/);
@@ -516,7 +517,8 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   const applyTools = fs.readFileSync(path.join(__dirname, '..', 'mcp/apply-tools.js'), 'utf8');
   const promptRegion = applyTools.slice(applyTools.indexOf("server.registerPrompt('trackly-apply'"));
 
-  assert.match(promptRegion, /bound start returns a non-maintenance server error/);
+  assert.match(promptRegion, /bound start returns a transport failure, a non-access HTTP 5xx response, or an error explicitly marked retryable true/);
+  assert.match(promptRegion, /controlled-access\/request errors marked retryable false[\s\S]*never retry or relabel them as an outage/);
   assert.match(promptRegion, /maintenance_mode or planned_maintenance[\s\S]*without consuming that retry/);
   assert.match(promptRegion, /never checkpoint the pre-run failure or detach it into an unbound legacy run/);
   assert.match(promptRegion, /Fill every visible field whose answer is already known, including optional fields/);
