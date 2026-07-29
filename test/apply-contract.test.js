@@ -141,7 +141,7 @@ test('truth certification schema binds exact resume identity only when approved'
 test('MCP prompt orders durable review checkpoints before truth and outcomes', () => {
   assert.match(
     source,
-    /After durable review-ready checkpoints, truth-certify and hand off the exact complete subset that is currently review-ready without waiting for needs-input members\./
+    /After durable review-ready checkpoints, truth-certify the exact complete subset, bulk-record literal outcome=review_ready for every member, and verify every recorded run returns awaiting_manual_submit before handoff without waiting for needs-input members\./
   );
 });
 
@@ -466,19 +466,19 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.2 or newer/);
+  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.3 or newer/);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.2 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.3 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.2 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.3 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.2/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.3/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 

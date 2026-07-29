@@ -173,11 +173,14 @@ After all conditional questions and certification wording are visible, show one
 final truthfulness prompt. Only after explicit user confirmation, compute the
 value-free answer-snapshot and wording fingerprints and call
 `trackly_certify_apply_batch_truth` for the exact complete subset that is
-currently `review_ready`. A `needs_input` member does not block certification
-or handoff of ready siblings. Never certify an arbitrary subset. When another
-member becomes ready later, obtain a fresh certification for the then-current
-complete `review_ready` subset. Never place the certification or its wording in
-the application profile.
+currently `review_ready`. Then call `trackly_record_application_outcomes` for
+that certified subset; every item must use the literal
+`outcome: review_ready`. Verify every recorded run returns
+`awaiting_manual_submit` before handing the forms to the user. A `needs_input`
+member does not block certification or handoff of ready siblings. Never certify
+an arbitrary subset. When another member becomes ready later, obtain a fresh
+certification for the then-current complete `review_ready` subset. Never place
+the certification or its wording in the application profile.
 
 A membership, profile revision, resume identity or hash, answer snapshot,
 certification wording, or affected inspection epoch change invalidates the
@@ -199,8 +202,9 @@ Never submit a member. After manual submission, mark Applied only from an
 observable success page or explicit user confirmation. Record the submit
 request, success page or `user_confirmation`, and any provider receipt with
 `trackly_record_apply_submission_evidence`; store only the redacted fingerprint
-and typed source. The outcome call is not complete until a fresh batch read
-shows member lifecycle `submitted` and tracker state `applied_confirmed`.
+and typed source. Then use the separate literal `outcome: submitted`. The
+outcome call is not complete until a fresh batch read shows member lifecycle
+`submitted` and tracker state `applied_confirmed`.
 Preserve the success tab during one documented idempotent conflict recovery;
 if reconciliation remains unsuccessful, report the control-plane defect and
 do not claim completion. Only then reconcile tab closure separately using the

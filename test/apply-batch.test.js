@@ -81,14 +81,22 @@ test('batch resume approval and truth certification are separate', () => {
   assert.match(reference, /truth certification.*after final answers/is);
   assert.match(reference, /`resumeDependency: not_applicable`/);
   assert.match(reference, /exact complete subset that is\s+currently `review_ready`/i);
-  assert.match(reference, /`needs_input` member does not block certification/i);
+  assert.match(reference, /`needs_input`\s+member does not block certification/i);
   assert.match(reference, /ordinary member-version checkpoint does\s+not invalidate/i);
-  assert.match(reference, /fresh certification for the then-current\s+complete `review_ready` subset/i);
+  assert.match(reference, /fresh\s+certification for the then-current\s+complete `review_ready` subset/i);
   assert.match(reference, /never.*reusable profile answer/is);
   assert.match(reference, /membership.*profile revision.*resume identity or hash.*answer snapshot.*certification wording.*affected inspection epoch change invalidates/is);
   assert.match(reference, /`trackly_approve_apply_batch_resume`/);
   assert.match(reference, /`trackly_verify_prepared_resume`/);
   assert.match(reference, /`trackly_certify_apply_batch_truth`/);
+});
+
+test('review handoff records and verifies the run-level review outcome explicitly', () => {
+  assert.match(skill, /every item must use the literal\s+`outcome: review_ready`/i);
+  assert.match(skill, /verify every recorded run returns\s+`awaiting_manual_submit`/i);
+  assert.match(reference, /every item must use the literal\s+`outcome: review_ready`/i);
+  assert.match(reference, /verify every recorded run returns\s+`awaiting_manual_submit`/i);
+  assert.match(skill, /use the separate literal `outcome: submitted`/i);
 });
 
 test('batch handoff separates grouped actions from per-run review evidence', () => {

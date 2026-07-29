@@ -514,6 +514,9 @@ test('local MCP prompt includes the complete run-bound resume proof gate', () =>
   assert.match(promptRegion, /scenario_coverage observation with committed=true/);
   assert.match(promptRegion, /browser_reclaim, which is satisfied only by browser_ready/);
   assert.match(promptRegion, /record blocked rather than review_ready/);
+  assert.match(promptRegion, /literal outcome=review_ready/);
+  assert.match(promptRegion, /verify every recorded run returns awaiting_manual_submit/);
+  assert.match(promptRegion, /literal outcome=submitted/);
 });
 
 test('resume preparation requires backend confirmation for the exact active run', () => {
