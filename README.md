@@ -31,7 +31,7 @@ trackly login
 trackly jobs --function product
 ```
 
-> **Prerequisites:** [Node.js 18+](https://nodejs.org/) (LTS recommended). On macOS with the official `.pkg` installer, global npm installs may require `sudo`.
+> **Prerequisites:** [Node.js 20+](https://nodejs.org/) (LTS recommended). On macOS with the official `.pkg` installer, global npm installs may require `sudo`.
 
 ## At a Glance
 

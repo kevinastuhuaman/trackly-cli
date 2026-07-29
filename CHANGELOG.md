@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2026-07-28
+## [0.9.0] - 2026-07-29
 
 ### Changed
 
+- Raised the minimum supported runtime to Node.js 20. This pre-1.0 minor
+  release makes the compatibility boundary explicit.
 - Trackly Apply skill 4.2.2 treats submission outcome reconciliation as a
   durable commit gate before closing confirmation tabs or claiming a job moved
   to Applied.

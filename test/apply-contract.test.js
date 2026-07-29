@@ -496,9 +496,33 @@ test('Apply skill reconciles durable submission state before closing a confirmat
 
 test('Apply skill preserves frozen members across backend start failures', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills/trackly-apply/SKILL.md'), 'utf8');
+  const batchOrchestration = fs.readFileSync(
+    path.join(__dirname, '..', 'skills/trackly-apply/references/batch-orchestration.md'),
+    'utf8',
+  );
   assert.match(skill, /retry the same complete binding once/i);
   assert.match(skill, /`backend_run_start_unavailable`/);
+  assert.match(skill, /Do not call `trackly_checkpoint_apply_batch` for this condition/);
+  assert.match(batchOrchestration, /Do not checkpoint\s+this condition: no run ID exists yet/);
+  assert.match(skill, /Route canonical `maintenance_mode` or legacy `planned_maintenance`[\s\S]*without consuming this retry/);
+  assert.ok(
+    !contract.constants.applyCheckpointActionCodes.includes('backend_run_start_unavailable'),
+    'pre-run backend failure must not masquerade as a run-bound checkpoint action',
+  );
   assert.match(skill, /Never switch that frozen member to an unbound legacy run/i);
+});
+
+test('MCP Apply prompt preserves safety-critical skill orchestration parity', () => {
+  const applyTools = fs.readFileSync(path.join(__dirname, '..', 'mcp/apply-tools.js'), 'utf8');
+  const promptRegion = applyTools.slice(applyTools.indexOf("server.registerPrompt('trackly-apply'"));
+
+  assert.match(promptRegion, /bound start returns a non-maintenance server error/);
+  assert.match(promptRegion, /maintenance_mode or planned_maintenance[\s\S]*without consuming that retry/);
+  assert.match(promptRegion, /never checkpoint the pre-run failure or detach it into an unbound legacy run/);
+  assert.match(promptRegion, /Fill every visible field whose answer is already known, including optional fields/);
+  assert.match(promptRegion, /provider playbook for Greenhouse, Ashby, HiBob/);
+  assert.match(promptRegion, /verify the committed DOM or accessibility state/);
+  assert.match(promptRegion, /final consent control/);
 });
 
 test('Apply skill carries live-beta ATS mechanics without user-specific answers', () => {
