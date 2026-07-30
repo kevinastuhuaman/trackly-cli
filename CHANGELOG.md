@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before claiming a review form is open.
 - Education and employment history are entered newest-first, and intentionally
   blank current employment is no longer confused with the most recent employer.
-- Current-epoch success-page receipts are reconciled without fabricating a
-  retroactive review checkpoint when Trackly's run projection is stale.
+- With backend apply protocol 3.3.2 or newer, current-epoch success-page
+  receipts are reconciled without fabricating a retroactive review checkpoint
+  when Trackly's run projection is stale.
 
 ## [0.9.1] - 2026-07-29
 
