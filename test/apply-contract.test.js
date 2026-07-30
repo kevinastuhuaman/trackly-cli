@@ -466,20 +466,36 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.3 or newer/);
+  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.4 or newer/);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.3 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.4 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.3 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.4 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.3/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.4/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
+});
+
+test('Apply skill separates current employment from most recent history and preserves row order', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /education and employment-history rows in reverse chronological order/i);
+  assert.match(skill, /employment status, current company, and most recent employer distinct/i);
+  assert.match(skill, /intentionally blank current company[\s\S]*does not erase prior employment/i);
+  assert.match(skill, /ask once and sync it/i);
+});
+
+test('Apply skill reconciles an exact success page without fabricated retroactive review', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /current-epoch exact-requisition success page is authoritative/i);
+  assert.match(skill, /`running`, `inspecting`, `needs_input`, or `review_ready`/i);
+  assert.match(skill, /without fabricating a retroactive review-ready checkpoint or truth certification/i);
+  assert.match(skill, /member lifecycle `submitted` and job state `applied_confirmed`/i);
 });
 
 test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {
@@ -531,6 +547,9 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /provider playbook for Greenhouse, Ashby, HiBob/);
   assert.match(promptRegion, /verify the committed DOM or accessibility state/);
   assert.match(promptRegion, /final consent control/);
+  assert.match(promptRegion, /success page may reconcile a still-inspecting or needs-input projection/i);
+  assert.match(promptRegion, /browser session finalizer keep list/i);
+  assert.match(promptRegion, /prove user-visible handoff/i);
 });
 
 test('Apply skill carries live-beta ATS mechanics without user-specific answers', () => {

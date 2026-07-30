@@ -53,3 +53,20 @@ test('old inspection epochs cannot satisfy review or closure', () => {
   assert.match(lifecycle, /Close evidence from an earlier inspection epoch cannot\s+satisfy the current closure gate/i);
   assert.match(lifecycle, /changed success URL.*revalidate/is);
 });
+
+test('browser finalization preserves the complete live batch inventory', () => {
+  assert.match(lifecycle, /finalization as destructive cleanup/i);
+  assert.match(lifecycle, /explicit keep entry for every live application tab/i);
+  assert.match(lifecycle, /`browser\.tabs\.finalize\(\{ keep \}\)` exactly once/i);
+  assert.match(lifecycle, /omitted, empty, partial, guessed, or stale keep list/i);
+  assert.match(lifecycle, /review-ready, inspecting, needs-input, or submitted-but-unreconciled/i);
+  assert.match(lifecycle, /do not invent one and do not run\s+any cleanup substitute/i);
+});
+
+test('handoff claims require user-visible proof rather than controller ownership', () => {
+  assert.match(lifecycle, /Opening or restoring a controller tab is not proof/i);
+  assert.match(lifecycle, /complete user-owned inventory/i);
+  assert.match(lifecycle, /documented user-visible\s+handoff receipt/i);
+  assert.match(lifecycle, /visibility is unverified/i);
+  assert.match(lifecycle, /Never convert controller ownership into a visibility claim/i);
+});

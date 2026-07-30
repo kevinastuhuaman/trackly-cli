@@ -74,6 +74,56 @@ Do not close a review-ready tab merely to reduce clutter. Preserve it for the
 user's manual Submit unless the user closes it or explicitly asks the agent to
 close it.
 
+## User-visible handoff receipt
+
+Opening or restoring a controller tab is not proof that the user can see it.
+Before saying that a form is open, visible, ready for review, or preserved:
+
+1. Reconcile the complete controller and user inventories.
+2. Require every handed-off application tab to appear in the complete
+   user-owned inventory, or require the adapter's documented user-visible
+   handoff receipt for that exact tab.
+3. Focus or reveal each review tab through the documented browser action when
+   the user asked to see it.
+4. Report the actual browser surface and any tab that could not be proven
+   visible. Never convert controller ownership into a visibility claim.
+
+If the host cannot provide a complete user inventory or an exact visibility
+receipt, preserve the tab but say that visibility is unverified. Do not tell
+the user to submit a form that has not been proven reachable from their
+surface.
+
+## Browser-session finalization safety
+
+Treat browser-session finalization as destructive cleanup, not as a harmless
+handoff marker. Immediately before the final browser action of every turn:
+
+1. Enumerate the complete current controller-owned inventory and reconcile it
+   with the local job/run/tab ledger.
+2. Build an explicit keep entry for every live application tab in the frozen
+   batch: `{ tab, status: "handoff" }`.
+3. When the host exposes `browser.tabs.finalize`, call
+   `browser.tabs.finalize({ keep })` exactly once as the final browser action.
+   If no documented session finalizer exists, do not invent one and do not run
+   any cleanup substitute.
+4. Never finalize with an omitted, empty, partial, guessed, or stale keep list.
+5. Do not use undocumented per-tab `finalize`, `markHandoff`, or
+   `markDeliverable` calls. Use only the browser's documented session-level
+   finalizer.
+6. Never finalize while creating or restoring tabs; wait until all form
+   mutations and committed-state checks for that turn are complete.
+
+A review-ready, inspecting, needs-input, or submitted-but-unreconciled
+application tab always remains `handoff`. Only omit a tab from `keep` after the
+user explicitly requests closure and the submitted/applied close-proof gate
+has passed.
+
+If finalization returns ambiguously or any expected tab disappears, stop all
+form mutation. Reconcile both controller and user inventories, preserve every
+remaining tab, and report the loss immediately. Never claim the tabs are
+visible or the drafts are preserved until the complete user-visible inventory
+proves it.
+
 ## Missing-tab recovery
 
 When an incomplete member's tab is missing:
