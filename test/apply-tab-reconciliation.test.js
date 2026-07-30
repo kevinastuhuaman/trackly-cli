@@ -54,9 +54,10 @@ test('old inspection epochs cannot satisfy review or closure', () => {
   assert.match(lifecycle, /changed success URL.*revalidate/is);
 });
 
-test('browser finalization preserves the complete live batch inventory', () => {
+test('browser finalization preserves the complete live application inventory', () => {
   assert.match(lifecycle, /finalization as destructive cleanup/i);
-  assert.match(lifecycle, /explicit keep entry for every live application tab/i);
+  assert.match(lifecycle, /complete current controller-owned and user-owned inventory\s+union/i);
+  assert.match(lifecycle, /every currently live mapped application\s+tab, including frozen-batch members and legacy single-run tabs/i);
   assert.match(lifecycle, /`browser\.tabs\.finalize\(\{ keep \}\)` exactly once/i);
   assert.match(lifecycle, /omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(lifecycle, /review-ready, inspecting, needs-input, or submitted-but-unreconciled/i);
@@ -65,6 +66,9 @@ test('browser finalization preserves the complete live batch inventory', () => {
   assert.match(lifecycle, /never invoke an implicit\s+close-all cleanup/i);
   assert.match(lifecycle, /stop before\s+mutating the form or entering private data/i);
   assert.match(lifecycle, /A no-op is not a preservation\s+mechanism/i);
+  assert.match(lifecycle, /user confirms they closed it\s+directly/i);
+  assert.match(lifecycle, /defer inventory recovery to the next turn/i);
+  assert.match(lifecycle, /must not be rerun/i);
 });
 
 test('handoff claims require user-visible proof rather than controller ownership', () => {

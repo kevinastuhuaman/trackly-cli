@@ -99,10 +99,13 @@ surface.
 Treat browser-session finalization as destructive cleanup, not as a harmless
 handoff marker. Immediately before the final browser action of every turn:
 
-1. Enumerate the complete current controller-owned inventory and reconcile it
-   with the local job/run/tab ledger.
-2. Build an explicit keep entry for every live application tab in the frozen
-   batch: `{ tab, status: "handoff" }`.
+1. Reconcile the complete current controller-owned and user-owned inventory
+   union with the local job/run/tab ledger. Refresh both inventories
+   immediately before building the keep list; a controller-only refresh cannot
+   prove that a handed-off user tab still exists.
+2. Build an explicit keep entry for every currently live mapped application
+   tab, including frozen-batch members and legacy single-run tabs:
+   `{ tab, status: "handoff" }`.
 3. When the host exposes `browser.tabs.finalize`, call
    `browser.tabs.finalize({ keep })` exactly once as the final browser action.
    If no documented session finalizer exists, invoke the adapter's documented
@@ -117,9 +120,13 @@ handoff marker. Immediately before the final browser action of every turn:
    mutations and committed-state checks for that turn are complete.
 
 A review-ready, inspecting, needs-input, or submitted-but-unreconciled
-application tab always remains `handoff`. Only omit a tab from `keep` after the
-user explicitly requests closure and the submitted/applied close-proof gate
-has passed.
+application tab always remains `handoff` while it is live. Omit a ledger tab
+only after the complete inventory union proves it is absent and either the
+user explicitly requested closure or the user confirms they closed it
+directly. For an incomplete user-closed tab, preserve the member and enter the
+missing-tab recovery flow on the next turn; never claim the unsaved draft
+survived. Agent-initiated closure still requires the submitted/applied
+close-proof gate.
 
 Determine which durable preservation mechanism the adapter supports during
 the browser readiness gate. If it exposes neither a documented session
@@ -128,8 +135,10 @@ mutating the form or entering private data. A no-op is not a preservation
 mechanism because temporary agent-created tabs may disappear at turn end.
 
 If finalization returns ambiguously or any expected tab disappears, stop all
-form mutation. Reconcile both controller and user inventories, preserve every
-remaining tab, and report the loss immediately. Never claim the tabs are
+form mutation. Because the finalizer must remain the turn's last browser
+action and must not be rerun, defer inventory recovery to the next turn. On
+that next turn, reconcile both controller and user inventories, preserve every
+remaining tab, and report any loss immediately. Never claim the tabs are
 visible or the drafts are preserved until the complete user-visible inventory
 proves it.
 
