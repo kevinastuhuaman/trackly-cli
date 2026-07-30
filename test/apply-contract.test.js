@@ -549,7 +549,7 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /provider playbook for Greenhouse, Ashby, HiBob/);
   assert.match(promptRegion, /verify the committed DOM or accessibility state/);
   assert.match(promptRegion, /final consent control/);
-  assert.match(promptRegion, /success page may reconcile a still-inspecting or needs-input projection/i);
+  assert.match(promptRegion, /Only when the fetched protocol is 3\.3\.2 or newer may a current-epoch exact-requisition success page reconcile a still-inspecting or needs-input projection/i);
   assert.match(promptRegion, /stale-projection success-page reconciliation is available only when the fetched Apply protocol is 3\.3\.2 or newer/i);
   assert.match(promptRegion, /employment\.most_recent_company and employment\.most_recent_title/i);
   assert.match(promptRegion, /documented session-level finalizer, exactly once as the final browser action/i);
