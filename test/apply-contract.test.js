@@ -367,7 +367,8 @@ test('Apply skill freezes and completes every member of an explicitly requested 
   assert.match(skill, /preserve every review-ready tab/);
   assert.match(skill, /hand off each certified review-ready subset without waiting on unrelated human actions/);
   assert.match(skill, /members with unresolved actions stay frozen and resumable/i);
-  assert.match(skill, /provide the review block defined in/i);
+  assert.match(skill, /Use the normal review block[\s\S]*only after documented visibility proof/i);
+  assert.match(skill, /use the separate visibility-unverified block/i);
 });
 
 test('Apply skill proves semantic browser readiness before preparing resume bytes', () => {
@@ -375,6 +376,13 @@ test('Apply skill proves semantic browser readiness before preparing resume byte
   const integrity = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'form-integrity.md'), 'utf8');
 
   assert.match(skill, /browser readiness gate/);
+  assert.match(
+    skill,
+    /either the documented session finalizer plus complete current controller-owned and user-owned inventory access[\s\S]*or a documented per-tab durable-handoff primitive/i,
+  );
+  assert.match(skill, /complete current controller-owned and user-owned inventory access/i);
+  assert.match(skill, /exact verifiable persistence receipt for every target tab/i);
+  assert.match(skill, /otherwise fail browser readiness/i);
   assert.match(skill, /Codex in-app browser controls, Chrome MCP\/extension browser control, or Claude in Chrome/);
   assert.match(skill, /discover or reclaim every target tab/);
   assert.match(skill, /exact employer, role, ATS, requisition URL, job ID, and run ID/);
@@ -466,20 +474,40 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.3 or newer/);
+  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.4 or newer/);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.3 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.4 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.3 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.4 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.3/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.4/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
+});
+
+test('Apply skill separates current employment from most recent history and preserves row order', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /education and employment-history rows in reverse chronological order/i);
+  assert.match(skill, /employment status, current company, and most recent employer distinct/i);
+  assert.match(skill, /intentionally blank current company[\s\S]*does not erase prior employment/i);
+  assert.match(skill, /`employment\.most_recent_company` and `employment\.most_recent_title`/i);
+  assert.match(skill, /only after the fetched profile schema exposes those exact keys/i);
+  assert.match(skill, /If either key is absent from the fetched schema, do not PATCH it/i);
+  assert.match(skill, /ask once and sync the confirmed value globally/i);
+});
+
+test('Apply skill reconciles an exact success page without fabricated retroactive review', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /both the freshly fetched protocol and the stored `run\.protocolVersion` are 3\.3\.2 or newer[\s\S]*current-epoch exact-requisition success page be treated as authoritative/i);
+  assert.match(skill, /`running`, `inspecting`, `needs_input`, `review_ready`, or only the request says `submitted`/i);
+  assert.match(skill, /If either version is 3\.3\.1, do not assume this repair exists/i);
+  assert.match(skill, /without fabricating a retroactive review-ready checkpoint or truth certification/i);
+  assert.match(skill, /member lifecycle `submitted` and job state `applied_confirmed`/i);
 });
 
 test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {
@@ -531,6 +559,36 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /provider playbook for Greenhouse, Ashby, HiBob/);
   assert.match(promptRegion, /verify the committed DOM or accessibility state/);
   assert.match(promptRegion, /final consent control/);
+  assert.match(promptRegion, /Only when both the fetched protocol and the stored run protocol are 3\.3\.2 or newer may a current-epoch exact-requisition success page reconcile a running, inspecting, needs_input, review_ready, or request-only submitted projection/i);
+  assert.match(promptRegion, /stale-projection success-page reconciliation is available only when both the fetched Apply protocol and the stored run\.protocolVersion are 3\.3\.2 or newer/i);
+  assert.match(promptRegion, /employment\.most_recent_company and employment\.most_recent_title/i);
+  assert.match(promptRegion, /only when the fetched profile schema exposes those exact keys/i);
+  assert.match(promptRegion, /If a key is absent, do not PATCH it/i);
+  assert.match(promptRegion, /documented session-level finalizer exactly once as the final browser action/i);
+  assert.match(promptRegion, /reconcile the complete controller-owned and user-owned inventory union/i);
+  assert.match(promptRegion, /explicit \{ tab, status: "handoff" \} keep entry for every currently live mapped application tab, including frozen-batch and legacy single-run tabs/i);
+  assert.match(promptRegion, /documented per-tab durable handoff for every live tab and verify each persistence receipt/i);
+  assert.match(promptRegion, /fail browser readiness if neither path is complete/i);
+  assert.match(promptRegion, /never use an omitted, empty, partial, guessed, or stale keep list/i);
+  assert.match(promptRegion, /If finalization is ambiguous, do not call another browser tool in that turn and do not rerun it/i);
+  assert.match(promptRegion, /A user-confirmed direct tab closure may leave the keep list only after the complete inventory union proves the tab is absent/i);
+  assert.match(promptRegion, /complete controller-owned and user-owned inventories[\s\S]*user-visible handoff receipt/i);
+  assert.match(promptRegion, /conditional rules supersede any unconditional complete-inventory wording earlier in this prompt/i);
+  assert.match(promptRegion, /session-finalizer path, require complete controller and user inventories/i);
+  assert.match(promptRegion, /per-tab durable-handoff path, do not require unavailable inventories/i);
+  assert.match(promptRegion, /If no mapped live application tabs remain, skip both finalization and per-tab handoff/i);
+  assert.match(promptRegion, /exact current tab-bound user-visible handoff receipt is valid alternative proof/i);
+  assert.match(promptRegion, /either complete-union absence or an exact current tab-bound user-side closure\/absence receipt/i);
+  assert.match(promptRegion, /inventory membership alone is never visibility proof/i);
+  assert.match(promptRegion, /use the visibility-unverified handoff/i);
+  assert.match(promptRegion, /do not tell the user to submit until the exact review tab is reclaimed and visibly proven/i);
+  assert.match(promptRegion, /employment status, intentionally blank current company, and most recent employer distinct/i);
+  assert.match(
+    promptRegion,
+    /intentionally blank current company never implies employment status and never erases prior employment/i,
+  );
+  assert.match(promptRegion, /employment and education in reverse chronological order/i);
+  assert.match(promptRegion, /canonical committed English name or verified catalog option/i);
 });
 
 test('Apply skill carries live-beta ATS mechanics without user-specific answers', () => {

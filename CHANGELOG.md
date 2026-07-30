@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-30
+
+### Fixed
+
+- Trackly Apply skill 4.2.4 preserves the complete live application-tab set
+  through browser-session finalization and requires user-visible handoff proof
+  before claiming a review form is open.
+- Education and employment history are entered newest-first, and intentionally
+  blank current employment is no longer confused with the most recent employer.
+- With backend apply protocol 3.3.2 or newer, current-epoch success-page
+  receipts are reconciled without fabricating a retroactive review checkpoint
+  when Trackly's run projection is stale.
+
 ## [0.9.1] - 2026-07-29
 
 ### Fixed

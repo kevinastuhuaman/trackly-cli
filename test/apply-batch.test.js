@@ -103,6 +103,8 @@ test('batch handoff separates grouped actions from per-run review evidence', () 
   assert.match(reviewHandoff, /Grouped actions/i);
   assert.match(reviewHandoff, /company.*role.*run.*action type/is);
   assert.match(reviewHandoff, /one\s+review block per run/i);
+  assert.match(reviewHandoff, /Review state prepared — visibility not verified/i);
+  assert.match(reviewHandoff, /Do not submit from this handoff/i);
   assert.match(reviewHandoff, /inspection epoch/i);
   assert.match(reviewHandoff, /truth certification/i);
   assert.match(reviewHandoff, /closure evidence/i);
