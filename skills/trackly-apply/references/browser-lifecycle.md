@@ -106,12 +106,16 @@ handoff marker. Immediately before the final browser action of every turn:
 2. Build an explicit keep entry for every currently live mapped application
    tab, including frozen-batch members and legacy single-run tabs:
    `{ tab, status: "handoff" }`.
-3. When the host exposes `browser.tabs.finalize`, call
-   `browser.tabs.finalize({ keep })` exactly once as the final browser action.
-   If no documented session finalizer exists, invoke the adapter's documented
-   per-tab durable-handoff primitive for every live application tab and verify
-   an exact persistence receipt for each one. Never invoke an implicit
-   close-all cleanup or an undocumented substitute.
+3. Use only the end-to-end preservation path selected at browser readiness:
+   - If the selected path is the documented session finalizer **and** complete
+     current controller-owned and user-owned inventory access, call
+     `browser.tabs.finalize({ keep })` exactly once as the final browser action.
+   - If the finalizer path is absent or unusable and the selected path is the
+     documented per-tab durable-handoff primitive, invoke it for every live
+     application tab and verify an exact persistence receipt for each one.
+   The mere presence of a finalizer must never override the verified per-tab
+   fallback. Never invoke an implicit close-all cleanup or an undocumented
+   substitute.
 4. Never finalize with an omitted, empty, partial, guessed, or stale keep list.
 5. Do not use undocumented per-tab `finalize`, `markHandoff`, or
    `markDeliverable` calls. Use only the browser's documented session-level

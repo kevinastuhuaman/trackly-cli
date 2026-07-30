@@ -61,7 +61,14 @@ test('browser finalization preserves the complete live application inventory', (
   assert.match(lifecycle, /`browser\.tabs\.finalize\(\{ keep \}\)` exactly once/i);
   assert.match(lifecycle, /omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(lifecycle, /review-ready, inspecting, needs-input, or submitted-but-unreconciled/i);
-  assert.match(lifecycle, /documented\s+per-tab durable-handoff primitive for every live application tab/i);
+  assert.match(
+    lifecycle,
+    /documented\s+per-tab durable-handoff primitive[\s\S]{0,120}every live\s+application tab/i,
+  );
+  assert.match(
+    lifecycle,
+    /mere presence of a finalizer must never override the verified per-tab[\s\S]{0,40}fallback/i,
+  );
   assert.match(lifecycle, /verify\s+an exact persistence receipt for each one/i);
   assert.match(lifecycle, /never invoke an implicit\s+close-all cleanup/i);
   assert.match(lifecycle, /stop before\s+mutating the form or\s+entering private\s+data/i);
