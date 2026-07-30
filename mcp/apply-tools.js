@@ -642,6 +642,12 @@ function registerApplyTools(
       role: 'user',
       content: {
         type: 'text',
+        text: 'Browser preservation clarification: The following conditional rules supersede any unconditional complete-inventory wording earlier in this prompt. For the session-finalizer path, require complete controller and user inventories, build the non-empty keep list, and run the finalizer once. For the documented per-tab durable-handoff path, do not require unavailable inventories; preserve each ledger-mapped live tab with an exact persistence receipt. If no mapped live application tabs remain, skip both finalization and per-tab handoff. For reachability and visibility on the per-tab path, an exact current tab-bound user-visible handoff receipt is valid alternative proof. A user-confirmed direct tab closure may retire its ledger entry only after either complete-union absence or an exact current tab-bound user-side closure/absence receipt. Agent-initiated closure still requires the full close-proof gate.',
+      },
+    }, {
+      role: 'user',
+      content: {
+        type: 'text',
         text: 'Protocol capability clarification: stale-projection success-page reconciliation is available only when both the fetched Apply protocol and the stored run.protocolVersion are 3.3.2 or newer. If either version is 3.3.1, preserve the success tab and use only the normal review-ready transition when valid; otherwise report that the backend must update. Read and write prior-employer answers through the canonical global keys employment.most_recent_company and employment.most_recent_title only when the fetched profile schema exposes those exact keys. If an exposed key is unknown, ask once and sync only the confirmed value. If a key is absent, do not PATCH it; retain the answer only for the current form and report the schema gap.',
       },
     }, {

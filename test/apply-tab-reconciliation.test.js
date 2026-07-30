@@ -76,6 +76,7 @@ test('browser finalization preserves the complete live application inventory', (
   assert.match(lifecycle, /stop before\s+mutating the form or\s+entering private\s+data/i);
   assert.match(lifecycle, /A no-op is not a preservation\s+mechanism/i);
   assert.match(lifecycle, /user confirms they closed it\s+directly/i);
+  assert.match(lifecycle, /per-tab adapter returns\s+an exact current tab-bound user-side closure\/absence receipt/i);
   assert.match(lifecycle, /defer inventory recovery to the next turn/i);
   assert.match(lifecycle, /must not be rerun/i);
 });
@@ -83,8 +84,9 @@ test('browser finalization preserves the complete live application inventory', (
 test('handoff claims require user-visible proof rather than controller ownership', () => {
   assert.match(lifecycle, /Opening or restoring a controller tab is not proof/i);
   assert.match(lifecycle, /complete user-owned inventory/i);
-  assert.match(lifecycle, /documented visible state or exact user-visible handoff receipt/i);
-  assert.match(lifecycle, /visibility is unverified/i);
+  assert.match(lifecycle, /exact current tab-bound\s+user-visible handoff receipt is alternative reachability proof/i);
+  assert.match(lifecycle, /documented visible state or exact current tab-bound user-visible handoff\s+receipt/i);
+  assert.match(lifecycle, /visibility is\s+unverified/i);
   assert.match(lifecycle, /Inventory\s+membership alone is never visibility proof/i);
   assert.match(lifecycle, /Never convert controller ownership into a visibility claim/i);
 });

@@ -79,20 +79,25 @@ close it.
 Opening or restoring a controller tab is not proof that the user can see it.
 Before saying that a form is open, visible, ready for review, or preserved:
 
-1. Reconcile the complete controller and user inventories.
-2. Require every handed-off application tab to appear in the complete
-   user-owned inventory as reachability proof.
-3. Before claiming a tab is visible, focus or reveal that exact review tab
+1. Use the reachability proof supported by the preservation path selected at
+   readiness:
+   - For the session-finalizer path, reconcile the complete controller and user
+     inventories and require the handed-off tab to appear in the complete
+     user-owned inventory.
+   - For the per-tab durable-handoff path, an exact current tab-bound
+     user-visible handoff receipt is alternative reachability proof; do not
+     require inventories that this path explicitly permits to be unavailable.
+2. Before claiming a tab is visible, focus or reveal that exact review tab
    through the adapter's documented presentation action and verify its
-   documented visible state or exact user-visible handoff receipt. Inventory
-   membership alone is never visibility proof.
-4. Report the actual browser surface and any tab that could not be proven
+   documented visible state or exact current tab-bound user-visible handoff
+   receipt. Inventory membership alone is never visibility proof.
+3. Report the actual browser surface and any tab that could not be proven
    visible. Never convert controller ownership into a visibility claim.
 
-If the host cannot provide a complete user inventory or an exact visibility
-receipt, preserve the tab but say that visibility is unverified. Do not tell
-the user to submit a form that has not been proven reachable from their
-surface.
+If the selected path can provide neither its required reachability proof nor
+an exact visibility receipt, preserve the tab but say that visibility is
+unverified. Do not tell the user to submit a form that has not been proven
+reachable from their surface.
 
 ## Browser-session finalization safety
 
@@ -126,12 +131,13 @@ handoff marker. Immediately before ending every browser turn:
 
 A review-ready, inspecting, needs-input, or submitted-but-unreconciled
 application tab always remains `handoff` while it is live. Omit a ledger tab
-only after the complete inventory union proves it is absent and either the
-user explicitly requested closure or the user confirms they closed it
-directly. For an incomplete user-closed tab, preserve the member and enter the
-missing-tab recovery flow on the next turn; never claim the unsaved draft
-survived. Agent-initiated closure still requires the submitted/applied
-close-proof gate.
+after the user explicitly requests closure, or the user confirms they closed it
+directly, and the selected path provides definitive absence proof: either the
+complete inventory union proves the tab absent, or the per-tab adapter returns
+an exact current tab-bound user-side closure/absence receipt. Without that
+proof, preserve the member and enter missing-tab recovery on the next turn;
+never claim the unsaved draft survived. Agent-initiated closure still requires
+the submitted/applied close-proof gate.
 
 Determine which durable preservation mechanism the adapter supports during
 the browser readiness gate and prove that mechanism is usable end to end. A

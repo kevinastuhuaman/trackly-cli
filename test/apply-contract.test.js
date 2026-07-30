@@ -573,6 +573,12 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /If finalization is ambiguous, do not call another browser tool in that turn and do not rerun it/i);
   assert.match(promptRegion, /A user-confirmed direct tab closure may leave the keep list only after the complete inventory union proves the tab is absent/i);
   assert.match(promptRegion, /complete controller-owned and user-owned inventories[\s\S]*user-visible handoff receipt/i);
+  assert.match(promptRegion, /conditional rules supersede any unconditional complete-inventory wording earlier in this prompt/i);
+  assert.match(promptRegion, /session-finalizer path, require complete controller and user inventories/i);
+  assert.match(promptRegion, /per-tab durable-handoff path, do not require unavailable inventories/i);
+  assert.match(promptRegion, /If no mapped live application tabs remain, skip both finalization and per-tab handoff/i);
+  assert.match(promptRegion, /exact current tab-bound user-visible handoff receipt is valid alternative proof/i);
+  assert.match(promptRegion, /either complete-union absence or an exact current tab-bound user-side closure\/absence receipt/i);
   assert.match(promptRegion, /inventory membership alone is never visibility proof/i);
   assert.match(promptRegion, /use the visibility-unverified handoff/i);
   assert.match(promptRegion, /do not tell the user to submit until the exact review tab is reclaimed and visibly proven/i);
