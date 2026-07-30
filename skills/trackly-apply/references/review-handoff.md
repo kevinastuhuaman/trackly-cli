@@ -1,6 +1,7 @@
 # Review handoff
 
-For one application, provide this compact block and stop:
+For one application, provide this compact block and stop only after the exact
+review tab has documented visibility proof:
 
 ```text
 Ready for your review — not submitted
@@ -24,6 +25,25 @@ Actual scenario coverage:
 Items requiring your attention:
 
 Please review the live form and click Submit manually.
+```
+
+If the form reached its verified review state but the adapter cannot prove the
+exact review tab visible or issue an exact user-visible handoff receipt, do not
+use the block above and do not tell the user to submit. Preserve the tab and
+use this separate block:
+
+```text
+Review state prepared — visibility not verified
+
+Company / role:
+ATS:
+Resume:
+Integrity sweep: pass/fail
+Actual scenario coverage:
+Recovery needed: reclaim and visibly reveal the exact review tab
+
+Do not submit from this handoff. I must first prove the live review form is
+visible on your browser surface.
 ```
 
 For a frozen batch, first summarize unresolved human actions, then provide one

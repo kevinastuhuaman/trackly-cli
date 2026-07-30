@@ -129,10 +129,15 @@ survived. Agent-initiated closure still requires the submitted/applied
 close-proof gate.
 
 Determine which durable preservation mechanism the adapter supports during
-the browser readiness gate. If it exposes neither a documented session
-finalizer nor a documented per-tab durable-handoff primitive, stop before
-mutating the form or entering private data. A no-op is not a preservation
-mechanism because temporary agent-created tabs may disappear at turn end.
+the browser readiness gate and prove that mechanism is usable end to end. A
+session-finalizer path is ready only when the adapter can also enumerate a
+complete current controller-owned and user-owned inventory union for its keep
+list. If complete inventory access is unavailable, use only a documented
+per-tab durable-handoff primitive whose exact persistence receipt can be
+verified for every target tab. If neither complete finalizer path nor verified
+per-tab path is available, stop before mutating the form or entering private
+data. A no-op is not a preservation mechanism because temporary agent-created
+tabs may disappear at turn end.
 
 If finalization returns ambiguously or any expected tab disappears, stop all
 form mutation. Because the finalizer must remain the turn's last browser

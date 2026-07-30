@@ -64,7 +64,7 @@ test('browser finalization preserves the complete live application inventory', (
   assert.match(lifecycle, /documented\s+per-tab durable-handoff primitive for every live application tab/i);
   assert.match(lifecycle, /verify\s+an exact persistence receipt for each one/i);
   assert.match(lifecycle, /never invoke an implicit\s+close-all cleanup/i);
-  assert.match(lifecycle, /stop before\s+mutating the form or entering private data/i);
+  assert.match(lifecycle, /stop before\s+mutating the form or\s+entering private\s+data/i);
   assert.match(lifecycle, /A no-op is not a preservation\s+mechanism/i);
   assert.match(lifecycle, /user confirms they closed it\s+directly/i);
   assert.match(lifecycle, /defer inventory recovery to the next turn/i);

@@ -367,7 +367,8 @@ test('Apply skill freezes and completes every member of an explicitly requested 
   assert.match(skill, /preserve every review-ready tab/);
   assert.match(skill, /hand off each certified review-ready subset without waiting on unrelated human actions/);
   assert.match(skill, /members with unresolved actions stay frozen and resumable/i);
-  assert.match(skill, /provide the review block defined in/i);
+  assert.match(skill, /Use the normal review block[\s\S]*only after documented visibility proof/i);
+  assert.match(skill, /use the separate visibility-unverified block/i);
 });
 
 test('Apply skill proves semantic browser readiness before preparing resume bytes', () => {
@@ -375,7 +376,12 @@ test('Apply skill proves semantic browser readiness before preparing resume byte
   const integrity = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'form-integrity.md'), 'utf8');
 
   assert.match(skill, /browser readiness gate/);
-  assert.match(skill, /either the documented session finalizer or a documented per-tab durable-handoff primitive/i);
+  assert.match(
+    skill,
+    /either the documented session finalizer plus complete current controller-owned and user-owned inventory access[\s\S]*or a documented per-tab durable-handoff primitive/i,
+  );
+  assert.match(skill, /complete current controller-owned and user-owned inventory access/i);
+  assert.match(skill, /exact verifiable persistence receipt for every target tab/i);
   assert.match(skill, /otherwise fail browser readiness/i);
   assert.match(skill, /Codex in-app browser controls, Chrome MCP\/extension browser control, or Claude in Chrome/);
   assert.match(skill, /discover or reclaim every target tab/);
@@ -562,15 +568,19 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /reconcile the complete controller-owned and user-owned inventory union/i);
   assert.match(promptRegion, /explicit \{ tab, status: "handoff" \} keep entry for every currently live mapped application tab, including frozen-batch and legacy single-run tabs/i);
   assert.match(promptRegion, /documented per-tab durable handoff for every live tab and verify each persistence receipt/i);
-  assert.match(promptRegion, /fail browser readiness if neither exists/i);
+  assert.match(promptRegion, /fail browser readiness if neither path is complete/i);
   assert.match(promptRegion, /never use an omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(promptRegion, /If finalization is ambiguous, do not call another browser tool in that turn and do not rerun it/i);
   assert.match(promptRegion, /A user-confirmed direct tab closure may leave the keep list only after the complete inventory union proves the tab is absent/i);
   assert.match(promptRegion, /complete controller-owned and user-owned inventories[\s\S]*user-visible handoff receipt/i);
   assert.match(promptRegion, /inventory membership alone is never visibility proof/i);
-  assert.match(promptRegion, /say visibility is unverified/i);
+  assert.match(promptRegion, /use the visibility-unverified handoff/i);
+  assert.match(promptRegion, /do not tell the user to submit until the exact review tab is reclaimed and visibly proven/i);
   assert.match(promptRegion, /employment status, intentionally blank current company, and most recent employer distinct/i);
-  assert.match(promptRegion, /blank current company never erases prior employment/i);
+  assert.match(
+    promptRegion,
+    /intentionally blank current company never implies employment status and never erases prior employment/i,
+  );
   assert.match(promptRegion, /employment and education in reverse chronological order/i);
   assert.match(promptRegion, /canonical committed English name or verified catalog option/i);
 });
