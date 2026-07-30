@@ -60,9 +60,11 @@ test('browser finalization preserves the complete live batch inventory', () => {
   assert.match(lifecycle, /`browser\.tabs\.finalize\(\{ keep \}\)` exactly once/i);
   assert.match(lifecycle, /omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(lifecycle, /review-ready, inspecting, needs-input, or submitted-but-unreconciled/i);
-  assert.match(lifecycle, /do not invent one and do not run\s+any cleanup substitute/i);
-  assert.match(lifecycle, /deliberately leaves every\s+live tab untouched/i);
-  assert.match(lifecycle, /never invoke an implicit close-all cleanup/i);
+  assert.match(lifecycle, /documented\s+per-tab durable-handoff primitive for every live application tab/i);
+  assert.match(lifecycle, /verify\s+an exact persistence receipt for each one/i);
+  assert.match(lifecycle, /never invoke an implicit\s+close-all cleanup/i);
+  assert.match(lifecycle, /stop before\s+mutating the form or entering private data/i);
+  assert.match(lifecycle, /A no-op is not a preservation\s+mechanism/i);
 });
 
 test('handoff claims require user-visible proof rather than controller ownership', () => {

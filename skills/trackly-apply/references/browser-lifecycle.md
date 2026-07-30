@@ -105,14 +105,14 @@ handoff marker. Immediately before the final browser action of every turn:
    batch: `{ tab, status: "handoff" }`.
 3. When the host exposes `browser.tabs.finalize`, call
    `browser.tabs.finalize({ keep })` exactly once as the final browser action.
-   If no documented session finalizer exists, do not invent one and do not run
-   any cleanup substitute. This fail-closed path deliberately leaves every
-   live tab untouched; never invoke an implicit close-all cleanup or an
-   undocumented per-tab substitute.
+   If no documented session finalizer exists, invoke the adapter's documented
+   per-tab durable-handoff primitive for every live application tab and verify
+   an exact persistence receipt for each one. Never invoke an implicit
+   close-all cleanup or an undocumented substitute.
 4. Never finalize with an omitted, empty, partial, guessed, or stale keep list.
 5. Do not use undocumented per-tab `finalize`, `markHandoff`, or
    `markDeliverable` calls. Use only the browser's documented session-level
-   finalizer.
+   finalizer or documented per-tab durable-handoff contract.
 6. Never finalize while creating or restoring tabs; wait until all form
    mutations and committed-state checks for that turn are complete.
 
@@ -120,6 +120,12 @@ A review-ready, inspecting, needs-input, or submitted-but-unreconciled
 application tab always remains `handoff`. Only omit a tab from `keep` after the
 user explicitly requests closure and the submitted/applied close-proof gate
 has passed.
+
+Determine which durable preservation mechanism the adapter supports during
+the browser readiness gate. If it exposes neither a documented session
+finalizer nor a documented per-tab durable-handoff primitive, stop before
+mutating the form or entering private data. A no-op is not a preservation
+mechanism because temporary agent-created tabs may disappear at turn end.
 
 If finalization returns ambiguously or any expected tab disappears, stop all
 form mutation. Reconcile both controller and user inventories, preserve every

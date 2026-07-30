@@ -375,6 +375,8 @@ test('Apply skill proves semantic browser readiness before preparing resume byte
   const integrity = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'form-integrity.md'), 'utf8');
 
   assert.match(skill, /browser readiness gate/);
+  assert.match(skill, /either the documented session finalizer or a documented per-tab durable-handoff primitive/i);
+  assert.match(skill, /otherwise fail browser readiness/i);
   assert.match(skill, /Codex in-app browser controls, Chrome MCP\/extension browser control, or Claude in Chrome/);
   assert.match(skill, /discover or reclaim every target tab/);
   assert.match(skill, /exact employer, role, ATS, requisition URL, job ID, and run ID/);
@@ -556,8 +558,10 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /employment\.most_recent_company and employment\.most_recent_title/i);
   assert.match(promptRegion, /only when the fetched profile schema exposes those exact keys/i);
   assert.match(promptRegion, /If a key is absent, do not PATCH it/i);
-  assert.match(promptRegion, /documented session-level finalizer, exactly once as the final browser action/i);
+  assert.match(promptRegion, /documented session-level finalizer exactly once as the final browser action/i);
   assert.match(promptRegion, /explicit \{ tab, status: "handoff" \} keep entry for every live application tab/i);
+  assert.match(promptRegion, /documented per-tab durable handoff for every live tab and verify each persistence receipt/i);
+  assert.match(promptRegion, /fail browser readiness if neither exists/i);
   assert.match(promptRegion, /never use an omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(promptRegion, /complete controller-owned and user-owned inventories[\s\S]*user-visible handoff receipt/i);
   assert.match(promptRegion, /inventory membership alone is never visibility proof/i);
