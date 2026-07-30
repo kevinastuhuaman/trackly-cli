@@ -61,12 +61,15 @@ test('browser finalization preserves the complete live batch inventory', () => {
   assert.match(lifecycle, /omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(lifecycle, /review-ready, inspecting, needs-input, or submitted-but-unreconciled/i);
   assert.match(lifecycle, /do not invent one and do not run\s+any cleanup substitute/i);
+  assert.match(lifecycle, /deliberately leaves every\s+live tab untouched/i);
+  assert.match(lifecycle, /never invoke an implicit close-all cleanup/i);
 });
 
 test('handoff claims require user-visible proof rather than controller ownership', () => {
   assert.match(lifecycle, /Opening or restoring a controller tab is not proof/i);
   assert.match(lifecycle, /complete user-owned inventory/i);
-  assert.match(lifecycle, /documented user-visible\s+handoff receipt/i);
+  assert.match(lifecycle, /documented visible state or exact user-visible handoff receipt/i);
   assert.match(lifecycle, /visibility is unverified/i);
+  assert.match(lifecycle, /Inventory\s+membership alone is never visibility proof/i);
   assert.match(lifecycle, /Never convert controller ownership into a visibility claim/i);
 });

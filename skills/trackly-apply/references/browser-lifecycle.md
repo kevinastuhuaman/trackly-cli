@@ -81,10 +81,11 @@ Before saying that a form is open, visible, ready for review, or preserved:
 
 1. Reconcile the complete controller and user inventories.
 2. Require every handed-off application tab to appear in the complete
-   user-owned inventory, or require the adapter's documented user-visible
-   handoff receipt for that exact tab.
-3. Focus or reveal each review tab through the documented browser action when
-   the user asked to see it.
+   user-owned inventory as reachability proof.
+3. Before claiming a tab is visible, focus or reveal that exact review tab
+   through the adapter's documented presentation action and verify its
+   documented visible state or exact user-visible handoff receipt. Inventory
+   membership alone is never visibility proof.
 4. Report the actual browser surface and any tab that could not be proven
    visible. Never convert controller ownership into a visibility claim.
 
@@ -105,7 +106,9 @@ handoff marker. Immediately before the final browser action of every turn:
 3. When the host exposes `browser.tabs.finalize`, call
    `browser.tabs.finalize({ keep })` exactly once as the final browser action.
    If no documented session finalizer exists, do not invent one and do not run
-   any cleanup substitute.
+   any cleanup substitute. This fail-closed path deliberately leaves every
+   live tab untouched; never invoke an implicit close-all cleanup or an
+   undocumented per-tab substitute.
 4. Never finalize with an omitted, empty, partial, guessed, or stale keep list.
 5. Do not use undocumented per-tab `finalize`, `markHandoff`, or
    `markDeliverable` calls. Use only the browser's documented session-level

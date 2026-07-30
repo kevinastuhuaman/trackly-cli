@@ -488,6 +488,8 @@ test('Apply skill separates current employment from most recent history and pres
   assert.match(skill, /employment status, current company, and most recent employer distinct/i);
   assert.match(skill, /intentionally blank current company[\s\S]*does not erase prior employment/i);
   assert.match(skill, /`employment\.most_recent_company` and `employment\.most_recent_title`/i);
+  assert.match(skill, /only after the fetched profile schema exposes those exact keys/i);
+  assert.match(skill, /If either key is absent from the fetched schema, do not PATCH it/i);
   assert.match(skill, /ask once and sync the confirmed value globally/i);
 });
 
@@ -552,10 +554,13 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /Only when the fetched protocol is 3\.3\.2 or newer may a current-epoch exact-requisition success page reconcile a still-inspecting or needs-input projection/i);
   assert.match(promptRegion, /stale-projection success-page reconciliation is available only when the fetched Apply protocol is 3\.3\.2 or newer/i);
   assert.match(promptRegion, /employment\.most_recent_company and employment\.most_recent_title/i);
+  assert.match(promptRegion, /only when the fetched profile schema exposes those exact keys/i);
+  assert.match(promptRegion, /If a key is absent, do not PATCH it/i);
   assert.match(promptRegion, /documented session-level finalizer, exactly once as the final browser action/i);
   assert.match(promptRegion, /explicit \{ tab, status: "handoff" \} keep entry for every live application tab/i);
   assert.match(promptRegion, /never use an omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(promptRegion, /complete controller-owned and user-owned inventories[\s\S]*user-visible handoff receipt/i);
+  assert.match(promptRegion, /inventory membership alone is never visibility proof/i);
   assert.match(promptRegion, /say visibility is unverified/i);
   assert.match(promptRegion, /employment status, intentionally blank current company, and most recent employer distinct/i);
   assert.match(promptRegion, /blank current company never erases prior employment/i);
