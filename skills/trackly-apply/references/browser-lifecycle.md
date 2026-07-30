@@ -97,30 +97,31 @@ surface.
 ## Browser-session finalization safety
 
 Treat browser-session finalization as destructive cleanup, not as a harmless
-handoff marker. Immediately before the final browser action of every turn:
+handoff marker. Immediately before ending every browser turn:
 
-1. Reconcile the complete current controller-owned and user-owned inventory
-   union with the local job/run/tab ledger. Refresh both inventories
-   immediately before building the keep list; a controller-only refresh cannot
-   prove that a handed-off user tab still exists.
-2. Build an explicit keep entry for every currently live mapped application
-   tab, including frozen-batch members and legacy single-run tabs:
-   `{ tab, status: "handoff" }`.
-3. Use only the end-to-end preservation path selected at browser readiness:
-   - If the selected path is the documented session finalizer **and** complete
-     current controller-owned and user-owned inventory access, call
+1. Determine the currently live mapped application tabs from the local ledger,
+   including frozen-batch members and legacy single-run tabs. If there are no
+   live mapped application tabs, skip both session finalization and per-tab
+   handoff; never call a finalizer with an empty keep list.
+2. Use only the end-to-end preservation path selected at browser readiness:
+   - For the documented session-finalizer path, refresh and reconcile the
+     complete current controller-owned and user-owned inventory union
+     immediately before building an explicit `{ tab, status: "handoff" }` keep
+     entry for every live mapped application tab. A controller-only refresh
+     cannot prove that a handed-off user tab still exists. Then call
      `browser.tabs.finalize({ keep })` exactly once as the final browser action.
-   - If the finalizer path is absent or unusable and the selected path is the
-     documented per-tab durable-handoff primitive, invoke it for every live
-     application tab and verify an exact persistence receipt for each one.
+   - For the documented per-tab durable-handoff path, do not require an
+     unavailable complete inventory union. Invoke the primitive for every live
+     application tab mapped in the ledger and verify an exact persistence
+     receipt for each one.
    The mere presence of a finalizer must never override the verified per-tab
    fallback. Never invoke an implicit close-all cleanup or an undocumented
    substitute.
-4. Never finalize with an omitted, empty, partial, guessed, or stale keep list.
-5. Do not use undocumented per-tab `finalize`, `markHandoff`, or
+3. Never finalize with an omitted, empty, partial, guessed, or stale keep list.
+4. Do not use undocumented per-tab `finalize`, `markHandoff`, or
    `markDeliverable` calls. Use only the browser's documented session-level
    finalizer or documented per-tab durable-handoff contract.
-6. Never finalize while creating or restoring tabs; wait until all form
+5. Never finalize while creating or restoring tabs; wait until all form
    mutations and committed-state checks for that turn are complete.
 
 A review-ready, inspecting, needs-input, or submitted-but-unreconciled

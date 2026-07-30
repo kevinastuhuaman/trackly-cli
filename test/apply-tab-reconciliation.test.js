@@ -57,19 +57,21 @@ test('old inspection epochs cannot satisfy review or closure', () => {
 test('browser finalization preserves the complete live application inventory', () => {
   assert.match(lifecycle, /finalization as destructive cleanup/i);
   assert.match(lifecycle, /complete current controller-owned and user-owned inventory\s+union/i);
-  assert.match(lifecycle, /every currently live mapped application\s+tab, including frozen-batch members and legacy single-run tabs/i);
+  assert.match(lifecycle, /currently live mapped application tabs[\s\S]{0,80}including frozen-batch members and legacy single-run tabs/i);
   assert.match(lifecycle, /`browser\.tabs\.finalize\(\{ keep \}\)` exactly once/i);
   assert.match(lifecycle, /omitted, empty, partial, guessed, or stale keep list/i);
   assert.match(lifecycle, /review-ready, inspecting, needs-input, or submitted-but-unreconciled/i);
   assert.match(
     lifecycle,
-    /documented\s+per-tab durable-handoff primitive[\s\S]{0,120}every live\s+application tab/i,
+    /For the documented per-tab durable-handoff path[\s\S]{0,240}every live\s+application tab/i,
   );
   assert.match(
     lifecycle,
     /mere presence of a finalizer must never override the verified per-tab[\s\S]{0,40}fallback/i,
   );
-  assert.match(lifecycle, /verify\s+an exact persistence receipt for each one/i);
+  assert.match(lifecycle, /If there are no\s+live mapped application tabs, skip both session finalization and per-tab\s+handoff/i);
+  assert.match(lifecycle, /For the documented per-tab durable-handoff path, do not require an\s+unavailable complete inventory union/i);
+  assert.match(lifecycle, /verify\s+an exact persistence\s+receipt for each one/i);
   assert.match(lifecycle, /never invoke an implicit\s+close-all cleanup/i);
   assert.match(lifecycle, /stop before\s+mutating the form or\s+entering private\s+data/i);
   assert.match(lifecycle, /A no-op is not a preservation\s+mechanism/i);
