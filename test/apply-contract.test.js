@@ -511,6 +511,22 @@ test('Apply skill reconciles exact current-epoch submission confirmations withou
   assert.match(skill, /member lifecycle `submitted` and job state `applied_confirmed`/i);
 });
 
+test('Apply skill and MCP prompt keep receipt discovery scoped and executable', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  const promptRegion = source.slice(source.indexOf("server.registerPrompt('trackly-apply'"));
+
+  for (const text of [skill, promptRegion]) {
+    assert.doesNotMatch(text, /search a connected mailbox when available/i);
+    assert.match(text, /never search a mailbox/i);
+    assert.match(text, /user suppl(?:ies|ied)|user supplies|user supplied/i);
+    assert.match(text, /bound application surface|bound application/i);
+    assert.match(text, /without entering private data/i);
+    assert.match(text, /same-company.*different.?role/i);
+    assert.match(text, /receipt (?:verifies|proves) (?:job )?identity|receipt proves identity/i);
+    assert.match(text, /accessible members before (?:known )?credential-gated members/i);
+  }
+});
+
 test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills/trackly-apply/SKILL.md'), 'utf8');
   const lifecycle = fs.readFileSync(
