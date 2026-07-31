@@ -70,6 +70,17 @@ the same binding. Therefore the bounded contingency budget is `52 + (3 * R)`,
 where `R` is the number of affected members and cannot exceed 20. Maintenance
 recovery is paced by the advertised window and is tracked separately.
 
+Each verified prior-submission duplicate reconciled during preflight receives
+seven additional calls after its baseline run start and surface binding: one
+provider-receipt evidence write, one success-page or explicit-user-confirmation
+evidence write, one submitted-outcome write, one durable-state refetch, and the
+three separate close-proof evidence writes. Therefore a batch containing both
+retryable start recovery and reconciled duplicates uses the bounded budget
+`52 + (3 * R) + (7 * D)`, where `D` is the number of reconciled duplicates and
+cannot exceed 20. Never spend the duplicate allowance without the normal
+success-page or explicit-user-confirmation authority, and never omit the
+durable refetch or three-part close proof merely to remain under budget.
+
 ## Ownership and replay safety
 
 Acquire the renewable lease before browser mutation. Each mutation supplies

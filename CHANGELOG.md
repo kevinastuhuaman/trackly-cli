@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-07-31
+
+### Fixed
+
+- Trackly Apply skill 4.2.5 treats current-epoch explicit user confirmation as
+  authoritative for protocol 3.3.2 stale-projection repair, while preserving
+  stronger stored success-page evidence and the manual-submit boundary.
+- Prior-submission receipts are reconciled before browser mutation, and
+  accessible frozen-batch members are handled before credential-gated members
+  without changing the server-owned batch membership or order.
+
 ## [0.9.2] - 2026-07-30
 
 ### Fixed
