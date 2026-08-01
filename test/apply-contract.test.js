@@ -550,7 +550,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
     assert.match(text, /declines?.*continue|skip.*without blocking/i);
     assert.match(text, /user suppl(?:ies|ied)|user supplies|user supplied/i);
     assert.match(text, /bound application surface|bound application/i);
-    assert.match(text, /without entering private data/i);
+    assert.match(text, /without entering private data|Enter no private data/i);
     assert.match(text, /same-company.*different.?role/i);
     assert.match(text, /receipt (?:verifies|proves) (?:job )?identity|receipt proves identity/i);
     assert.match(text, /accessible members before (?:known )?credential-gated members/i);
@@ -566,6 +566,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(promptRegion, /approved pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*historical range the user selects[\s\S]*never search the whole mailbox/i);
   assert.match(promptRegion, /Scope search and completion only to executable frozen members without static exclusions[\s\S]*manual-only members are skipped[\s\S]*never require a forbidden run/i);
   assert.match(promptRegion, /exact requisition identity plus the same employer or verified ATS tenant\/sender identity[\s\S]*bare requisition ID is never sufficient/i);
+  assert.match(promptRegion, /only when member\.runId is absent may trackly_start_apply_run[\s\S]*when member\.runId exists but its browser binding is missing[\s\S]*never start again[\s\S]*trackly_bind_apply_surface with recovery_binding/i);
   assert.doesNotMatch(promptRegion, /known batch window/i);
   assert.match(promptRegion, /Without a requisition ID[\s\S]*must not be recorded as provider_receipt_detected until the user explicitly confirms that it belongs to the current batch member/i);
 
@@ -584,6 +585,8 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /re-select or confirm the exact inbox connector and account[\s\S]*Never use a current client default/i);
   assert.match(inboxPreflight, /Set `completed` only after the bounded search finds no positive matches or every\s+positive match among executable members has been durably recorded/i);
   assert.match(inboxPreflight, /durable recording\/reconciliation step fails[\s\S]*keep\s+`consented_pending`/i);
+  assert.match(promptRegion, /Mark completed only after[\s\S]*when submission authority exists[\s\S]*reconciled/i);
+  assert.match(inboxPreflight, /Set `completed` only after[\s\S]*submission authority also exists[\s\S]*outcome reconciliation[\s\S]*before completion/i);
   assert.match(inboxPreflight, /pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*user to select a historical range[\s\S]*never silently search the whole\s+mailbox/i);
   assert.match(inboxPreflight, /Scope both search and completion to executable frozen[\s\S]*manual-only members[\s\S]*do not block `completed`[\s\S]*never create a forbidden run/i);
   assert.match(inboxPreflight, /exact requisition ID[\s\S]*same employer or verified ATS tenant\/sender identity[\s\S]*bare\s+requisition identifier is not globally unique/i);
@@ -603,6 +606,12 @@ test('Apply browser ledger keeps inbox preflight recovery value-free and local',
   assert.match(lifecycle, /re-selects or confirms the exact inbox connector and account[\s\S]*Never\s+substitute the client's current default mailbox/i);
   assert.match(lifecycle, /Keep `consented_pending` until[\s\S]*every positive match is durably recorded/i);
   assert.match(lifecycle, /Remove this state when the\s+batch expires/i);
+});
+
+test('Apply receipt preflight rebinds an existing run instead of starting it again', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /If `runId` is absent[\s\S]*`trackly_start_apply_run` as the sanctioned idempotent start/i);
+  assert.match(skill, /If `runId` exists but its browser binding is missing[\s\S]*never call `trackly_start_apply_run` again[\s\S]*`trackly_bind_apply_surface` with `recovery_binding`/i);
 });
 
 test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {
