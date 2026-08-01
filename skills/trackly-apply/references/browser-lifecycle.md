@@ -26,8 +26,14 @@ there are no positive matches or every positive match is durably recorded and,
 when submission authority exists, reconciled, and every match has an explicit
 `reconciled` or local value-free `cleared_by_user` disposition. A matched member
 without an explicit disposition remains free of form mutation. If a bounded
-connector query fails, set terminal `search_failed` before continuing browser
-work. If the ledger state is absent
+connector query fails before any positive match, set terminal `search_failed`
+before continuing browser work. If a later query fails after positive matches
+already exist, retain value-free local classifications for those members, keep
+them mutation-free under `consented_pending` until explicitly dispositioned,
+classify the remaining unsearched members locally as query-failed, and never
+rerun inbox search after browser mutation. After the retained matches are
+resolved, transition the batch to terminal `search_failed`, not `completed`.
+If the ledger state is absent
 before any inbox search or form mutation, make a fresh offer and never infer
 consent or completion. Remove this state when the batch expires.
 
