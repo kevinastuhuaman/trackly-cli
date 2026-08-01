@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-07-31
+
+### Fixed
+
+- Trackly Apply skill 4.2.6 and MCP contract 3.3.3 now advertise the narrow
+  legacy repair path correctly: a protocol 3.3.1 run may reconcile only from
+  retained current-epoch explicit user-confirmation evidence. Passive
+  success-page repair remains limited to protocol 3.3.2 or newer.
+
 ## [0.9.4] - 2026-07-31
 
 ### Fixed
