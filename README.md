@@ -176,7 +176,7 @@ Then use natural language in any of these clients:
 | trackly_get_apply_queue | Get user-approved jobs ready for execution |
 | trackly_get_application_profile | Get versioned profile answers and provenance |
 | trackly_get_profile_onboarding | Get schema plus missing questions |
-| trackly_update_application_profile | Save scoped answers with optimistic concurrency |
+| trackly_update_application_profile | Save scoped answers with optimistic concurrency; revoking sensitive storage takes a two-step confirmation |
 | trackly_create_apply_batch | Freeze an exact recent-first approved batch |
 | trackly_get_active_apply_batch | Recover the newest unexpired active batch after context loss |
 | trackly_get_apply_batch | Read frozen membership with opaque pagination |

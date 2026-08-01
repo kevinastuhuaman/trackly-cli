@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-01
+
+### Added
+
+- `trackly_update_application_profile` now requires explicit two-step
+  confirmation (contract 3.4.0) before revoking sensitive-storage consent,
+  which permanently deletes all stored sensitive and restricted answers.
+  The first call saves nothing and returns a challenge listing the affected
+  keys; nothing is deleted until the confirmation token is echoed back.
+
 ## [0.10.0] - 2026-08-01
 
 ### Added
