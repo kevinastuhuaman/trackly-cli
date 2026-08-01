@@ -154,7 +154,7 @@ function registerApplyTools(
 
   server.tool(
     'trackly_update_application_profile',
-    'Update confirmed profile answers with optimistic concurrency. Use global scope only for an explicit always-answer preference. Setting sensitiveStorageConsent=false permanently deletes every stored sensitive and restricted answer and is a two-step action: the first call saves nothing and returns a confirmation challenge; retry with the echoed sensitiveRevocationConfirmToken to proceed.',
+    'Update confirmed profile answers with optimistic concurrency. Use global scope only for an explicit always-answer preference. Setting sensitiveStorageConsent=false deletes every stored sensitive and restricted answer (an admin-recoverable archive is kept for 30 days, then purged) and is a two-step action: the first call saves nothing and returns a confirmation challenge; retry with the echoed sensitiveRevocationConfirmToken to proceed.',
     {
       expectedRevision: z.number().int().min(1),
       source: z.enum(['web', 'ios', 'macos', 'codex', 'claude', 'mcp']).optional(),
