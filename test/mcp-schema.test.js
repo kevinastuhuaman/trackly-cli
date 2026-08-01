@@ -777,6 +777,10 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true } } }));
         } else if (mode === 'array-fields') {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: ['eeo.gender'] } }));
+        } else if (mode === 'null-field-entry') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': null } } }));
+        } else if (mode === 'stateless-field-entry') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': {} } } }));
         } else {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: goodFields } }));
         }
@@ -826,6 +830,8 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
     { mode: 'missing-revision', code: 'invalid_profile_revision' },
     { mode: 'missing-fields', code: 'invalid_profile_response' },
     { mode: 'array-fields', code: 'invalid_profile_response' },
+    { mode: 'null-field-entry', code: 'invalid_profile_response' },
+    { mode: 'stateless-field-entry', code: 'invalid_profile_response' },
     { mode: 'empty-schema', code: 'invalid_profile_response' },
     { mode: 'null-schema-entry', code: 'invalid_profile_response' },
     { mode: 'partial-schema-entry', code: 'invalid_profile_response' },

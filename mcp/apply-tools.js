@@ -229,12 +229,14 @@ function registerApplyTools(
             && typeof field.key === 'string'
             && typeof field.storage === 'string'
             && typeof field.sensitivity === 'string');
-        if (
-          !profileFieldsShape || typeof profileFieldsShape !== 'object'
-          || Array.isArray(profileFieldsShape)
-          || Object.keys(profileFieldsShape).length === 0
-          || !schemaEntriesValid
-        ) {
+        const profileEntriesValid = !!profileFieldsShape
+          && typeof profileFieldsShape === 'object'
+          && !Array.isArray(profileFieldsShape)
+          && Object.keys(profileFieldsShape).length > 0
+          && Object.values(profileFieldsShape).every((entry) => entry
+            && typeof entry === 'object' && !Array.isArray(entry)
+            && typeof entry.state === 'string');
+        if (!profileEntriesValid || !schemaEntriesValid) {
           throw {
             status: 502,
             code: 'invalid_profile_response',
