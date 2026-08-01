@@ -220,6 +220,19 @@ function registerApplyTools(
             error: 'Trackly did not return a valid profile revision. No changes were saved.',
           };
         }
+        const profileFieldsShape = profileResponse?.profile?.fields;
+        const schemaFieldsShape = schemaResponse?.fields;
+        if (
+          !profileFieldsShape || typeof profileFieldsShape !== 'object'
+          || Object.keys(profileFieldsShape).length === 0
+          || !Array.isArray(schemaFieldsShape) || schemaFieldsShape.length === 0
+        ) {
+          throw {
+            status: 502,
+            code: 'invalid_profile_response',
+            error: 'Trackly returned an incomplete profile or schema, so the deletion scope cannot be verified. No changes were saved.',
+          };
+        }
         if (sensitiveRevocationConfirmToken !== confirmationToken || body.expectedRevision !== currentRevision) {
           throw {
             status: 409,
@@ -230,7 +243,7 @@ function registerApplyTools(
               affectedKeys,
               alsoDeletes: 'Every provider- and company-scoped sensitive or restricted answer is also deleted, as are answers stored under retired catalog keys; those keys are not listed here.',
               confirmationToken,
-              instructions: 'Show the user the affected keys and get explicit confirmation, then retry with expectedRevision=currentRevision and sensitiveRevocationConfirmToken=confirmationToken. If the original call carried other changes, re-read the profile first and reconcile them against the current revision instead of resending stale changes blindly. The token becomes invalid whenever the profile revision changes.',
+              instructions: 'Do not retry automatically. Show the user the affected keys and get explicit confirmation, then retry with the FULL original request body (including any changes, education, or confirmProfile fields) plus expectedRevision=currentRevision and sensitiveRevocationConfirmToken=confirmationToken. If the original call carried other changes, re-read the profile first and reconcile them against the current revision instead of resending stale changes blindly. The token becomes invalid whenever the profile revision changes.',
             },
           };
         }

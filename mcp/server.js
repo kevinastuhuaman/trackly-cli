@@ -90,6 +90,7 @@ function createErrorResult(error, fallbackMessage, extra = {}) {
     || error?.code === 'invalid_preference_revision'
     || error?.code === 'sensitive_revocation_confirmation_required'
     || error?.code === 'invalid_profile_revision'
+    || error?.code === 'invalid_profile_response'
   ) {
     payload.code = error.code;
   }

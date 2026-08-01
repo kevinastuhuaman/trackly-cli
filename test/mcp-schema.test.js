@@ -759,6 +759,79 @@ test('trackly_search_jobs defaults jobFunction to ALL functions when caller omit
   );
 });
 
+test('sensitive consent revocation fails closed on malformed profile or schema responses', async (t) => {
+  const goodFields = { 'eeo.gender': { state: 'answered' } };
+  const goodSchema = [{ key: 'eeo.gender', storage: 'answer', sensitivity: 'restricted' }];
+  let mode = 'missing-revision';
+  const requests = [];
+  const httpServer = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      requests.push({ method: req.method, url: req.url });
+      res.setHeader('Content-Type', 'application/json');
+      if (req.method === 'GET' && req.url === '/api/jobscout/application-profile') {
+        if (mode === 'missing-revision') {
+          res.end(JSON.stringify({ success: true, profile: { sensitiveStorage: { consented: true }, fields: goodFields } }));
+        } else if (mode === 'missing-fields') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true } } }));
+        } else {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: goodFields } }));
+        }
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/api/jobscout/application-profile/schema') {
+        res.end(JSON.stringify(mode === 'empty-schema' ? { success: true, fields: [] } : { success: true, fields: goodSchema }));
+        return;
+      }
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: 'unexpected request' }));
+    });
+  });
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => httpServer.close());
+
+  const originalApiKey = process.env.TRACKLY_API_KEY;
+  const originalBaseUrl = process.env.TRACKLY_BASE_URL;
+  process.env.TRACKLY_API_KEY = 'trk_test_failclosed_revocation';
+  process.env.TRACKLY_BASE_URL = `http://127.0.0.1:${httpServer.address().port}`;
+  t.after(() => {
+    if (originalApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = originalApiKey;
+    if (originalBaseUrl === undefined) delete process.env.TRACKLY_BASE_URL;
+    else process.env.TRACKLY_BASE_URL = originalBaseUrl;
+  });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer();
+  const client = new Client({ name: 'fail-closed-revocation-test', version: '1.0.0' });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+  });
+
+  const cases = [
+    { mode: 'missing-revision', code: 'invalid_profile_revision' },
+    { mode: 'missing-fields', code: 'invalid_profile_response' },
+    { mode: 'empty-schema', code: 'invalid_profile_response' },
+  ];
+  for (const testCase of cases) {
+    mode = testCase.mode;
+    const result = await client.callTool({
+      name: 'trackly_update_application_profile',
+      arguments: { expectedRevision: 7, sensitiveStorageConsent: false },
+    });
+    assert.equal(result.isError, true, `${testCase.mode} must be an error`);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.code, testCase.code, `${testCase.mode} code`);
+    assert.equal(payload.status, 502, `${testCase.mode} status`);
+    assert.match(payload.error, /No changes were saved\./);
+  }
+  assert.equal(requests.filter(({ method }) => method === 'PATCH').length, 0, 'fail-closed paths must never PATCH');
+});
+
 test('sensitive consent revocation requires an echoed confirmation token before any PATCH', async (t) => {
   const { createHash } = require('node:crypto');
   const profileFields = {
