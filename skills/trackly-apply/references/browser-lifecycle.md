@@ -13,6 +13,39 @@ ownership state, and inspection epoch. Raw tab identifiers never go to the
 Trackly backend. If the host persists the ledger, store it in a private
 mode `0600` file and remove it when the batch expires.
 
+For the optional inbox receipt preflight, also keep value-free state keyed by
+the normalized configured backend origin, exact batch ID, and a local hash of
+the immutable ordered frozen member IDs: `not_offered`, `declined`, `unavailable`,
+`search_failed`, `consented_pending`, or `completed`. This state and its
+batch-scoped consent never go to Trackly. On recovery, do not repeat `declined`,
+`unavailable`, `search_failed`, or `completed`. When an opted-in user explicitly pauses to connect an inbox, keep
+`consented_pending`; use `unavailable` only when the user continues without the
+optional check. Resume `consented_pending` only after the current normalized
+backend origin, exact batch ID, and immutable membership hash all match the
+stored key, then require the user to re-select or confirm the exact inbox
+connector and account. A numeric batch ID match alone is never sufficient. Never
+substitute the client's current default mailbox. Keep `consented_pending` until
+there are no positive matches or every positive match is durably recorded and,
+when submission authority exists, reconciled, and every match has an explicit
+`reconciled` or local value-free `cleared_by_user` disposition. A matched member
+without an explicit disposition remains free of form mutation. If a bounded
+connector query fails before any positive match, set terminal `search_failed`
+before continuing browser work. If a later query fails after positive matches
+already exist, retain value-free local classifications for those members, keep
+them mutation-free under `consented_pending` until explicitly dispositioned,
+classify the remaining unsearched members locally as query-failed, and never
+rerun inbox search after browser mutation. After the retained matches are
+resolved, transition the batch to terminal `search_failed`, not `completed`.
+If `trackly_start_apply_run` later returns a non-null `executionBlocker` for a
+member that had no static exclusion, classify that member locally as
+runtime-blocked and remove it from the optional preflight completion gate.
+Never create a browser binding or receipt-evidence write forbidden by the
+runtime blocker. Preserve the member without mutation, do not mark it Applied
+from the receipt, and continue unaffected siblings.
+If the ledger state is absent
+before any inbox search or form mutation, make a fresh offer and never infer
+consent or completion. Remove this state when the batch expires.
+
 Backend observations contain only a value-free binding hash, inspection epoch,
 ownership state, lifecycle/action codes, and timestamps. Never send the URL,
 tab title, employer, role, page text, credentials, or answer values as browser
