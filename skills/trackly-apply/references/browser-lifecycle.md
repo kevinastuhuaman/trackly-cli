@@ -17,10 +17,13 @@ For the optional inbox receipt preflight, also keep value-free state keyed
 by the exact batch ID: `not_offered`, `declined`, `unavailable`,
 `consented_pending`, or `completed`. This state and its batch-scoped consent
 never go to Trackly. On recovery, do not repeat `declined`, `unavailable`, or
-`completed`; resume `consented_pending` only for the same verified batch. If
-the ledger state is absent before any inbox search or form mutation, make a
-fresh offer and never infer consent or completion. Remove this state when the
-batch expires.
+`completed`; resume `consented_pending` only for the same verified batch after
+the user re-selects or confirms the exact inbox connector and account. Never
+substitute the client's current default mailbox. Keep `consented_pending` until
+there are no positive matches or every positive match is durably recorded and,
+when submission authority exists, reconciled. If the ledger state is absent
+before any inbox search or form mutation, make a fresh offer and never infer
+consent or completion. Remove this state when the batch expires.
 
 Backend observations contain only a value-free binding hash, inspection epoch,
 ownership state, lifecycle/action codes, and timestamps. Never send the URL,

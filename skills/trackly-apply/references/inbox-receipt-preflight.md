@@ -26,9 +26,18 @@ Record only the value-free preflight state in the private local batch ledger:
 `not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`.
 Never send this state or its batch-scoped consent to Trackly. On recovery, do
 not repeat a `declined`, `unavailable`, or `completed` preflight. Resume a
-`consented_pending` search only after verifying the exact same batch ID. If the
-local state is absent before any inbox search or form mutation, make a fresh
-offer; never infer consent or completion.
+`consented_pending` search only after verifying the exact same batch ID and
+asking the user to re-select or confirm the exact inbox connector and account.
+Never use a current client default or another connected mailbox as a substitute.
+If the local state is absent before any inbox search or form mutation, make a
+fresh offer; never infer consent or completion.
+
+Set `completed` only after the bounded search finds no positive matches or every
+positive match has been durably recorded against the exact member and run. When
+submission authority also exists, finish its documented outcome reconciliation
+before completion. If a positive match still exists only in session memory or
+any durable recording/reconciliation step fails, keep `consented_pending`,
+preserve that member without form mutation, and continue unaffected siblings.
 
 ## Search minimally
 
