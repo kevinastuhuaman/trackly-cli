@@ -77,12 +77,15 @@ smallest bounded window that can identify the frozen batch:
 1. Prefer the exact requisition ID when one is known, but always combine it
    with the same employer or verified ATS tenant/sender identity. A bare
    requisition identifier is not globally unique and is never sufficient.
-2. Otherwise combine employer and exact or near-exact role with a bounded
-   pre-batch lookback that can contain a prior submission. Use the job's known
-   posting-to-freeze interval. If no trustworthy posting timestamp exists, ask
-   the user to select a historical range; never silently search the whole
-   mailbox. If the user does not select one, skip receipt discovery for that
-   member and continue the application normally.
+2. Otherwise combine employer and exact or near-exact role with an approved
+   bounded lookback that can contain a prior submission. Use the job's known
+   posting-to-current-preflight interval. Its upper bound is the actual search
+   time, never the earlier batch-freeze time, so recovery includes a manual
+   submission made after freezing. If no trustworthy posting timestamp exists,
+   ask the user to select a historical range ending at the current search;
+   never silently search the whole mailbox. If the user does not select one,
+   skip receipt discovery for that member and continue the application
+   normally.
 3. Read message metadata or summaries first. Read raw message content only when
    necessary to resolve the exact job identity.
 4. Stop searching when every frozen member is classified or the bounded query
