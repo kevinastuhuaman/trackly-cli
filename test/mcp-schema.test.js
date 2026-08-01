@@ -760,8 +760,11 @@ test('trackly_search_jobs defaults jobFunction to ALL functions when caller omit
 });
 
 test('sensitive consent revocation fails closed on malformed profile or schema responses', async (t) => {
-  const goodFields = { 'eeo.gender': { state: 'answered' } };
-  const goodSchema = [{ key: 'eeo.gender', storage: 'answer', sensitivity: 'restricted' }];
+  const goodFields = { 'eeo.gender': { state: 'answered' }, 'identity.first_name': { state: 'answered' } };
+  const goodSchema = [
+    { key: 'eeo.gender', storage: 'answer', sensitivity: 'restricted' },
+    { key: 'identity.first_name', storage: 'answer', sensitivity: 'standard' },
+  ];
   let mode = 'missing-revision';
   const requests = [];
   const httpServer = http.createServer((req, res) => {
@@ -781,6 +784,8 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': null } } }));
         } else if (mode === 'stateless-field-entry') {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': {} } } }));
+        } else if (mode === 'truncated-profile') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': { state: 'answered' } } } }));
         } else {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: goodFields } }));
         }
@@ -789,6 +794,8 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
       if (req.method === 'GET' && req.url === '/api/jobscout/application-profile/schema') {
         if (mode === 'empty-schema') {
           res.end(JSON.stringify({ success: true, fields: [] }));
+        } else if (mode === 'truncated-schema') {
+          res.end(JSON.stringify({ success: true, fields: [goodSchema[1]] }));
         } else if (mode === 'null-schema-entry') {
           res.end(JSON.stringify({ success: true, fields: [null] }));
         } else if (mode === 'partial-schema-entry') {
@@ -832,6 +839,8 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
     { mode: 'array-fields', code: 'invalid_profile_response' },
     { mode: 'null-field-entry', code: 'invalid_profile_response' },
     { mode: 'stateless-field-entry', code: 'invalid_profile_response' },
+    { mode: 'truncated-schema', code: 'invalid_profile_response' },
+    { mode: 'truncated-profile', code: 'invalid_profile_response' },
     { mode: 'empty-schema', code: 'invalid_profile_response' },
     { mode: 'null-schema-entry', code: 'invalid_profile_response' },
     { mode: 'partial-schema-entry', code: 'invalid_profile_response' },

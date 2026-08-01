@@ -236,7 +236,14 @@ function registerApplyTools(
           && Object.values(profileFieldsShape).every((entry) => entry
             && typeof entry === 'object' && !Array.isArray(entry)
             && typeof entry.state === 'string');
-        if (!profileEntriesValid || !schemaEntriesValid) {
+        const profileKeyList = profileEntriesValid ? Object.keys(profileFieldsShape) : [];
+        const schemaKeySet = new Set(
+          schemaEntriesValid ? schemaFieldsShape.map((field) => field.key) : [],
+        );
+        const catalogConsistent = profileEntriesValid && schemaEntriesValid
+          && profileKeyList.length === schemaKeySet.size
+          && profileKeyList.every((key) => schemaKeySet.has(key));
+        if (!profileEntriesValid || !schemaEntriesValid || !catalogConsistent) {
           throw {
             status: 502,
             code: 'invalid_profile_response',
