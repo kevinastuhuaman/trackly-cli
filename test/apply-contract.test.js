@@ -558,6 +558,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
 
   assert.doesNotMatch(promptRegion, /never search a mailbox/i);
   assert.doesNotMatch(promptRegion, /skill 4\.2\.6 or newer/i);
+  assert.match(promptRegion, /Before mutating the first form in a newly frozen batch/i);
   assert.match(promptRegion, /make its one non-mutating offer[\s\S]*search an inbox connector only after explicit batch-scoped user opt-in/i);
   assert.match(promptRegion, /Never inspect any unrelated private-data source[\s\S]*only the separately connected inbox connector the user approved for this exact batch/i);
   assert.match(promptRegion, /Without a requisition ID[\s\S]*must not be recorded as provider_receipt_detected until the user explicitly confirms that it belongs to the current batch member/i);
