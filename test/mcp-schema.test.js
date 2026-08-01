@@ -759,12 +759,11 @@ test('trackly_search_jobs defaults jobFunction to ALL functions when caller omit
   );
 });
 
-test('sensitive consent revocation fails closed on malformed profile or schema responses', async (t) => {
-  const goodFields = { 'eeo.gender': { state: 'answered' }, 'identity.first_name': { state: 'answered' } };
-  const goodSchema = [
-    { key: 'eeo.gender', storage: 'answer', sensitivity: 'restricted' },
-    { key: 'identity.first_name', storage: 'answer', sensitivity: 'standard' },
-  ];
+test('sensitive consent revocation fails closed on malformed profile responses', async (t) => {
+  const goodFields = {
+    'eeo.gender': { state: 'answered', sensitivity: 'restricted', encrypted: true },
+    'identity.first_name': { state: 'answered', sensitivity: 'standard', encrypted: false },
+  };
   let mode = 'missing-revision';
   const requests = [];
   const httpServer = http.createServer((req, res) => {
@@ -784,24 +783,10 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': null } } }));
         } else if (mode === 'stateless-field-entry') {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': {} } } }));
-        } else if (mode === 'truncated-profile') {
-          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': { state: 'answered' } } } }));
+        } else if (mode === 'sensitivity-less-entry') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': { state: 'answered', encrypted: true } } } }));
         } else {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: goodFields } }));
-        }
-        return;
-      }
-      if (req.method === 'GET' && req.url === '/api/jobscout/application-profile/schema') {
-        if (mode === 'empty-schema') {
-          res.end(JSON.stringify({ success: true, fields: [] }));
-        } else if (mode === 'truncated-schema') {
-          res.end(JSON.stringify({ success: true, fields: [goodSchema[1]] }));
-        } else if (mode === 'null-schema-entry') {
-          res.end(JSON.stringify({ success: true, fields: [null] }));
-        } else if (mode === 'partial-schema-entry') {
-          res.end(JSON.stringify({ success: true, fields: [{ key: 'eeo.gender', storage: 'answer' }] }));
-        } else {
-          res.end(JSON.stringify({ success: true, fields: goodSchema }));
         }
         return;
       }
@@ -839,11 +824,7 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
     { mode: 'array-fields', code: 'invalid_profile_response' },
     { mode: 'null-field-entry', code: 'invalid_profile_response' },
     { mode: 'stateless-field-entry', code: 'invalid_profile_response' },
-    { mode: 'truncated-schema', code: 'invalid_profile_response' },
-    { mode: 'truncated-profile', code: 'invalid_profile_response' },
-    { mode: 'empty-schema', code: 'invalid_profile_response' },
-    { mode: 'null-schema-entry', code: 'invalid_profile_response' },
-    { mode: 'partial-schema-entry', code: 'invalid_profile_response' },
+    { mode: 'sensitivity-less-entry', code: 'invalid_profile_response' },
   ];
   for (const testCase of cases) {
     mode = testCase.mode;
@@ -862,23 +843,24 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
 
 test('sensitive consent revocation requires an echoed confirmation token before any PATCH', async (t) => {
   const { createHash } = require('node:crypto');
+  // Answer-row entries carry an `encrypted` boolean + PERSISTED row sensitivity
+  // (the backend DELETE's own predicate). Profile-column / backfilled entries
+  // never carry `encrypted` and are never deleted.
   const profileFields = {
-    'eeo.gender': { state: 'answered' },
-    'identity.age_18_or_older': { state: 'declined' },
-    'location.residential_city': { state: 'answered' },
-    'authorization.visa_type': { state: 'unknown' },
-    'identity.email': { state: 'answered' },
-    'identity.first_name': { state: 'answered' },
+    'eeo.gender': { state: 'answered', sensitivity: 'restricted', encrypted: true },
+    'identity.age_18_or_older': { state: 'declined', sensitivity: 'sensitive', encrypted: true },
+    'location.residential_city': { state: 'answered', sensitivity: 'restricted', encrypted: true },
+    'legacy.retired_question': { state: 'answered', sensitivity: 'sensitive', encrypted: true },
+    'authorization.visa_type': { state: 'unknown', sensitivity: 'restricted' },
+    'identity.email': { state: 'answered', sensitivity: 'sensitive' },
+    'identity.first_name': { state: 'answered', sensitivity: 'standard', encrypted: false },
   };
-  const schemaFields = [
-    { key: 'eeo.gender', storage: 'answer', sensitivity: 'restricted' },
-    { key: 'identity.age_18_or_older', storage: 'answer', sensitivity: 'sensitive' },
-    { key: 'location.residential_city', storage: 'answer', sensitivity: 'restricted' },
-    { key: 'authorization.visa_type', storage: 'answer', sensitivity: 'restricted' },
-    { key: 'identity.email', storage: 'profile', sensitivity: 'sensitive' },
-    { key: 'identity.first_name', storage: 'answer', sensitivity: 'standard' },
+  const expectedAffectedKeys = [
+    'eeo.gender',
+    'identity.age_18_or_older',
+    'legacy.retired_question',
+    'location.residential_city',
   ];
-  const expectedAffectedKeys = ['eeo.gender', 'identity.age_18_or_older', 'location.residential_city'];
   const tokenFor = (revision, keys) => createHash('sha256')
     .update(`trackly:sensitive-revocation:v1:${revision}:${keys.join(',')}`, 'utf8')
     .digest('hex');
@@ -896,10 +878,6 @@ test('sensitive consent revocation requires an echoed confirmation token before 
           success: true,
           profile: { revision: profileRevision, sensitiveStorage: { consented: true }, fields: profileFields },
         }));
-        return;
-      }
-      if (req.method === 'GET' && req.url === '/api/jobscout/application-profile/schema') {
-        res.end(JSON.stringify({ success: true, fields: schemaFields }));
         return;
       }
       if (req.method === 'PATCH' && req.url === '/api/jobscout/application-profile') {
@@ -959,9 +937,9 @@ test('sensitive consent revocation requires an echoed confirmation token before 
   assert.equal(challenge.confirmation.currentRevision, 7);
   assert.deepEqual(challenge.confirmation.affectedKeys, expectedAffectedKeys);
   assert.equal(challenge.confirmation.confirmationToken, tokenFor(7, expectedAffectedKeys));
+  assert.match(challenge.confirmation.instructions, /Do not retry automatically\./);
   assert.deepEqual(requests.map(({ method, url }) => ({ method, url })), [
     { method: 'GET', url: '/api/jobscout/application-profile' },
-    { method: 'GET', url: '/api/jobscout/application-profile/schema' },
   ], 'MCP revocation challenge must not send a PATCH');
 
   const confirmedResult = await client.callTool({

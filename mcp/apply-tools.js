@@ -20,17 +20,19 @@ const APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST = 20;
 const APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT = 25;
 const APPLY_BATCH_MAX_BULK_MUTATIONS = 20;
 
-function sensitiveRevocationConfirmation(profileResponse, schemaResponse) {
+function sensitiveRevocationConfirmation(profileResponse) {
   const profile = profileResponse?.profile || {};
   const currentRevision = Number(profile.revision);
   const fields = profile.fields || {};
-  const deletableKeys = new Set(
-    (Array.isArray(schemaResponse?.fields) ? schemaResponse.fields : [])
-      .filter((field) => field && field.storage === 'answer' && field.sensitivity !== 'standard')
-      .map((field) => field.key)
-  );
+  // Stored answer rows serialize an `encrypted` boolean plus their PERSISTED
+  // row sensitivity — the same predicate the backend DELETE uses. Profile-column
+  // and backfilled entries never carry `encrypted` and are never deleted.
   const affectedKeys = Object.keys(fields)
-    .filter((key) => deletableKeys.has(key) && fields[key]?.state && fields[key].state !== 'unknown')
+    .filter((key) => {
+      const entry = fields[key];
+      return entry && typeof entry.encrypted === 'boolean'
+        && (entry.sensitivity === 'sensitive' || entry.sensitivity === 'restricted');
+    })
     .sort();
   const confirmationToken = createHash('sha256')
     .update(`trackly:sensitive-revocation:v1:${currentRevision}:${affectedKeys.join(',')}`, 'utf8')
@@ -207,13 +209,9 @@ function registerApplyTools(
     wrapTool(async (params) => {
       const { sensitiveRevocationConfirmToken, ...body } = params;
       if (body.sensitiveStorageConsent === false) {
-        const [profileResponse, schemaResponse] = await Promise.all([
-          apiRequest('GET', '/api/jobscout/application-profile', null, false, false, MCP_USER_AGENT),
-          apiRequest('GET', '/api/jobscout/application-profile/schema', null, false, false, MCP_USER_AGENT),
-        ]);
-        const { currentRevision, affectedKeys, confirmationToken } =
-          sensitiveRevocationConfirmation(profileResponse, schemaResponse);
-        if (!Number.isSafeInteger(currentRevision) || currentRevision < 1) {
+        const profileResponse = await apiRequest('GET', '/api/jobscout/application-profile', null, false, false, MCP_USER_AGENT);
+        const rawRevision = Number(profileResponse?.profile?.revision);
+        if (!Number.isSafeInteger(rawRevision) || rawRevision < 1) {
           throw {
             status: 502,
             code: 'invalid_profile_revision',
@@ -221,35 +219,23 @@ function registerApplyTools(
           };
         }
         const profileFieldsShape = profileResponse?.profile?.fields;
-        const schemaFieldsShape = schemaResponse?.fields;
-        const schemaEntriesValid = Array.isArray(schemaFieldsShape)
-          && schemaFieldsShape.length > 0
-          && schemaFieldsShape.every((field) => field
-            && typeof field === 'object' && !Array.isArray(field)
-            && typeof field.key === 'string'
-            && typeof field.storage === 'string'
-            && typeof field.sensitivity === 'string');
         const profileEntriesValid = !!profileFieldsShape
           && typeof profileFieldsShape === 'object'
           && !Array.isArray(profileFieldsShape)
           && Object.keys(profileFieldsShape).length > 0
           && Object.values(profileFieldsShape).every((entry) => entry
             && typeof entry === 'object' && !Array.isArray(entry)
-            && typeof entry.state === 'string');
-        const profileKeyList = profileEntriesValid ? Object.keys(profileFieldsShape) : [];
-        const schemaKeySet = new Set(
-          schemaEntriesValid ? schemaFieldsShape.map((field) => field.key) : [],
-        );
-        const catalogConsistent = profileEntriesValid && schemaEntriesValid
-          && profileKeyList.length === schemaKeySet.size
-          && profileKeyList.every((key) => schemaKeySet.has(key));
-        if (!profileEntriesValid || !schemaEntriesValid || !catalogConsistent) {
+            && typeof entry.state === 'string'
+            && typeof entry.sensitivity === 'string');
+        if (!profileEntriesValid) {
           throw {
             status: 502,
             code: 'invalid_profile_response',
-            error: 'Trackly returned an incomplete profile or schema, so the deletion scope cannot be verified. No changes were saved.',
+            error: 'Trackly returned an incomplete profile, so the deletion scope cannot be verified. No changes were saved.',
           };
         }
+        const { currentRevision, affectedKeys, confirmationToken } =
+          sensitiveRevocationConfirmation(profileResponse);
         if (sensitiveRevocationConfirmToken !== confirmationToken || body.expectedRevision !== currentRevision) {
           throw {
             status: 409,
@@ -258,7 +244,7 @@ function registerApplyTools(
             confirmation: {
               currentRevision,
               affectedKeys,
-              alsoDeletes: 'Every provider- and company-scoped sensitive or restricted answer is also deleted, as are answers stored under retired catalog keys; those keys are not listed here.',
+              alsoDeletes: 'Every provider- and company-scoped sensitive or restricted answer is also deleted, along with any stored rows not visible in this profile view; those keys are not listed here.',
               confirmationToken,
               instructions: 'Do not retry automatically. Show the user the affected keys and get explicit confirmation, then retry with the FULL original request body (including any changes, education, or confirmProfile fields) plus expectedRevision=currentRevision and sensitiveRevocationConfirmToken=confirmationToken. If the original call carried other changes, re-read the profile first and reconcile them against the current revision instead of resending stale changes blindly. The token becomes invalid whenever the profile revision changes.',
             },
