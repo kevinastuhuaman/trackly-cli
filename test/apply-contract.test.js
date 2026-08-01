@@ -487,19 +487,19 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /Require skill 4\.2\.6 or newer/);
+  assert.match(promptRegion, /requires skill 4\.2\.7 or newer/i);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.6 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.7 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.6 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.7 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.6/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.7/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 
@@ -535,13 +535,19 @@ test('Apply MCP prompt does not retain superseded compatibility wording', () => 
   assert.match(promptRegion, /protocol 3\.3\.1 success-page evidence remains ineligible/i);
 });
 
-test('Apply skill and MCP prompt keep receipt discovery scoped and executable', () => {
+test('Apply skill and MCP prompt offer privacy-safe external inbox receipt discovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  const inboxPreflight = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'inbox-receipt-preflight.md'),
+    'utf8',
+  );
   const promptRegion = source.slice(source.indexOf("server.registerPrompt('trackly-apply'"));
 
   for (const text of [skill, promptRegion]) {
-    assert.doesNotMatch(text, /search a connected mailbox when available/i);
-    assert.match(text, /never search a mailbox/i);
+    assert.match(text, /Trackly (?:itself )?(?:never|does not) (?:receive|access).*mailbox|Trackly remains mailbox-blind/i);
+    assert.match(text, /explicit.*batch-scoped.*consent/i);
+    assert.match(text, /connector (?:presence|availability).*not consent/i);
+    assert.match(text, /declines?.*continue|skip.*without blocking/i);
     assert.match(text, /user suppl(?:ies|ied)|user supplies|user supplied/i);
     assert.match(text, /bound application surface|bound application/i);
     assert.match(text, /without entering private data/i);
@@ -549,6 +555,15 @@ test('Apply skill and MCP prompt keep receipt discovery scoped and executable', 
     assert.match(text, /receipt (?:verifies|proves) (?:job )?identity|receipt proves identity/i);
     assert.match(text, /accessible members before (?:known )?credential-gated members/i);
   }
+
+  assert.match(inboxPreflight, /agent-side connector/i);
+  assert.match(inboxPreflight, /client-appropriate setup\s+guidance/i);
+  assert.match(inboxPreflight, /raw message content[\s\S]*stays? local/i);
+  assert.match(inboxPreflight, /never send[\s\S]*message IDs[\s\S]*Trackly/i);
+  assert.match(inboxPreflight, /exact requisition/i);
+  assert.match(inboxPreflight, /same employer.*different role/i);
+  assert.match(inboxPreflight, /receipt alone.*never authorizes/i);
+  assert.match(inboxPreflight, /continue the batch normally/i);
 });
 
 test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-08-01
+
+### Added
+
+- Trackly Apply skill 4.2.7 offers a one-time, batch-scoped duplicate-receipt
+  check through a user's separately connected agent inbox. Trackly remains
+  mailbox-blind, connector availability is never treated as consent, and
+  declining or lacking a connector never blocks application work.
+- Inbox receipt matches remain local and may produce only the existing redacted
+  provider-receipt evidence. A receipt still cannot authorize submission or an
+  Applied status without a success page or explicit user confirmation.
+
 ## [0.9.5] - 2026-07-31
 
 ### Fixed
