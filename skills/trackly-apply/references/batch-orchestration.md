@@ -63,7 +63,12 @@ resume approval, one truth certification, one
 `trackly_record_application_outcomes` call, and one final refresh. An existing
 active batch omits the create call. Do not replace bulk observations,
 checkpoints, or outcomes with per-member requests. Resume download and exact
-local verification are excluded from this count. Each member that encounters
+local verification are excluded from this count. Optional external inbox
+connector traffic is also excluded because it never reaches Trackly's MCP or
+HTTP API; bound it separately to one connector capability check plus at most one
+initial query and one identity-refinement query per executable member (`1 + 2E`,
+where `E` cannot exceed 20). Stop when the bounded query is exhausted and never
+expand to an unbounded mailbox search. Each member that encounters
 the one permitted retryable bound-start failure receives exactly three
 additional recovery calls: refetch the active batch, renew its lease, and retry
 the same binding. Therefore the bounded contingency budget is `52 + (3 * R)`,
@@ -76,8 +81,11 @@ provider-receipt evidence write, one success-page or explicit-user-confirmation
 evidence write, one submitted-outcome write, one durable-state refetch, and the
 three separate close-proof evidence writes. Therefore a batch containing both
 retryable start recovery and reconciled duplicates uses the bounded budget
-`52 + (3 * R) + (7 * D)`, where `D` is the number of reconciled duplicates and
-cannot exceed 20. Never spend the duplicate allowance without the normal
+`52 + (3 * R) + (7 * D) + C`, where `D` is the number of reconciled duplicates,
+and `C` is the number of positive matches durably recorded and then explicitly
+cleared by the user without reconciliation. Each cleared match adds exactly one
+provider-receipt evidence write; `D + C` cannot exceed 20. Never spend the
+duplicate allowance without the normal
 success-page or explicit-user-confirmation authority, and never omit the
 durable refetch or three-part close proof merely to remain under budget.
 
