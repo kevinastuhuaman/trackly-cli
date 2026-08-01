@@ -562,6 +562,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(promptRegion, /make its one non-mutating offer[\s\S]*search an inbox connector only after explicit batch-scoped user opt-in/i);
   assert.match(promptRegion, /Never inspect any unrelated private-data source[\s\S]*only the separately connected inbox connector the user approved for this exact batch/i);
   assert.match(promptRegion, /recovery of consented_pending[\s\S]*re-select or confirm the exact inbox connector and account[\s\S]*never substitute a client default/i);
+  assert.match(promptRegion, /no connector is callable[\s\S]*continues without the check[\s\S]*unavailable[\s\S]*pauses for setup[\s\S]*consented_pending/i);
   assert.match(promptRegion, /Mark completed only after no positive match exists or every executable positive match is durably recorded[\s\S]*Otherwise retain consented_pending/i);
   assert.match(promptRegion, /approved pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*historical range the user selects[\s\S]*never search the whole mailbox/i);
   assert.match(promptRegion, /Scope search and completion only to executable frozen members without static exclusions[\s\S]*manual-only members are skipped[\s\S]*never require a forbidden run/i);
@@ -583,6 +584,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /`not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`/i);
   assert.match(inboxPreflight, /(?:local\s+|ledger\s+)?state is absent before any inbox search or form mutation[\s\S]*fresh\s+offer/i);
   assert.match(inboxPreflight, /re-select or confirm the exact inbox connector and account[\s\S]*Never use a current client default/i);
+  assert.match(inboxPreflight, /pauses?[\s\S]*keep `consented_pending`[\s\S]*`unavailable` only when[\s\S]*continue without the optional check/i);
   assert.match(inboxPreflight, /Set `completed` only after the bounded search finds no positive matches or every\s+positive match among executable members has been durably recorded/i);
   assert.match(inboxPreflight, /durable recording\/reconciliation step fails[\s\S]*keep\s+`consented_pending`/i);
   assert.match(promptRegion, /Mark completed only after[\s\S]*when submission authority exists[\s\S]*reconciled/i);
@@ -612,6 +614,8 @@ test('Apply receipt preflight rebinds an existing run instead of starting it aga
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   assert.match(skill, /If `runId` is absent[\s\S]*`trackly_start_apply_run` as the sanctioned idempotent start/i);
   assert.match(skill, /If `runId` exists but its browser binding is missing[\s\S]*never call `trackly_start_apply_run` again[\s\S]*`trackly_bind_apply_surface` with `recovery_binding`/i);
+  assert.match(skill, /call `trackly_start_apply_run` only when its `runId` is absent[\s\S]*When `runId` already exists[\s\S]*never invoke a later unconditional start step/i);
+  assert.match(skill, /When the member already has a `runId`[\s\S]*do not call `trackly_start_apply_run` in this or any subsequent start step/i);
 });
 
 test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {

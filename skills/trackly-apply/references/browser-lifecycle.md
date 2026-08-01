@@ -17,7 +17,9 @@ For the optional inbox receipt preflight, also keep value-free state keyed
 by the exact batch ID: `not_offered`, `declined`, `unavailable`,
 `consented_pending`, or `completed`. This state and its batch-scoped consent
 never go to Trackly. On recovery, do not repeat `declined`, `unavailable`, or
-`completed`; resume `consented_pending` only for the same verified batch after
+`completed`. When an opted-in user explicitly pauses to connect an inbox, keep
+`consented_pending`; use `unavailable` only when the user continues without the
+optional check. Resume `consented_pending` only for the same verified batch after
 the user re-selects or confirms the exact inbox connector and account. Never
 substitute the client's current default mailbox. Keep `consented_pending` until
 there are no positive matches or every positive match is durably recorded and,

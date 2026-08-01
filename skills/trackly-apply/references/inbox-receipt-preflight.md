@@ -20,12 +20,16 @@ connector, skip the check and continue the batch normally. Do not install or
 connect an inbox integration without the user's separate request. When the
 user opts in but no connector is callable, give client-appropriate setup
 guidance and continue the current batch unless the user explicitly asks to
-pause for setup.
+pause for setup. If the user pauses, keep `consented_pending`; after setup,
+resume only after the user re-selects or confirms the exact connector and
+account for this batch. Use `unavailable` only when no connector is callable
+and the user chooses to continue without the optional check.
 
 Record only the value-free preflight state in the private local batch ledger:
 `not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`.
 Never send this state or its batch-scoped consent to Trackly. On recovery, do
-not repeat a `declined`, `unavailable`, or `completed` preflight. Resume a
+not repeat a `declined`, `unavailable`, or `completed` preflight. A setup-paused
+opt-in remains `consented_pending`, not `unavailable`. Resume a
 `consented_pending` search only after verifying the exact same batch ID and
 asking the user to re-select or confirm the exact inbox connector and account.
 Never use a current client default or another connected mailbox as a substitute.
