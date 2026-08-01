@@ -587,7 +587,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /never send[\s\S]*message IDs[\s\S]*Trackly/i);
   assert.match(inboxPreflight, /exact requisition/i);
   assert.match(inboxPreflight, /same employer.*different role/i);
-  assert.match(inboxPreflight, /Without a requisition ID[\s\S]*user's\s+explicit[\s\S]*confirmation that the receipt belongs to that batch member/i);
+  assert.match(inboxPreflight, /Without a requisition ID[\s\S]*user's\s+explicit[\s\S]*confirmation that[\s\S]*the receipt belongs to that batch member/i);
   assert.match(inboxPreflight, /receipt alone.*never authorizes/i);
   assert.match(inboxPreflight, /continue[\s\S]*the batch normally/i);
   assert.match(inboxPreflight, /value-free preflight state[\s\S]*private local batch ledger/i);
@@ -607,6 +607,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(promptRegion, /Reconcile a confirmed submission[\s\S]*explicit user statement that it was not submitted[\s\S]*cleared_by_user/i);
   assert.match(inboxPreflight, /Set `completed` only after[\s\S]*submission authority also exists[\s\S]*outcome reconciliation[\s\S]*before completion/i);
   assert.match(inboxPreflight, /approved[\s\S]*bounded lookback[\s\S]*posting-to-current-preflight interval[\s\S]*actual search[\s\S]*manual[\s\S]*submission made after freezing[\s\S]*historical range ending at the current search[\s\S]*never silently search the whole mailbox/i);
+  assert.doesNotMatch(inboxPreflight, /pre-batch lookback|posting-to-freeze/i);
   assert.match(inboxPreflight, /Scope both search and\s+completion to executable frozen[\s\S]*manual-only members[\s\S]*do not block `completed`[\s\S]*never create a forbidden run/i);
   assert.match(inboxPreflight, /runtime `executionBlocker`[\s\S]*reclassify it locally as[\s\S]*runtime-blocked[\s\S]*exclude it from the optional preflight completion gate[\s\S]*Never create a forbidden browser binding or evidence write/i);
   assert.match(inboxPreflight, /exact requisition ID[\s\S]*same employer or verified ATS tenant\/sender identity[\s\S]*bare\s+requisition identifier is not globally unique/i);

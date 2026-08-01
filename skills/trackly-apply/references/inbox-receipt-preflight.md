@@ -112,8 +112,9 @@ state in Trackly.
   tenant/sender identity is strong duplicate evidence. A bare requisition ID
   is not.
 - Without a requisition ID, require the same employer, exact or near-exact
-  role, a timestamp inside the approved pre-batch lookback, and the user's
-  explicit confirmation that the receipt belongs to that batch member.
+  role, a timestamp inside the approved posting-to-current-preflight or
+  user-selected historical interval, and the user's explicit confirmation that
+  the receipt belongs to that batch member.
 - Same employer plus a materially different role is negative evidence for the
   current member. Keep the member and its tab.
 - An ambiguous or missing match changes nothing. Continue the application.
