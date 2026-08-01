@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-01
+
+### Changed
+
+- `trackly_update_application_profile` now forwards the full request —
+  including `sensitiveRevocationConfirmToken` — to the backend, which owns
+  the sensitive-storage revocation guard at the service layer (close-ai
+  #1294). The local pre-flight guard is removed so no client-side copy can
+  drift or be bypassed by version skew; the service's 409 challenge is
+  relayed verbatim.
+
 ## [0.10.1] - 2026-08-01
 
 ### Added

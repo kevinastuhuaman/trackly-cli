@@ -99,6 +99,11 @@ function createErrorResult(error, fallbackMessage, extra = {}) {
     payload.confirmation = error.confirmation;
   }
 
+  if (error?.status === 409 && error?.error === 'sensitive_revocation_confirmation_required' && error?.confirmation) {
+    payload.code = error.error;
+    payload.confirmation = error.confirmation;
+  }
+
   if (error?.status === 409 && error?.error === 'preference_revision_conflict') {
     payload.preferences = error.preferences;
     payload.discoveryPreferenceRevision = error.discoveryPreferenceRevision;
