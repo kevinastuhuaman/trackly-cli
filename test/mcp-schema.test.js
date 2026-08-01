@@ -775,13 +775,23 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
           res.end(JSON.stringify({ success: true, profile: { sensitiveStorage: { consented: true }, fields: goodFields } }));
         } else if (mode === 'missing-fields') {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true } } }));
+        } else if (mode === 'array-fields') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: ['eeo.gender'] } }));
         } else {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: goodFields } }));
         }
         return;
       }
       if (req.method === 'GET' && req.url === '/api/jobscout/application-profile/schema') {
-        res.end(JSON.stringify(mode === 'empty-schema' ? { success: true, fields: [] } : { success: true, fields: goodSchema }));
+        if (mode === 'empty-schema') {
+          res.end(JSON.stringify({ success: true, fields: [] }));
+        } else if (mode === 'null-schema-entry') {
+          res.end(JSON.stringify({ success: true, fields: [null] }));
+        } else if (mode === 'partial-schema-entry') {
+          res.end(JSON.stringify({ success: true, fields: [{ key: 'eeo.gender', storage: 'answer' }] }));
+        } else {
+          res.end(JSON.stringify({ success: true, fields: goodSchema }));
+        }
         return;
       }
       res.statusCode = 500;
@@ -815,7 +825,10 @@ test('sensitive consent revocation fails closed on malformed profile or schema r
   const cases = [
     { mode: 'missing-revision', code: 'invalid_profile_revision' },
     { mode: 'missing-fields', code: 'invalid_profile_response' },
+    { mode: 'array-fields', code: 'invalid_profile_response' },
     { mode: 'empty-schema', code: 'invalid_profile_response' },
+    { mode: 'null-schema-entry', code: 'invalid_profile_response' },
+    { mode: 'partial-schema-entry', code: 'invalid_profile_response' },
   ];
   for (const testCase of cases) {
     mode = testCase.mode;

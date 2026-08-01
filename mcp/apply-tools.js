@@ -222,10 +222,18 @@ function registerApplyTools(
         }
         const profileFieldsShape = profileResponse?.profile?.fields;
         const schemaFieldsShape = schemaResponse?.fields;
+        const schemaEntriesValid = Array.isArray(schemaFieldsShape)
+          && schemaFieldsShape.length > 0
+          && schemaFieldsShape.every((field) => field
+            && typeof field === 'object' && !Array.isArray(field)
+            && typeof field.key === 'string'
+            && typeof field.storage === 'string'
+            && typeof field.sensitivity === 'string');
         if (
           !profileFieldsShape || typeof profileFieldsShape !== 'object'
+          || Array.isArray(profileFieldsShape)
           || Object.keys(profileFieldsShape).length === 0
-          || !Array.isArray(schemaFieldsShape) || schemaFieldsShape.length === 0
+          || !schemaEntriesValid
         ) {
           throw {
             status: 502,
