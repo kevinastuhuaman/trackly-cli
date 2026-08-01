@@ -46,8 +46,12 @@ for this batch. Never inspect another unrelated private-data source. Search the
 smallest bounded window that can identify the frozen batch:
 
 1. Prefer the exact requisition ID when one is known.
-2. Otherwise combine employer, exact or near-exact role, and the known batch
-   time window.
+2. Otherwise combine employer and exact or near-exact role with a bounded
+   pre-batch lookback that can contain a prior submission. Use the job's known
+   posting-to-freeze interval. If no trustworthy posting timestamp exists, ask
+   the user to select a historical range; never silently search the whole
+   mailbox. If the user does not select one, skip receipt discovery for that
+   member and continue the application normally.
 3. Read message metadata or summaries first. Read raw message content only when
    necessary to resolve the exact job identity.
 4. Stop searching when every frozen member is classified or the bounded query
@@ -63,8 +67,8 @@ state in Trackly.
 
 - Exact requisition identity is strong duplicate evidence.
 - Without a requisition ID, require the same employer, exact or near-exact
-  role, a timestamp inside the known batch window, and the user's explicit
-  confirmation that the receipt belongs to that batch member.
+  role, a timestamp inside the approved pre-batch lookback, and the user's
+  explicit confirmation that the receipt belongs to that batch member.
 - Same employer plus a materially different role is negative evidence for the
   current member. Keep the member and its tab.
 - An ambiguous or missing match changes nothing. Continue the application.

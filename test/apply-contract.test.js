@@ -563,6 +563,8 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(promptRegion, /Never inspect any unrelated private-data source[\s\S]*only the separately connected inbox connector the user approved for this exact batch/i);
   assert.match(promptRegion, /recovery of consented_pending[\s\S]*re-select or confirm the exact inbox connector and account[\s\S]*never substitute a client default/i);
   assert.match(promptRegion, /Mark completed only after no positive match exists or every positive match is durably recorded[\s\S]*Otherwise retain consented_pending/i);
+  assert.match(promptRegion, /approved pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*historical range the user selects[\s\S]*never search the whole mailbox/i);
+  assert.doesNotMatch(promptRegion, /known batch window/i);
   assert.match(promptRegion, /Without a requisition ID[\s\S]*must not be recorded as provider_receipt_detected until the user explicitly confirms that it belongs to the current batch member/i);
 
   assert.match(inboxPreflight, /agent-side connector/i);
@@ -571,7 +573,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /never send[\s\S]*message IDs[\s\S]*Trackly/i);
   assert.match(inboxPreflight, /exact requisition/i);
   assert.match(inboxPreflight, /same employer.*different role/i);
-  assert.match(inboxPreflight, /Without a requisition ID[\s\S]*user's explicit[\s\S]*confirmation that the receipt belongs to that batch member/i);
+  assert.match(inboxPreflight, /Without a requisition ID[\s\S]*user's\s+explicit[\s\S]*confirmation that the receipt belongs to that batch member/i);
   assert.match(inboxPreflight, /receipt alone.*never authorizes/i);
   assert.match(inboxPreflight, /continue the batch normally/i);
   assert.match(inboxPreflight, /value-free preflight state[\s\S]*private local batch ledger/i);
@@ -579,6 +581,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /(?:local\s+|ledger\s+)?state is absent before any inbox search or form mutation[\s\S]*fresh\s+offer/i);
   assert.match(inboxPreflight, /re-select or confirm the exact inbox connector and account[\s\S]*Never use a current client default/i);
   assert.match(inboxPreflight, /Set `completed` only after[\s\S]*no positive matches or every\s+positive match has been durably recorded[\s\S]*keep `consented_pending`/i);
+  assert.match(inboxPreflight, /pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*user to select a historical range[\s\S]*never silently search the whole\s+mailbox/i);
   assert.match(inboxPreflight, /verified duplicate[\s\S]*preserve that member without\s+form mutation[\s\S]*continue\s+unaffected siblings/i);
   assert.match(inboxPreflight, /Never inspect another unrelated private-data source/i);
 });
