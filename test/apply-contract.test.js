@@ -563,6 +563,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(promptRegion, /Never inspect any unrelated private-data source[\s\S]*only the separately connected inbox connector the user approved for this exact batch/i);
   assert.match(promptRegion, /recovery of consented_pending[\s\S]*re-select or confirm the exact inbox connector and account[\s\S]*never substitute a client default/i);
   assert.match(promptRegion, /no connector is callable[\s\S]*continues without the check[\s\S]*unavailable[\s\S]*pauses for setup[\s\S]*consented_pending/i);
+  assert.match(skill, /no connector is callable[\s\S]*user chooses to continue[\s\S]*explicitly pauses for setup[\s\S]*retain `consented_pending`[\s\S]*re-selects or confirms the exact connector and account/i);
   assert.match(promptRegion, /positive match lacks[\s\S]*submission confirmation[\s\S]*retain consented_pending[\s\S]*free of form mutation[\s\S]*ask the user/i);
   assert.match(promptRegion, /Durable receipt recording alone never permits refill or mutation/i);
   assert.match(promptRegion, /bounded connector query fails before any positive match[\s\S]*terminal search_failed before form mutation/i);
