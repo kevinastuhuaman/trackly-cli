@@ -785,6 +785,10 @@ test('sensitive consent revocation fails closed on malformed profile responses',
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': {} } } }));
         } else if (mode === 'sensitivity-less-entry') {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': { state: 'answered', encrypted: true } } } }));
+        } else if (mode === 'string-encrypted-marker') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': { state: 'answered', sensitivity: 'restricted', encrypted: 'true' } } } }));
+        } else if (mode === 'unknown-sensitivity') {
+          res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: { 'eeo.gender': { state: 'answered', sensitivity: 'secret', encrypted: true } } } }));
         } else {
           res.end(JSON.stringify({ success: true, profile: { revision: 7, sensitiveStorage: { consented: true }, fields: goodFields } }));
         }
@@ -825,6 +829,8 @@ test('sensitive consent revocation fails closed on malformed profile responses',
     { mode: 'null-field-entry', code: 'invalid_profile_response' },
     { mode: 'stateless-field-entry', code: 'invalid_profile_response' },
     { mode: 'sensitivity-less-entry', code: 'invalid_profile_response' },
+    { mode: 'string-encrypted-marker', code: 'invalid_profile_response' },
+    { mode: 'unknown-sensitivity', code: 'invalid_profile_response' },
   ];
   for (const testCase of cases) {
     mode = testCase.mode;

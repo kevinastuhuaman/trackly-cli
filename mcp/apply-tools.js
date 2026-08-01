@@ -226,7 +226,8 @@ function registerApplyTools(
           && Object.values(profileFieldsShape).every((entry) => entry
             && typeof entry === 'object' && !Array.isArray(entry)
             && typeof entry.state === 'string'
-            && typeof entry.sensitivity === 'string');
+            && (entry.sensitivity === 'standard' || entry.sensitivity === 'sensitive' || entry.sensitivity === 'restricted')
+            && (!('encrypted' in entry) || typeof entry.encrypted === 'boolean'));
         if (!profileEntriesValid) {
           throw {
             status: 502,
