@@ -530,6 +530,7 @@ test('Apply MCP prompt does not retain superseded compatibility wording', () => 
   const promptRegion = source.slice(source.indexOf("server.registerPrompt('trackly-apply'"));
   assert.doesNotMatch(promptRegion, /skill 4\.2\.5 or newer/i);
   assert.doesNotMatch(promptRegion, /Only when both the fetched protocol and the stored run protocol are 3\.3\.2 or newer/i);
+  assert.match(promptRegion, /With fetched Apply protocol 3\.3\.2 or newer, stale-projection reconciliation is available for current-epoch exact-requisition success-page or explicit user-confirmation evidence/i);
   assert.match(promptRegion, /stored protocol 3\.3\.1 run may be repaired only from retained current-epoch explicit user-confirmation evidence/i);
   assert.match(promptRegion, /protocol 3\.3\.1 success-page evidence remains ineligible/i);
 });
