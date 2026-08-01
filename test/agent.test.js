@@ -428,7 +428,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
   }];
   const current = agent.evaluateApplyCompatibility({
     version: '3.3.1',
-    mcpContractVersion: '3.3.1',
+    mcpContractVersion: '3.3.2',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.2.5',
@@ -441,7 +441,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
 
   const future = agent.evaluateApplyCompatibility({
     version: '3.3.1',
-    mcpContractVersion: '3.3.1',
+    mcpContractVersion: '3.3.2',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.3.0',
@@ -452,7 +452,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
 
   const missingMinimum = agent.evaluateApplyCompatibility({
     version: '3.3.1',
-    mcpContractVersion: '3.3.1',
+    mcpContractVersion: '3.3.2',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
   }, installed);
@@ -468,7 +468,7 @@ test('agent doctor compatibility rejects stale CLI and MCP contract versions', (
   }];
   const base = {
     version: '3.3.1',
-    mcpContractVersion: '3.3.1',
+    mcpContractVersion: '3.3.2',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.2.5',
@@ -476,7 +476,7 @@ test('agent doctor compatibility rejects stale CLI and MCP contract versions', (
 
   const staleCli = agent.evaluateApplyCompatibility({
     ...base,
-    compatibleCliMinimumVersion: '0.9.4',
+    compatibleCliMinimumVersion: '0.9.5',
   }, clients);
   assert.equal(staleCli.cliMinimumSatisfied, false);
   assert.equal(staleCli.compatible, false);
@@ -509,8 +509,8 @@ test('agent doctor fails browser readiness closed unless a full semantic surface
 test('agent doctor does not infer controller and user tab union inventory from plugin presence', async () => {
   await withTempAgentHomeAsync(async () => {
     const report = await agent.doctorAgent();
-    assert.equal(report.cliVersion, '0.9.3');
-    assert.equal(report.mcpContractVersion, '3.3.1');
+    assert.equal(report.cliVersion, '0.9.4');
+    assert.equal(report.mcpContractVersion, '3.3.2');
     assert.match(report.skillPackIntegrity.expectedDigest, /^[a-f0-9]{64}$/);
     assert.deepEqual(report.browserControl.tabInventory, {
       controllerOwnedTabs: 'runtime_verification_required',
