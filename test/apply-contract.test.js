@@ -487,7 +487,7 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /requires skill 4\.2\.7 or newer/i);
+  assert.match(promptRegion, /require(?:s)? skill 4\.2\.7 or newer/i);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
@@ -555,6 +555,9 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
     assert.match(text, /receipt (?:verifies|proves) (?:job )?identity|receipt proves identity/i);
     assert.match(text, /accessible members before (?:known )?credential-gated members/i);
   }
+
+  assert.doesNotMatch(promptRegion, /never search a mailbox/i);
+  assert.doesNotMatch(promptRegion, /skill 4\.2\.6 or newer/i);
 
   assert.match(inboxPreflight, /agent-side connector/i);
   assert.match(inboxPreflight, /client-appropriate setup\s+guidance/i);

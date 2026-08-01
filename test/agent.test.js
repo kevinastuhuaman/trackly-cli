@@ -62,6 +62,7 @@ test('agent setup installs one canonical skill and links both clients', () => {
     const result = agent.setupAgent('both');
     assert.equal(result.skillVersion, '4.2.7');
     assert.ok(fs.existsSync(path.join(result.canonical, 'SKILL.md')));
+    assert.ok(fs.existsSync(path.join(result.canonical, 'references', 'inbox-receipt-preflight.md')));
     assert.equal(result.clients.length, 2);
     for (const client of result.clients) {
       assert.ok(fs.existsSync(path.join(client.target, 'SKILL.md')));
