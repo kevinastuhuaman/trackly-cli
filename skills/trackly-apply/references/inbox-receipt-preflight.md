@@ -33,11 +33,16 @@ If the local state is absent before any inbox search or form mutation, make a
 fresh offer; never infer consent or completion.
 
 Set `completed` only after the bounded search finds no positive matches or every
-positive match has been durably recorded against the exact member and run. When
+positive match among executable members has been durably recorded against the
+exact member and run. Scope both search and completion to executable frozen
+members without a static exclusion. Skip retained inactive, insecure-URL, or
+protocol-declared manual-only members; they do not block `completed`, and the
+agent must never create a forbidden run merely to record a receipt. When
 submission authority also exists, finish its documented outcome reconciliation
-before completion. If a positive match still exists only in session memory or
-any durable recording/reconciliation step fails, keep `consented_pending`,
-preserve that member without form mutation, and continue unaffected siblings.
+before completion. If an executable member's positive match still exists only
+in session memory or any durable recording/reconciliation step fails, keep
+`consented_pending`, preserve that member without form mutation, and continue
+unaffected siblings.
 
 ## Search minimally
 
@@ -45,7 +50,9 @@ Use only the Gmail, Outlook, or other agent-side inbox connector the user chose
 for this batch. Never inspect another unrelated private-data source. Search the
 smallest bounded window that can identify the frozen batch:
 
-1. Prefer the exact requisition ID when one is known.
+1. Prefer the exact requisition ID when one is known, but always combine it
+   with the same employer or verified ATS tenant/sender identity. A bare
+   requisition identifier is not globally unique and is never sufficient.
 2. Otherwise combine employer and exact or near-exact role with a bounded
    pre-batch lookback that can contain a prior submission. Use the job's known
    posting-to-freeze interval. If no trustworthy posting timestamp exists, ask
@@ -65,7 +72,9 @@ state in Trackly.
 
 ## Match conservatively
 
-- Exact requisition identity is strong duplicate evidence.
+- Exact requisition identity plus the same employer or verified ATS
+  tenant/sender identity is strong duplicate evidence. A bare requisition ID
+  is not.
 - Without a requisition ID, require the same employer, exact or near-exact
   role, a timestamp inside the approved pre-batch lookback, and the user's
   explicit confirmation that the receipt belongs to that batch member.

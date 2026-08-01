@@ -562,8 +562,10 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(promptRegion, /make its one non-mutating offer[\s\S]*search an inbox connector only after explicit batch-scoped user opt-in/i);
   assert.match(promptRegion, /Never inspect any unrelated private-data source[\s\S]*only the separately connected inbox connector the user approved for this exact batch/i);
   assert.match(promptRegion, /recovery of consented_pending[\s\S]*re-select or confirm the exact inbox connector and account[\s\S]*never substitute a client default/i);
-  assert.match(promptRegion, /Mark completed only after no positive match exists or every positive match is durably recorded[\s\S]*Otherwise retain consented_pending/i);
+  assert.match(promptRegion, /Mark completed only after no positive match exists or every executable positive match is durably recorded[\s\S]*Otherwise retain consented_pending/i);
   assert.match(promptRegion, /approved pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*historical range the user selects[\s\S]*never search the whole mailbox/i);
+  assert.match(promptRegion, /Scope search and completion only to executable frozen members without static exclusions[\s\S]*manual-only members are skipped[\s\S]*never require a forbidden run/i);
+  assert.match(promptRegion, /exact requisition identity plus the same employer or verified ATS tenant\/sender identity[\s\S]*bare requisition ID is never sufficient/i);
   assert.doesNotMatch(promptRegion, /known batch window/i);
   assert.match(promptRegion, /Without a requisition ID[\s\S]*must not be recorded as provider_receipt_detected until the user explicitly confirms that it belongs to the current batch member/i);
 
@@ -580,8 +582,11 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /`not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`/i);
   assert.match(inboxPreflight, /(?:local\s+|ledger\s+)?state is absent before any inbox search or form mutation[\s\S]*fresh\s+offer/i);
   assert.match(inboxPreflight, /re-select or confirm the exact inbox connector and account[\s\S]*Never use a current client default/i);
-  assert.match(inboxPreflight, /Set `completed` only after[\s\S]*no positive matches or every\s+positive match has been durably recorded[\s\S]*keep `consented_pending`/i);
+  assert.match(inboxPreflight, /Set `completed` only after the bounded search finds no positive matches or every\s+positive match among executable members has been durably recorded/i);
+  assert.match(inboxPreflight, /durable recording\/reconciliation step fails[\s\S]*keep\s+`consented_pending`/i);
   assert.match(inboxPreflight, /pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*user to select a historical range[\s\S]*never silently search the whole\s+mailbox/i);
+  assert.match(inboxPreflight, /Scope both search and completion to executable frozen[\s\S]*manual-only members[\s\S]*do not block `completed`[\s\S]*never create a forbidden run/i);
+  assert.match(inboxPreflight, /exact requisition ID[\s\S]*same employer or verified ATS tenant\/sender identity[\s\S]*bare\s+requisition identifier is not globally unique/i);
   assert.match(inboxPreflight, /verified duplicate[\s\S]*preserve that member without\s+form mutation[\s\S]*continue\s+unaffected siblings/i);
   assert.match(inboxPreflight, /Never inspect another unrelated private-data source/i);
 });
