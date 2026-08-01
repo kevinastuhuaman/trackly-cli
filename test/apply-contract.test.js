@@ -558,6 +558,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
 
   assert.doesNotMatch(promptRegion, /never search a mailbox/i);
   assert.doesNotMatch(promptRegion, /skill 4\.2\.6 or newer/i);
+  assert.match(promptRegion, /Without a requisition ID[\s\S]*must not be recorded as provider_receipt_detected until the user explicitly confirms that it belongs to the current batch member/i);
 
   assert.match(inboxPreflight, /agent-side connector/i);
   assert.match(inboxPreflight, /client-appropriate setup\s+guidance/i);
@@ -565,6 +566,7 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /never send[\s\S]*message IDs[\s\S]*Trackly/i);
   assert.match(inboxPreflight, /exact requisition/i);
   assert.match(inboxPreflight, /same employer.*different role/i);
+  assert.match(inboxPreflight, /Without a requisition ID[\s\S]*user's explicit[\s\S]*confirmation that the receipt belongs to that batch member/i);
   assert.match(inboxPreflight, /receipt alone.*never authorizes/i);
   assert.match(inboxPreflight, /continue the batch normally/i);
 });
