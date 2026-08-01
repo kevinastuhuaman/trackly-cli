@@ -25,15 +25,18 @@ resume only after the user re-selects or confirms the exact connector and
 account for this batch. Use `unavailable` only when no connector is callable
 and the user chooses to continue without the optional check.
 
-Record only the value-free preflight state in the private local batch ledger:
+Record only the value-free preflight state in the private local batch ledger,
+keyed by the normalized configured backend origin, exact batch ID, and a local
+hash of the immutable ordered frozen member IDs:
 `not_offered`, `declined`, `unavailable`, `search_failed`,
 `consented_pending`, or `completed`.
 Never send this state or its batch-scoped consent to Trackly. On recovery, do
 not repeat a `declined`, `unavailable`, `search_failed`, or `completed`
 preflight. A setup-paused opt-in remains `consented_pending`, not `unavailable`.
-Resume a
-`consented_pending` search only after verifying the exact same batch ID and
-asking the user to re-select or confirm the exact inbox connector and account.
+Resume a `consented_pending` search only after verifying the same normalized
+backend origin, exact batch ID, and immutable membership hash; a numeric batch
+ID alone is never sufficient. Then require the user to re-select or confirm the
+exact inbox connector and account.
 Never use a current client default or another connected mailbox as a substitute.
 If the local state is absent before any inbox search or form mutation, make a
 fresh offer; never infer consent or completion.
@@ -52,6 +55,13 @@ completion to executable frozen
 members without a static exclusion. Skip retained inactive, insecure-URL, or
 protocol-declared manual-only members; they do not block `completed`, and the
 agent must never create a forbidden run merely to record a receipt. When
+`trackly_start_apply_run` returns a non-null runtime `executionBlocker` for a
+member that previously had no static exclusion, reclassify it locally as
+runtime-blocked and exclude it from the optional preflight completion gate.
+Never create a forbidden browser binding or evidence write merely to complete
+the preflight. Preserve that member without form mutation, never mark it
+Applied from a receipt, report its blocker, and continue unaffected siblings.
+When
 submission authority also exists, finish its documented outcome reconciliation
 before completion. If an executable member's positive match still exists only
 in session memory or any durable recording/reconciliation step fails, keep

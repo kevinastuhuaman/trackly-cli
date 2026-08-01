@@ -81,8 +81,11 @@ provider-receipt evidence write, one success-page or explicit-user-confirmation
 evidence write, one submitted-outcome write, one durable-state refetch, and the
 three separate close-proof evidence writes. Therefore a batch containing both
 retryable start recovery and reconciled duplicates uses the bounded budget
-`52 + (3 * R) + (7 * D)`, where `D` is the number of reconciled duplicates and
-cannot exceed 20. Never spend the duplicate allowance without the normal
+`52 + (3 * R) + (7 * D) + C`, where `D` is the number of reconciled duplicates,
+and `C` is the number of positive matches durably recorded and then explicitly
+cleared by the user without reconciliation. Each cleared match adds exactly one
+provider-receipt evidence write; `D + C` cannot exceed 20. Never spend the
+duplicate allowance without the normal
 success-page or explicit-user-confirmation authority, and never omit the
 durable refetch or three-part close proof merely to remain under budget.
 
