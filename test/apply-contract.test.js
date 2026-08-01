@@ -5,6 +5,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const contract = require('../contracts/trackly-apply-tools.json');
+const packageManifest = require('../package.json');
+const serverManifest = require('../server.json');
+const packageLock = require('../package-lock.json');
+const shrinkwrap = require('../npm-shrinkwrap.json');
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
@@ -106,6 +110,15 @@ test('local MCP Apply schemas match each complete versioned input schema', () =>
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
     assert.equal(normalizeSchema(executableSchema), localSchema, `${name} schema drifted`);
   }
+});
+
+test('release manifests stay on one package version', () => {
+  assert.equal(serverManifest.version, packageManifest.version);
+  assert.equal(serverManifest.packages[0].version, packageManifest.version);
+  assert.equal(packageLock.version, packageManifest.version);
+  assert.equal(packageLock.packages[''].version, packageManifest.version);
+  assert.equal(shrinkwrap.version, packageManifest.version);
+  assert.equal(shrinkwrap.packages[''].version, packageManifest.version);
 });
 
 test('named Apply contract aliases resolve to executed schema definitions', () => {
@@ -508,8 +521,17 @@ test('Apply skill reconciles exact current-epoch submission confirmations withou
   assert.match(skill, /Preserve an existing `success_page` confirmation when a later `user_confirmation` triggers repair/i);
   assert.match(skill, /protocol 3\.3\.1 run, but only from retained current-epoch explicit `user_confirmation` evidence/i);
   assert.match(skill, /protocol 3\.3\.1 `success_page` evidence remains ineligible/i);
+  assert.match(skill, /freshly fetched server protocol is still 3\.3\.1, do not attempt stale-projection repair/i);
   assert.match(skill, /without fabricating a retroactive review-ready checkpoint or truth certification/i);
   assert.match(skill, /member lifecycle `submitted` and job state `applied_confirmed`/i);
+});
+
+test('Apply MCP prompt does not retain superseded compatibility wording', () => {
+  const promptRegion = source.slice(source.indexOf("server.registerPrompt('trackly-apply'"));
+  assert.doesNotMatch(promptRegion, /skill 4\.2\.5 or newer/i);
+  assert.doesNotMatch(promptRegion, /Only when both the fetched protocol and the stored run protocol are 3\.3\.2 or newer/i);
+  assert.match(promptRegion, /stored protocol 3\.3\.1 run may be repaired only from retained current-epoch explicit user-confirmation evidence/i);
+  assert.match(promptRegion, /protocol 3\.3\.1 success-page evidence remains ineligible/i);
 });
 
 test('Apply skill and MCP prompt keep receipt discovery scoped and executable', () => {
@@ -580,8 +602,8 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /provider playbook for Greenhouse, Ashby, HiBob/);
   assert.match(promptRegion, /verify the committed DOM or accessibility state/);
   assert.match(promptRegion, /final consent control/);
-  assert.match(promptRegion, /Only when both the fetched protocol and the stored run protocol are 3\.3\.2 or newer may current-epoch exact-requisition success-page or explicit user-confirmation evidence reconcile a running, inspecting, needs_input, review_ready, or request-only submitted projection/i);
-  assert.match(promptRegion, /compatibility and reconciliation rules supersede stricter version wording earlier in this prompt/i);
+  assert.match(promptRegion, /With a fetched server protocol of 3\.3\.2 or newer, current-epoch exact-requisition success-page or explicit user-confirmation evidence may reconcile a stale projection when the stored run protocol is 3\.3\.2 or newer/i);
+  assert.doesNotMatch(promptRegion, /compatibility and reconciliation rules supersede stricter version wording earlier in this prompt/i);
   assert.match(promptRegion, /stored protocol 3\.3\.1 run may be repaired only from retained current-epoch explicit user-confirmation evidence/i);
   assert.match(promptRegion, /protocol 3\.3\.1 success-page evidence remains ineligible/i);
   assert.match(promptRegion, /Preserve an existing success_page confirmation when a later user_confirmation triggers repair/i);
