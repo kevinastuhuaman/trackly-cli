@@ -220,7 +220,7 @@ function registerApplyTools(
             error: 'Trackly did not return a valid profile revision. No changes were saved.',
           };
         }
-        if (sensitiveRevocationConfirmToken !== confirmationToken) {
+        if (sensitiveRevocationConfirmToken !== confirmationToken || body.expectedRevision !== currentRevision) {
           throw {
             status: 409,
             code: 'sensitive_revocation_confirmation_required',
@@ -228,9 +228,9 @@ function registerApplyTools(
             confirmation: {
               currentRevision,
               affectedKeys,
-              alsoDeletes: 'Every provider- and company-scoped sensitive or restricted answer is also deleted; those keys are not listed here.',
+              alsoDeletes: 'Every provider- and company-scoped sensitive or restricted answer is also deleted, as are answers stored under retired catalog keys; those keys are not listed here.',
               confirmationToken,
-              instructions: 'Show the user the affected keys and get explicit confirmation. Then retry the identical call with expectedRevision=currentRevision and sensitiveRevocationConfirmToken=confirmationToken. The token becomes invalid whenever the profile revision changes.',
+              instructions: 'Show the user the affected keys and get explicit confirmation, then retry with expectedRevision=currentRevision and sensitiveRevocationConfirmToken=confirmationToken. If the original call carried other changes, re-read the profile first and reconcile them against the current revision instead of resending stale changes blindly. The token becomes invalid whenever the profile revision changes.',
             },
           };
         }

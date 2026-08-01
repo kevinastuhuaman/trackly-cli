@@ -896,6 +896,20 @@ test('sensitive consent revocation requires an echoed confirmation token before 
   assert.equal(stale.confirmation.confirmationToken, tokenFor(9, expectedAffectedKeys));
   assert.equal(requests.filter(({ method }) => method === 'PATCH').length, 1, 'stale token must not PATCH');
 
+  const staleRevisionResult = await client.callTool({
+    name: 'trackly_update_application_profile',
+    arguments: {
+      expectedRevision: 7,
+      sensitiveStorageConsent: false,
+      sensitiveRevocationConfirmToken: tokenFor(9, expectedAffectedKeys),
+    },
+  });
+  assert.equal(staleRevisionResult.isError, true);
+  const staleRevision = JSON.parse(staleRevisionResult.content[0].text);
+  assert.equal(staleRevision.code, 'sensitive_revocation_confirmation_required');
+  assert.match(staleRevision.confirmation.instructions, /reconcile them against the current revision/);
+  assert.equal(requests.filter(({ method }) => method === 'PATCH').length, 1, 'current token with stale expectedRevision must not PATCH');
+
   const optInResult = await client.callTool({
     name: 'trackly_update_application_profile',
     arguments: { expectedRevision: 10, sensitiveStorageConsent: true },
