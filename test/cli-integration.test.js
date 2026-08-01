@@ -589,7 +589,7 @@ test('agent doctor explains that exact resume validation is deferred to a real A
   });
 
   assert.equal(result.stderr, '');
-  assert.match(result.stdout, /CLI: 0\.9\.3; MCP contract: 3\.3\.1/);
+  assert.match(result.stdout, /CLI: 0\.9\.4; MCP contract: 3\.3\.2/);
   assert.match(result.stdout, /Skill: 4\.2\.5; digest: [a-f0-9]{64}/);
   assert.match(result.stdout, /Resume validation: available \(exact bytes are verified during an active Apply run\)/);
 });

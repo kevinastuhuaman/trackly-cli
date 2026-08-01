@@ -1,5 +1,5 @@
 {
-  "contractVersion": "3.3.1",
+  "contractVersion": "3.3.2",
   "constants": {
     "applyScenarioCodes": ["browser_reclaim", "resume_upload", "resume_parser_recheck", "semantic_boolean_commit", "custom_select_commit", "multi_step_navigation", "free_text_voice", "required_error_sweep", "final_consent", "handoff_reclaim", "critical_contact_integrity", "manual_submit_boundary", "job_identity_match"],
     "applyBrowserSurfaces": ["codex_in_app", "chrome_extension", "claude_in_chrome"],

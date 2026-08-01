@@ -17,12 +17,12 @@
       ]
     }
   ],
-  "version": "0.9.3",
+  "version": "0.9.4",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "trackly-cli",
-      "version": "0.9.3",
+      "version": "0.9.4",
       "runtimeHint": "npx",
       "runtimeArguments": [
         {
