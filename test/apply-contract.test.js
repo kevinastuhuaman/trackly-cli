@@ -100,7 +100,7 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.3.2');
+  assert.equal(contract.contractVersion, '3.3.3');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -474,19 +474,19 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require Trackly Apply protocol 3\.3\.1 or newer and skill 4\.2\.5 or newer/);
+  assert.match(promptRegion, /Require skill 4\.2\.6 or newer/);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.5 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.6 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.5 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.6 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.5/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.6/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 
@@ -503,10 +503,11 @@ test('Apply skill separates current employment from most recent history and pres
 
 test('Apply skill reconciles exact current-epoch submission confirmations without fabricated retroactive review', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /both the freshly fetched protocol and the stored `run\.protocolVersion` are 3\.3\.2 or newer[\s\S]*current-epoch exact-requisition `success_page` or explicit `user_confirmation` evidence reconcile/i);
+  assert.match(skill, /freshly fetched server protocol of 3\.3\.2 or newer[\s\S]*current-epoch exact-requisition `success_page` or explicit `user_confirmation` evidence may reconcile/i);
   assert.match(skill, /`running`, `inspecting`, `needs_input`, `review_ready`, or only the request says `submitted`/i);
   assert.match(skill, /Preserve an existing `success_page` confirmation when a later `user_confirmation` triggers repair/i);
-  assert.match(skill, /If either version is 3\.3\.1, do not assume this repair exists/i);
+  assert.match(skill, /protocol 3\.3\.1 run, but only from retained current-epoch explicit `user_confirmation` evidence/i);
+  assert.match(skill, /protocol 3\.3\.1 `success_page` evidence remains ineligible/i);
   assert.match(skill, /without fabricating a retroactive review-ready checkpoint or truth certification/i);
   assert.match(skill, /member lifecycle `submitted` and job state `applied_confirmed`/i);
 });
@@ -580,7 +581,9 @@ test('MCP Apply prompt preserves safety-critical skill orchestration parity', ()
   assert.match(promptRegion, /verify the committed DOM or accessibility state/);
   assert.match(promptRegion, /final consent control/);
   assert.match(promptRegion, /Only when both the fetched protocol and the stored run protocol are 3\.3\.2 or newer may current-epoch exact-requisition success-page or explicit user-confirmation evidence reconcile a running, inspecting, needs_input, review_ready, or request-only submitted projection/i);
-  assert.match(promptRegion, /stale-projection reconciliation for success-page or explicit user-confirmation evidence is available only when both the fetched Apply protocol and the stored run\.protocolVersion are 3\.3\.2 or newer/i);
+  assert.match(promptRegion, /compatibility and reconciliation rules supersede stricter version wording earlier in this prompt/i);
+  assert.match(promptRegion, /stored protocol 3\.3\.1 run may be repaired only from retained current-epoch explicit user-confirmation evidence/i);
+  assert.match(promptRegion, /protocol 3\.3\.1 success-page evidence remains ineligible/i);
   assert.match(promptRegion, /Preserve an existing success_page confirmation when a later user_confirmation triggers repair/i);
   assert.match(promptRegion, /employment\.most_recent_company and employment\.most_recent_title/i);
   assert.match(promptRegion, /only when the fetched profile schema exposes those exact keys/i);
