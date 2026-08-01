@@ -13,6 +13,15 @@ ownership state, and inspection epoch. Raw tab identifiers never go to the
 Trackly backend. If the host persists the ledger, store it in a private
 mode `0600` file and remove it when the batch expires.
 
+For the optional inbox receipt preflight, also keep value-free state keyed
+by the exact batch ID: `not_offered`, `declined`, `unavailable`,
+`consented_pending`, or `completed`. This state and its batch-scoped consent
+never go to Trackly. On recovery, do not repeat `declined`, `unavailable`, or
+`completed`; resume `consented_pending` only for the same verified batch. If
+the ledger state is absent before any inbox search or form mutation, make a
+fresh offer and never infer consent or completion. Remove this state when the
+batch expires.
+
 Backend observations contain only a value-free binding hash, inspection epoch,
 ownership state, lifecycle/action codes, and timestamps. Never send the URL,
 tab title, employer, role, page text, credentials, or answer values as browser

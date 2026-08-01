@@ -558,6 +558,8 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
 
   assert.doesNotMatch(promptRegion, /never search a mailbox/i);
   assert.doesNotMatch(promptRegion, /skill 4\.2\.6 or newer/i);
+  assert.match(promptRegion, /make its one non-mutating offer[\s\S]*search an inbox connector only after explicit batch-scoped user opt-in/i);
+  assert.match(promptRegion, /Never inspect any unrelated private-data source[\s\S]*only the separately connected inbox connector the user approved for this exact batch/i);
   assert.match(promptRegion, /Without a requisition ID[\s\S]*must not be recorded as provider_receipt_detected until the user explicitly confirms that it belongs to the current batch member/i);
 
   assert.match(inboxPreflight, /agent-side connector/i);
@@ -569,6 +571,23 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /Without a requisition ID[\s\S]*user's explicit[\s\S]*confirmation that the receipt belongs to that batch member/i);
   assert.match(inboxPreflight, /receipt alone.*never authorizes/i);
   assert.match(inboxPreflight, /continue the batch normally/i);
+  assert.match(inboxPreflight, /value-free preflight state[\s\S]*private local batch ledger/i);
+  assert.match(inboxPreflight, /`not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`/i);
+  assert.match(inboxPreflight, /(?:local\s+|ledger\s+)?state is absent before any inbox search or form mutation[\s\S]*fresh\s+offer/i);
+  assert.match(inboxPreflight, /verified duplicate[\s\S]*preserve that member without\s+form mutation[\s\S]*continue\s+unaffected siblings/i);
+  assert.match(inboxPreflight, /Never inspect another unrelated private-data source/i);
+});
+
+test('Apply browser ledger keeps inbox preflight recovery value-free and local', () => {
+  const lifecycle = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-lifecycle.md'),
+    'utf8',
+  );
+  assert.match(lifecycle, /value-free state keyed\s+by the exact batch ID/i);
+  assert.match(lifecycle, /`not_offered`, `declined`, `unavailable`,[\s\S]*`consented_pending`, or `completed`/i);
+  assert.match(lifecycle, /never go to Trackly/i);
+  assert.match(lifecycle, /state is absent before any inbox search or form mutation[\s\S]*fresh offer/i);
+  assert.match(lifecycle, /Remove this state when the\s+batch expires/i);
 });
 
 test('Apply skill reconciles durable submission state before closing a confirmation tab', () => {

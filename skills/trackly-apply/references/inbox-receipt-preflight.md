@@ -22,9 +22,18 @@ user opts in but no connector is callable, give client-appropriate setup
 guidance and continue the current batch unless the user explicitly asks to
 pause for setup.
 
+Record only the value-free preflight state in the private local batch ledger:
+`not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`.
+Never send this state or its batch-scoped consent to Trackly. On recovery, do
+not repeat a `declined`, `unavailable`, or `completed` preflight. Resume a
+`consented_pending` search only after verifying the exact same batch ID. If the
+local state is absent before any inbox search or form mutation, make a fresh
+offer; never infer consent or completion.
+
 ## Search minimally
 
-Use the user's chosen Gmail, Outlook, or other agent-side connector. Search the
+Use only the Gmail, Outlook, or other agent-side inbox connector the user chose
+for this batch. Never inspect another unrelated private-data source. Search the
 smallest bounded window that can identify the frozen batch:
 
 1. Prefer the exact requisition ID when one is known.
@@ -64,6 +73,10 @@ the typed receipt proof and record only `provider_receipt_detected` with source
 confirmation tab open until a refetch proves both the submitted member
 lifecycle and the `applied_confirmed` job state.
 
-Failure to search, connect, match, or record optional receipt evidence is not a
+Failure to search, connect, or match optional receipt evidence is not a
 browser-work blocker. Preserve any evidence already supplied by the user and
-continue the batch normally.
+continue the batch normally. If a verified duplicate also has the required
+success page or explicit submission confirmation, preserve that member without
+form mutation when redacted receipt recording or outcome reconciliation fails.
+Retry only the documented idempotent reconciliation path and continue
+unaffected siblings; never reopen or refill the preserved member.
