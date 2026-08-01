@@ -102,7 +102,7 @@ API-key creation attempts.
 - **trackly_get_apply_queue** — Get user-approved check-later jobs in deterministic execution order.
 - **trackly_get_application_profile** — Get the versioned, scoped application profile.
 - **trackly_get_profile_onboarding** — Get backend-owned questions plus only missing/unconfirmed answers.
-- **trackly_update_application_profile** — Save explicit answer states with optimistic concurrency and global/provider/company scope.
+- **trackly_update_application_profile** — Save explicit answer states with optimistic concurrency and global/provider/company scope. Setting `sensitiveStorageConsent=false` is destructive and requires a second call echoing the `sensitiveRevocationConfirmToken` from the returned challenge.
 - **trackly_create_apply_batch** — Freeze an exact recent-first set of approved jobs with an idempotency key.
 - **trackly_get_active_apply_batch** — Recover the newest unexpired active batch before creating another after chat or browser context loss.
 - **trackly_get_apply_batch** — Page a server-owned frozen batch without reordering or replacing members.

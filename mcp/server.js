@@ -88,8 +88,14 @@ function createErrorResult(error, fallbackMessage, extra = {}) {
   if (
     error?.code === 'experience_filter_v2_unavailable'
     || error?.code === 'invalid_preference_revision'
+    || error?.code === 'sensitive_revocation_confirmation_required'
+    || error?.code === 'invalid_profile_revision'
   ) {
     payload.code = error.code;
+  }
+
+  if (error?.code === 'sensitive_revocation_confirmation_required' && error?.confirmation) {
+    payload.confirmation = error.confirmation;
   }
 
   if (error?.status === 409 && error?.error === 'preference_revision_conflict') {

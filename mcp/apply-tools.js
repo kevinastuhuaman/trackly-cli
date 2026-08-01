@@ -1,5 +1,6 @@
 'use strict';
 
+const { createHash } = require('node:crypto');
 const { z } = require('zod');
 const { apiRequest } = require('../lib/client');
 const { prepareResume, verifyPreparedResume } = require('../lib/agent');
@@ -18,6 +19,24 @@ const APPLY_BATCH_MAX_MEMBERS = 100;
 const APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST = 20;
 const APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT = 25;
 const APPLY_BATCH_MAX_BULK_MUTATIONS = 20;
+
+function sensitiveRevocationConfirmation(profileResponse, schemaResponse) {
+  const profile = profileResponse?.profile || {};
+  const currentRevision = Number(profile.revision);
+  const fields = profile.fields || {};
+  const deletableKeys = new Set(
+    (Array.isArray(schemaResponse?.fields) ? schemaResponse.fields : [])
+      .filter((field) => field && field.storage === 'answer' && field.sensitivity !== 'standard')
+      .map((field) => field.key)
+  );
+  const affectedKeys = Object.keys(fields)
+    .filter((key) => deletableKeys.has(key) && fields[key]?.state && fields[key].state !== 'unknown')
+    .sort();
+  const confirmationToken = createHash('sha256')
+    .update(`trackly:sensitive-revocation:v1:${currentRevision}:${affectedKeys.join(',')}`, 'utf8')
+    .digest('hex');
+  return { currentRevision, affectedKeys, confirmationToken };
+}
 const SAFE_OBSERVATION_CODE = /^[a-z0-9][a-z0-9_:-]{0,99}$/;
 const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
 
@@ -153,7 +172,7 @@ function registerApplyTools(
 
   server.tool(
     'trackly_update_application_profile',
-    'Update confirmed profile answers with optimistic concurrency. Use global scope only for an explicit always-answer preference.',
+    'Update confirmed profile answers with optimistic concurrency. Use global scope only for an explicit always-answer preference. Setting sensitiveStorageConsent=false permanently deletes every stored sensitive and restricted answer and is a two-step action: the first call saves nothing and returns a confirmation challenge; retry with the echoed sensitiveRevocationConfirmToken to proceed.',
     {
       expectedRevision: z.number().int().min(1),
       source: z.enum(['web', 'ios', 'macos', 'codex', 'claude', 'mcp']).optional(),
@@ -183,8 +202,41 @@ function registerApplyTools(
       })).max(20).optional(),
       confirmProfile: z.boolean().optional(),
       sensitiveStorageConsent: z.boolean().optional(),
+      sensitiveRevocationConfirmToken: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     },
-    wrapTool(async (params) => apiRequest('PATCH', '/api/jobscout/application-profile', params, false, false, MCP_USER_AGENT), 'Failed to update application profile')
+    wrapTool(async (params) => {
+      const { sensitiveRevocationConfirmToken, ...body } = params;
+      if (body.sensitiveStorageConsent === false) {
+        const [profileResponse, schemaResponse] = await Promise.all([
+          apiRequest('GET', '/api/jobscout/application-profile', null, false, false, MCP_USER_AGENT),
+          apiRequest('GET', '/api/jobscout/application-profile/schema', null, false, false, MCP_USER_AGENT),
+        ]);
+        const { currentRevision, affectedKeys, confirmationToken } =
+          sensitiveRevocationConfirmation(profileResponse, schemaResponse);
+        if (!Number.isSafeInteger(currentRevision) || currentRevision < 1) {
+          throw {
+            status: 502,
+            code: 'invalid_profile_revision',
+            error: 'Trackly did not return a valid profile revision. No changes were saved.',
+          };
+        }
+        if (sensitiveRevocationConfirmToken !== confirmationToken) {
+          throw {
+            status: 409,
+            code: 'sensitive_revocation_confirmation_required',
+            error: 'Revoking sensitive storage consent permanently deletes every stored sensitive and restricted answer. No changes were saved.',
+            confirmation: {
+              currentRevision,
+              affectedKeys,
+              alsoDeletes: 'Every provider- and company-scoped sensitive or restricted answer is also deleted; those keys are not listed here.',
+              confirmationToken,
+              instructions: 'Show the user the affected keys and get explicit confirmation. Then retry the identical call with expectedRevision=currentRevision and sensitiveRevocationConfirmToken=confirmationToken. The token becomes invalid whenever the profile revision changes.',
+            },
+          };
+        }
+      }
+      return apiRequest('PATCH', '/api/jobscout/application-profile', body, false, false, MCP_USER_AGENT);
+    }, 'Failed to update application profile')
   );
 
   server.tool(

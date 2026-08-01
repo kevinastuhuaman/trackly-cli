@@ -758,3 +758,153 @@ test('trackly_search_jobs defaults jobFunction to ALL functions when caller omit
     'JOB_FUNCTIONS.join(",") on the else branch.',
   );
 });
+
+test('sensitive consent revocation requires an echoed confirmation token before any PATCH', async (t) => {
+  const { createHash } = require('node:crypto');
+  const profileFields = {
+    'eeo.gender': { state: 'answered' },
+    'identity.age_18_or_older': { state: 'declined' },
+    'location.residential_city': { state: 'answered' },
+    'authorization.visa_type': { state: 'unknown' },
+    'identity.email': { state: 'answered' },
+    'identity.first_name': { state: 'answered' },
+  };
+  const schemaFields = [
+    { key: 'eeo.gender', storage: 'answer', sensitivity: 'restricted' },
+    { key: 'identity.age_18_or_older', storage: 'answer', sensitivity: 'sensitive' },
+    { key: 'location.residential_city', storage: 'answer', sensitivity: 'restricted' },
+    { key: 'authorization.visa_type', storage: 'answer', sensitivity: 'restricted' },
+    { key: 'identity.email', storage: 'profile', sensitivity: 'sensitive' },
+    { key: 'identity.first_name', storage: 'answer', sensitivity: 'standard' },
+  ];
+  const expectedAffectedKeys = ['eeo.gender', 'identity.age_18_or_older', 'location.residential_city'];
+  const tokenFor = (revision, keys) => createHash('sha256')
+    .update(`trackly:sensitive-revocation:v1:${revision}:${keys.join(',')}`, 'utf8')
+    .digest('hex');
+
+  let profileRevision = 7;
+  const requests = [];
+  const httpServer = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      requests.push({ method: req.method, url: req.url, body });
+      res.setHeader('Content-Type', 'application/json');
+      if (req.method === 'GET' && req.url === '/api/jobscout/application-profile') {
+        res.end(JSON.stringify({
+          success: true,
+          profile: { revision: profileRevision, sensitiveStorage: { consented: true }, fields: profileFields },
+        }));
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/api/jobscout/application-profile/schema') {
+        res.end(JSON.stringify({ success: true, fields: schemaFields }));
+        return;
+      }
+      if (req.method === 'PATCH' && req.url === '/api/jobscout/application-profile') {
+        res.end(JSON.stringify({
+          success: true,
+          revision: profileRevision + 1,
+          changedKeys: [...expectedAffectedKeys, 'profile.sensitive_storage_consent'],
+        }));
+        return;
+      }
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'unexpected request' }));
+    });
+  });
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => httpServer.close());
+
+  const originalApiKey = process.env.TRACKLY_API_KEY;
+  const originalBaseUrl = process.env.TRACKLY_BASE_URL;
+  process.env.TRACKLY_API_KEY = 'trk_test_sensitive_revocation';
+  process.env.TRACKLY_BASE_URL = `http://127.0.0.1:${httpServer.address().port}`;
+  t.after(() => {
+    if (originalApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = originalApiKey;
+    if (originalBaseUrl === undefined) delete process.env.TRACKLY_BASE_URL;
+    else process.env.TRACKLY_BASE_URL = originalBaseUrl;
+  });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createServer();
+  const client = new Client({ name: 'sensitive-revocation-test', version: '1.0.0' });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+  });
+
+  const tools = await client.listTools();
+  const updateTool = tools.tools.find((tool) => tool.name === 'trackly_update_application_profile');
+  assert.ok(updateTool.inputSchema.properties.sensitiveRevocationConfirmToken, 'token field must be published');
+  assert.equal(
+    updateTool.inputSchema.properties.sensitiveRevocationConfirmToken.pattern,
+    '^[a-f0-9]{64}$',
+  );
+  assert.match(updateTool.description, /two-step action/);
+
+  const challengeResult = await client.callTool({
+    name: 'trackly_update_application_profile',
+    arguments: { expectedRevision: 7, sensitiveStorageConsent: false },
+  });
+  assert.equal(challengeResult.isError, true);
+  const challenge = JSON.parse(challengeResult.content[0].text);
+  assert.equal(challenge.code, 'sensitive_revocation_confirmation_required');
+  assert.equal(challenge.status, 409);
+  assert.match(challenge.error, /No changes were saved\./);
+  assert.equal(challenge.confirmation.currentRevision, 7);
+  assert.deepEqual(challenge.confirmation.affectedKeys, expectedAffectedKeys);
+  assert.equal(challenge.confirmation.confirmationToken, tokenFor(7, expectedAffectedKeys));
+  assert.deepEqual(requests.map(({ method, url }) => ({ method, url })), [
+    { method: 'GET', url: '/api/jobscout/application-profile' },
+    { method: 'GET', url: '/api/jobscout/application-profile/schema' },
+  ], 'MCP revocation challenge must not send a PATCH');
+
+  const confirmedResult = await client.callTool({
+    name: 'trackly_update_application_profile',
+    arguments: {
+      expectedRevision: 7,
+      sensitiveStorageConsent: false,
+      sensitiveRevocationConfirmToken: challenge.confirmation.confirmationToken,
+    },
+  });
+  assert.ok(!confirmedResult.isError, 'confirmed revocation must pass through');
+  const confirmed = JSON.parse(confirmedResult.content[0].text);
+  assert.deepEqual(confirmed.changedKeys, [...expectedAffectedKeys, 'profile.sensitive_storage_consent']);
+  const patchRequests = requests.filter(({ method }) => method === 'PATCH');
+  assert.equal(patchRequests.length, 1, 'exactly one PATCH after confirmation');
+  assert.deepEqual(JSON.parse(patchRequests[0].body), {
+    expectedRevision: 7,
+    sensitiveStorageConsent: false,
+  }, 'confirmation token must be stripped from the PATCH body');
+
+  profileRevision = 9;
+  const staleResult = await client.callTool({
+    name: 'trackly_update_application_profile',
+    arguments: {
+      expectedRevision: 7,
+      sensitiveStorageConsent: false,
+      sensitiveRevocationConfirmToken: challenge.confirmation.confirmationToken,
+    },
+  });
+  assert.equal(staleResult.isError, true);
+  const stale = JSON.parse(staleResult.content[0].text);
+  assert.equal(stale.confirmation.currentRevision, 9);
+  assert.equal(stale.confirmation.confirmationToken, tokenFor(9, expectedAffectedKeys));
+  assert.equal(requests.filter(({ method }) => method === 'PATCH').length, 1, 'stale token must not PATCH');
+
+  const optInResult = await client.callTool({
+    name: 'trackly_update_application_profile',
+    arguments: { expectedRevision: 10, sensitiveStorageConsent: true },
+  });
+  assert.ok(!optInResult.isError);
+  const finalPatches = requests.filter(({ method }) => method === 'PATCH');
+  assert.equal(finalPatches.length, 2, 'opt-in stays single-call');
+  assert.deepEqual(JSON.parse(finalPatches[1].body), {
+    expectedRevision: 10,
+    sensitiveStorageConsent: true,
+  });
+});

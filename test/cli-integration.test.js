@@ -20,7 +20,7 @@ test('published package version has a dated changelog section', () => {
   const changelog = fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
 
   assert.match(changelog, new RegExp(
-    `^## \\[${packageVersion.replace(/\./g, '\\.')}\\] - 2026-07-31$`,
+    `^## \\[${packageVersion.replace(/\./g, '\\.')}\\] - 2026-08-01$`,
     'm',
   ));
 });
@@ -589,7 +589,7 @@ test('agent doctor explains that exact resume validation is deferred to a real A
   });
 
   assert.equal(result.stderr, '');
-  assert.match(result.stdout, /CLI: 0\.9\.5; MCP contract: 3\.3\.3/);
+  assert.match(result.stdout, /CLI: 0\.9\.6; MCP contract: 3\.4\.0/);
   assert.match(result.stdout, /Skill: 4\.2\.6; digest: [a-f0-9]{64}/);
   assert.match(result.stdout, /Resume validation: available \(exact bytes are verified during an active Apply run\)/);
 });
