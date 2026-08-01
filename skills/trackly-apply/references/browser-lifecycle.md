@@ -15,15 +15,19 @@ mode `0600` file and remove it when the batch expires.
 
 For the optional inbox receipt preflight, also keep value-free state keyed
 by the exact batch ID: `not_offered`, `declined`, `unavailable`,
-`consented_pending`, or `completed`. This state and its batch-scoped consent
-never go to Trackly. On recovery, do not repeat `declined`, `unavailable`, or
-`completed`. When an opted-in user explicitly pauses to connect an inbox, keep
+`search_failed`, `consented_pending`, or `completed`. This state and its
+batch-scoped consent never go to Trackly. On recovery, do not repeat `declined`,
+`unavailable`, `search_failed`, or `completed`. When an opted-in user explicitly pauses to connect an inbox, keep
 `consented_pending`; use `unavailable` only when the user continues without the
 optional check. Resume `consented_pending` only for the same verified batch after
 the user re-selects or confirms the exact inbox connector and account. Never
 substitute the client's current default mailbox. Keep `consented_pending` until
 there are no positive matches or every positive match is durably recorded and,
-when submission authority exists, reconciled. If the ledger state is absent
+when submission authority exists, reconciled, and every match has an explicit
+`reconciled` or local value-free `cleared_by_user` disposition. A matched member
+without an explicit disposition remains free of form mutation. If a bounded
+connector query fails, set terminal `search_failed` before continuing browser
+work. If the ledger state is absent
 before any inbox search or form mutation, make a fresh offer and never infer
 consent or completion. Remove this state when the batch expires.
 

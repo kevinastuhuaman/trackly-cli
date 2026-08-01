@@ -15,8 +15,8 @@ Before mutating the first application form, make one non-blocking offer:
 
 Proceed only after explicit batch-scoped consent. Connector presence or
 availability is not consent. Do not persist consent as a Trackly profile
-answer. If the user declines, does not opt in, or has no callable inbox
-connector, skip the check and continue the batch normally. Do not install or
+answer. If the user declines or does not opt in, skip the check and continue
+the batch normally. Do not install or
 connect an inbox integration without the user's separate request. When the
 user opts in but no connector is callable, give client-appropriate setup
 guidance and continue the current batch unless the user explicitly asks to
@@ -26,10 +26,12 @@ account for this batch. Use `unavailable` only when no connector is callable
 and the user chooses to continue without the optional check.
 
 Record only the value-free preflight state in the private local batch ledger:
-`not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`.
+`not_offered`, `declined`, `unavailable`, `search_failed`,
+`consented_pending`, or `completed`.
 Never send this state or its batch-scoped consent to Trackly. On recovery, do
-not repeat a `declined`, `unavailable`, or `completed` preflight. A setup-paused
-opt-in remains `consented_pending`, not `unavailable`. Resume a
+not repeat a `declined`, `unavailable`, `search_failed`, or `completed`
+preflight. A setup-paused opt-in remains `consented_pending`, not `unavailable`.
+Resume a
 `consented_pending` search only after verifying the exact same batch ID and
 asking the user to re-select or confirm the exact inbox connector and account.
 Never use a current client default or another connected mailbox as a substitute.
@@ -38,7 +40,15 @@ fresh offer; never infer consent or completion.
 
 Set `completed` only after the bounded search finds no positive matches or every
 positive match among executable members has been durably recorded against the
-exact member and run. Scope both search and completion to executable frozen
+exact member and run and has an explicit disposition. Without a visible success
+page or explicit submission confirmation, keep the matched member free of form
+mutation and keep `consented_pending` while asking whether the exact application
+was submitted. A user-confirmed submission follows reconciliation; an explicit
+user statement that it was not submitted, or an explicit instruction to continue
+this exact application, records only a value-free local `cleared_by_user`
+disposition before browser work. Never treat durable receipt recording alone as
+permission to refill or mutate the matched member. Scope both search and
+completion to executable frozen
 members without a static exclusion. Skip retained inactive, insecure-URL, or
 protocol-declared manual-only members; they do not block `completed`, and the
 agent must never create a forbidden run merely to record a receipt. When
@@ -100,8 +110,11 @@ confirmation tab open until a refetch proves both the submitted member
 lifecycle and the `applied_confirmed` job state.
 
 Failure to search, connect, or match optional receipt evidence is not a
-browser-work blocker. Preserve any evidence already supplied by the user and
-continue the batch normally. If a verified duplicate also has the required
+browser-work blocker. If a bounded connector query fails before exhaustion,
+do not leave a late `consented_pending` search that could run after form
+mutation: report the failure, set local state to terminal `search_failed`, and
+continue unaffected browser work. Preserve any evidence already supplied by
+the user and continue the batch normally. If a verified duplicate also has the required
 success page or explicit submission confirmation, preserve that member without
 form mutation when redacted receipt recording or outcome reconciliation fails.
 Retry only the documented idempotent reconciliation path and continue

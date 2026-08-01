@@ -63,7 +63,12 @@ resume approval, one truth certification, one
 `trackly_record_application_outcomes` call, and one final refresh. An existing
 active batch omits the create call. Do not replace bulk observations,
 checkpoints, or outcomes with per-member requests. Resume download and exact
-local verification are excluded from this count. Each member that encounters
+local verification are excluded from this count. Optional external inbox
+connector traffic is also excluded because it never reaches Trackly's MCP or
+HTTP API; bound it separately to one connector capability check plus at most one
+initial query and one identity-refinement query per executable member (`1 + 2E`,
+where `E` cannot exceed 20). Stop when the bounded query is exhausted and never
+expand to an unbounded mailbox search. Each member that encounters
 the one permitted retryable bound-start failure receives exactly three
 additional recovery calls: refetch the active batch, renew its lease, and retry
 the same binding. Therefore the bounded contingency budget is `52 + (3 * R)`,

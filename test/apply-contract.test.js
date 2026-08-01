@@ -563,7 +563,10 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(promptRegion, /Never inspect any unrelated private-data source[\s\S]*only the separately connected inbox connector the user approved for this exact batch/i);
   assert.match(promptRegion, /recovery of consented_pending[\s\S]*re-select or confirm the exact inbox connector and account[\s\S]*never substitute a client default/i);
   assert.match(promptRegion, /no connector is callable[\s\S]*continues without the check[\s\S]*unavailable[\s\S]*pauses for setup[\s\S]*consented_pending/i);
-  assert.match(promptRegion, /Mark completed only after no positive match exists or every executable positive match is durably recorded[\s\S]*Otherwise retain consented_pending/i);
+  assert.match(promptRegion, /positive match lacks[\s\S]*submission confirmation[\s\S]*retain consented_pending[\s\S]*free of form mutation[\s\S]*ask the user/i);
+  assert.match(promptRegion, /Durable receipt recording alone never permits refill or mutation/i);
+  assert.match(promptRegion, /bounded connector query fails[\s\S]*terminal search_failed before form mutation[\s\S]*never resume that search after forms are mutated/i);
+  assert.match(promptRegion, /Mark completed only after no positive match exists or every executable positive match is durably recorded[\s\S]*explicit disposition/i);
   assert.match(promptRegion, /approved pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*historical range the user selects[\s\S]*never search the whole mailbox/i);
   assert.match(promptRegion, /Scope search and completion only to executable frozen members without static exclusions[\s\S]*manual-only members are skipped[\s\S]*never require a forbidden run/i);
   assert.match(promptRegion, /exact requisition identity plus the same employer or verified ATS tenant\/sender identity[\s\S]*bare requisition ID is never sufficient/i);
@@ -581,16 +584,19 @@ test('Apply skill and MCP prompt offer privacy-safe external inbox receipt disco
   assert.match(inboxPreflight, /receipt alone.*never authorizes/i);
   assert.match(inboxPreflight, /continue the batch normally/i);
   assert.match(inboxPreflight, /value-free preflight state[\s\S]*private local batch ledger/i);
-  assert.match(inboxPreflight, /`not_offered`, `declined`, `unavailable`, `consented_pending`, or `completed`/i);
+  assert.match(inboxPreflight, /`not_offered`, `declined`, `unavailable`, `search_failed`,[\s\S]*`consented_pending`, or `completed`/i);
   assert.match(inboxPreflight, /(?:local\s+|ledger\s+)?state is absent before any inbox search or form mutation[\s\S]*fresh\s+offer/i);
   assert.match(inboxPreflight, /re-select or confirm the exact inbox connector and account[\s\S]*Never use a current client default/i);
   assert.match(inboxPreflight, /pauses?[\s\S]*keep `consented_pending`[\s\S]*`unavailable` only when[\s\S]*continue without the optional check/i);
   assert.match(inboxPreflight, /Set `completed` only after the bounded search finds no positive matches or every\s+positive match among executable members has been durably recorded/i);
   assert.match(inboxPreflight, /durable recording\/reconciliation step fails[\s\S]*keep\s+`consented_pending`/i);
-  assert.match(promptRegion, /Mark completed only after[\s\S]*when submission authority exists[\s\S]*reconciled/i);
+  assert.match(inboxPreflight, /Without a visible success[\s\S]*keep the matched member free of form[\s\S]*keep `consented_pending`[\s\S]*asking whether/i);
+  assert.match(inboxPreflight, /`cleared_by_user`[\s\S]*before browser work[\s\S]*Never treat durable receipt recording alone/i);
+  assert.match(inboxPreflight, /bounded connector query fails[\s\S]*terminal `search_failed`[\s\S]*continue unaffected browser work/i);
+  assert.match(promptRegion, /Reconcile a confirmed submission[\s\S]*explicit user statement that it was not submitted[\s\S]*cleared_by_user/i);
   assert.match(inboxPreflight, /Set `completed` only after[\s\S]*submission authority also exists[\s\S]*outcome reconciliation[\s\S]*before completion/i);
   assert.match(inboxPreflight, /pre-batch lookback[\s\S]*posting-to-freeze interval[\s\S]*user to select a historical range[\s\S]*never silently search the whole\s+mailbox/i);
-  assert.match(inboxPreflight, /Scope both search and completion to executable frozen[\s\S]*manual-only members[\s\S]*do not block `completed`[\s\S]*never create a forbidden run/i);
+  assert.match(inboxPreflight, /Scope both search and\s+completion to executable frozen[\s\S]*manual-only members[\s\S]*do not block `completed`[\s\S]*never create a forbidden run/i);
   assert.match(inboxPreflight, /exact requisition ID[\s\S]*same employer or verified ATS tenant\/sender identity[\s\S]*bare\s+requisition identifier is not globally unique/i);
   assert.match(inboxPreflight, /verified duplicate[\s\S]*preserve that member without\s+form mutation[\s\S]*continue\s+unaffected siblings/i);
   assert.match(inboxPreflight, /Never inspect another unrelated private-data source/i);
@@ -602,11 +608,13 @@ test('Apply browser ledger keeps inbox preflight recovery value-free and local',
     'utf8',
   );
   assert.match(lifecycle, /value-free state keyed\s+by the exact batch ID/i);
-  assert.match(lifecycle, /`not_offered`, `declined`, `unavailable`,[\s\S]*`consented_pending`, or `completed`/i);
+  assert.match(lifecycle, /`not_offered`, `declined`, `unavailable`,[\s\S]*`search_failed`, `consented_pending`, or `completed`/i);
   assert.match(lifecycle, /never go to Trackly/i);
   assert.match(lifecycle, /(?:ledger\s+)?state is absent\s+before any inbox search or form mutation[\s\S]*fresh\s+offer/i);
   assert.match(lifecycle, /re-selects or confirms the exact inbox connector and account[\s\S]*Never\s+substitute the client's current default mailbox/i);
   assert.match(lifecycle, /Keep `consented_pending` until[\s\S]*every positive match is durably recorded/i);
+  assert.match(lifecycle, /`reconciled` or local value-free `cleared_by_user` disposition[\s\S]*without an explicit disposition remains free of form mutation/i);
+  assert.match(lifecycle, /connector query fails[\s\S]*`search_failed`[\s\S]*continuing\s+browser\s+work/i);
   assert.match(lifecycle, /Remove this state when the\s+batch expires/i);
 });
 
@@ -646,6 +654,7 @@ test('Apply skill preserves frozen members across backend start failures', () =>
   assert.match(batchOrchestration, /bounded contingency budget is `52 \+ \(3 \* R\)`/);
   assert.match(batchOrchestration, /seven additional calls after its baseline run start and surface binding/i);
   assert.match(batchOrchestration, /`52 \+ \(3 \* R\) \+ \(7 \* D\)`/);
+  assert.match(batchOrchestration, /external inbox[\s\S]*excluded because it never reaches Trackly's MCP or[\s\S]*`1 \+ 2E`[\s\S]*`E` cannot exceed 20/i);
   assert.match(batchOrchestration, /never spend the duplicate allowance[\s\S]*success-page or explicit-user-confirmation authority/i);
   assert.match(batchOrchestration, /`R` is the number of affected members and cannot exceed 20/);
   assert.match(skill, /route canonical `maintenance_mode` or legacy `planned_maintenance`[\s\S]*Route maintenance on either attempt/);
