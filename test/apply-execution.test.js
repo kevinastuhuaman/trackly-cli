@@ -326,12 +326,15 @@ test('skill 4.3 recovers executions before legacy batches and distinguishes comp
   assert.match(orchestration, /immutable child batch/i);
   assert.match(orchestration, /newly saved jobs[^\n]*next execution/i);
   assert.match(orchestration, /never reconstruct[^\n]*progress/i);
-  assert.match(orchestration, /start response's authoritative `progress` and `nextAction`/i);
+  assert.match(orchestration, /start response's authoritative `progress`\s+and\s+`nextAction`/i);
   assert.match(skill, /Immediately consume the start response's authoritative `progress` and `nextAction`/i);
   assert.match(skill, /advance_apply_execution` with the actual current `browserSurface`/i);
   assert.match(skill, /`expectedMemberVersion`, `expectedInspectionEpoch`/);
   assert.match(orchestration, /current authoritative progress and the current execution revision/i);
   assert.match(orchestration, /response\.execution\.currentWave\.batchId/);
+  assert.match(orchestration, /execution\.unresolvedWaves[^\n]*ascending `waveOrder`/i);
+  assert.match(orchestration, /currentWave\.batchId[\s\S]*latest scheduling identity[\s\S]*not[\s\S]*complete recovery set/i);
+  assert.match(skill, /Recover every entry in `execution\.unresolvedWaves` in ascending `waveOrder`/i);
   assert.match(orchestration, /advance response[\s\S]*response\.batchId/i);
 });
 

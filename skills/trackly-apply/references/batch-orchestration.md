@@ -22,11 +22,16 @@ chat, browser tabs, or a client-side queue.
 The start call itself returns that authoritative progress funnel and
 `nextAction`. Consume that response immediately before opening, claiming, or
 mutating a browser surface; do not issue a blind advance or infer a first wave.
-For start, active-recovery, and get responses, use
-`response.execution.currentWave.batchId` as the only child-batch recovery
-target. For an advance response that creates a wave, use its top-level
-`response.batchId`. Never guess across those response shapes. If the applicable
-field is null, follow `nextAction` rather than guessing a prior batch.
+For start, active-recovery, and get responses, recover every entry in
+`response.execution.unresolvedWaves` in ascending `waveOrder`. This list is the
+authoritative browser-handoff set, including an older wave that still has a
+draft, question, review, submission, or closure obligation after a newer
+replacement wave was created. Use `response.execution.currentWave.batchId`
+only as the latest scheduling identity when following `nextAction`; it is not
+the complete recovery set. For an advance response that creates a wave, use
+its top-level `response.batchId`. Never guess across those response shapes. If
+the applicable field is null or `unresolvedWaves` is empty, follow
+`nextAction` rather than guessing a prior batch.
 
 ## Parent execution and child waves
 
@@ -95,8 +100,11 @@ or pagination in the prompt.
 For an execution request:
 
 1. call `trackly_get_active_apply_execution`;
-2. resume it or start one `complete_next_n_accessible` execution, then consume
-   the start response's authoritative `progress` and `nextAction`;
+2. resume it or start one `complete_next_n_accessible` execution; on recovery,
+   reclaim every `execution.unresolvedWaves` entry in ascending `waveOrder`,
+   then consume the response's authoritative `progress` and `nextAction`. For a
+   new execution, consume the start response's authoritative `progress` and
+   `nextAction` before any advance;
 3. follow that `nextAction` and page/claim only the returned child batch;
 4. classify all current-wave members and persist dispositions;
 5. bring accessible members through the ordinary batch integrity and review
