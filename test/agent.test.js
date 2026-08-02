@@ -500,6 +500,35 @@ test('agent doctor compatibility rejects stale CLI and MCP contract versions', (
   assert.equal(missingVersions.compatible, false);
 });
 
+test('agent doctor accepts the legacy MCP contract only while accessible execution is disabled', () => {
+  const clients = [{
+    client: 'codex',
+    installed: true,
+    installedSkillVersion: '4.3.0',
+  }];
+  const base = {
+    version: '3.4.0',
+    mcpContractVersion: '3.4.0',
+    compatibleCliMinimumVersion: '0.10.2',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.2.6',
+  };
+
+  const disabled = agent.evaluateApplyCompatibility({
+    ...base,
+    batchOrchestration: { accessibleExecution: { enabled: false } },
+  }, clients);
+  assert.equal(disabled.mcpContractCompatible, true);
+  assert.equal(disabled.compatible, true);
+
+  const enabled = agent.evaluateApplyCompatibility({
+    ...base,
+    batchOrchestration: { accessibleExecution: { enabled: true } },
+  }, clients);
+  assert.equal(enabled.mcpContractCompatible, false);
+  assert.equal(enabled.compatible, false);
+});
+
 test('agent doctor fails browser readiness closed unless a full semantic surface exists', () => {
   assert.equal(agent.liveBrowserReady({ codex: false, codexComputerUse: false, claude: null }), false);
   assert.equal(agent.liveBrowserReady({ codex: true, codexComputerUse: false, claude: null }), false);
