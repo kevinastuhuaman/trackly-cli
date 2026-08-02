@@ -7,6 +7,7 @@ const APPLY_CONTRACT = require('../contracts/trackly-apply-tools.json');
 
 const APPLY_BROWSER_SURFACES = APPLY_CONTRACT.constants.applyBrowserSurfaces;
 const APPLY_EXECUTION_ACCESS_CLASSIFICATIONS = APPLY_CONTRACT.constants.applyAccessClassifications;
+const APPLY_EXECUTION_DISPOSITION_SOURCES = APPLY_CONTRACT.constants.applyExecutionDispositionSources;
 const APPLY_SCENARIO_CODES = APPLY_CONTRACT.constants.applyScenarioCodes;
 const APPLY_CHECKPOINT_ACTION_CODES = APPLY_CONTRACT.constants.applyCheckpointActionCodes;
 const APPLY_EXECUTION_MAX_TARGET = APPLY_CONTRACT.constants.applyExecutionMaxTarget;
@@ -27,7 +28,7 @@ const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
 const applyExecutionDispositionSchema = z.object({
   jobId: z.number().int().min(1),
   classification: z.enum(APPLY_EXECUTION_ACCESS_CLASSIFICATIONS),
-  source: z.literal('live_probe'),
+  source: z.enum(APPLY_EXECUTION_DISPOSITION_SOURCES),
   batchId: z.number().int().min(1),
   memberId: z.number().int().min(1),
   runId: z.number().int().min(1),

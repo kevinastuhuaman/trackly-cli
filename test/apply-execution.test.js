@@ -184,6 +184,7 @@ test('execution contract uses bounded targets, revisions, idempotency, and typed
     'operator_stop',
   ]);
   assert.deepEqual(contract.constants.applyExecutionDispositionSources, ['live_probe']);
+  assert.match(tools, /source: z\.enum\(APPLY_EXECUTION_DISPOSITION_SOURCES\)/);
 });
 
 test('local MCP accepts only fully bound live-probe dispositions', () => {
@@ -220,7 +221,7 @@ test('local MCP accepts only fully bound live-probe dispositions', () => {
     assert.throws(() => registration.schema.parse({
       ...common,
       dispositions: [{ ...bound, source }],
-    }), /Invalid literal value|Invalid input/i, source);
+    }), z.ZodError, source);
   }
   assert.throws(() => registration.schema.parse({
     ...common,

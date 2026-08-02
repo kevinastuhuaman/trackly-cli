@@ -33,6 +33,7 @@ for (const constantName of [
   'applyAccessClassifications',
   'applyExecutionDispositionSources',
   'applyExecutionStopReasonCodes',
+  'applyProbeCleanupPreferences',
 ]) {
   assert.deepEqual(
     hosted.constants[constantName],
