@@ -15,10 +15,22 @@ runs remain recovery-only compatibility paths.
   queue records. Never replenish or replace that inspection batch.
 - A saved/check-later job is already approved. Neither mode rescans fit.
 
-Call `trackly_get_active_apply_execution` before legacy active-batch recovery.
+Call `trackly_get_active_apply_execution` before legacy active-batch recovery,
+even when the fetched protocol reports accessible execution disabled. A
+rollback may preserve an execution whose child batches are intentionally
+hidden from legacy recovery. When disabled and one is active, recover it
+read-only and permit only get or stop operations; never start, advance, or
+record dispositions until the capability is enabled. When disabled and none
+is active, continue through the fixed-batch compatibility path.
 Never create a second execution because context or tabs were lost. Read the
 server's progress and `nextAction`; never reconstruct execution progress from
 chat, browser tabs, or a client-side queue.
+If a new fill/apply request changes the target from the active execution,
+explain the mismatch and obtain explicit confirmation. Then stop the old
+execution with reason `target_changed`, refetch and verify its terminal state,
+and only then start the new target. If the user asks to stop, stop it with
+reason `user_requested` using the latest revision and a fresh idempotency key,
+then refetch and verify `stopped` or `closed` before reporting completion.
 The start call itself returns that authoritative progress funnel and
 `nextAction`. Consume that response immediately before opening, claiming, or
 mutating a browser surface; do not issue a blind advance or infer a first wave.

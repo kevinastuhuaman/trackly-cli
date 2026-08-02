@@ -320,6 +320,11 @@ test('skill 4.3 recovers executions before legacy batches and distinguishes comp
   assert.match(skill, /durablyReviewReady/);
   assert.match(skill, /explicit[^\n]*inspect[^\n]*fixed[^\n]*batch/i);
   assert.match(skill, /stop it with reason `target_changed`/i);
+  assert.match(skill, /target differs[\s\S]*explicit confirmation[\s\S]*reason `target_changed`[\s\S]*terminal state/i);
+  assert.match(skill, /asks to stop[\s\S]*reason `user_requested`[\s\S]*refetch[\s\S]*`stopped` or `closed`/i);
+  assert.match(skill, /even when `batchOrchestration\.accessibleExecution\.enabled` is false/i);
+  assert.match(skill, /When disabled and an execution is active[\s\S]*read-only[\s\S]*never start, advance, or record dispositions/i);
+  assert.match(tools, /always call trackly_get_active_apply_execution[\s\S]*even when accessible execution is disabled/i);
   assert.match(tools, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(tools, /generic queue-first instruction applies only when resuming that already-active legacy 3\.2/i);
   assert.match(orchestration, /original recent-first[^\n]*snapshot/i);
