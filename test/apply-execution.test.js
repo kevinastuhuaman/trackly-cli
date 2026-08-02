@@ -101,6 +101,8 @@ test('execution tools validate and send the exact HTTP contract', async () => {
         batchId: 9,
         memberId: 10,
         runId: 11,
+        expectedMemberVersion: 3,
+        expectedInspectionEpoch: 1,
         probeOnlyNoDraft: true,
         browserSurface: 'codex_in_app',
       }],
@@ -116,6 +118,8 @@ test('execution tools validate and send the exact HTTP contract', async () => {
           batchId: 9,
           memberId: 10,
           runId: 11,
+          expectedMemberVersion: 3,
+          expectedInspectionEpoch: 1,
           probeOnlyNoDraft: true,
           browserSurface: 'codex_in_app',
         }],
@@ -197,9 +201,14 @@ test('local MCP accepts only fully bound live-probe dispositions', () => {
     batchId: 9,
     memberId: 10,
     runId: 11,
+    expectedMemberVersion: 3,
+    expectedInspectionEpoch: 1,
     browserSurface: 'codex_in_app',
   };
-  for (const missing of ['batchId', 'memberId', 'runId', 'browserSurface']) {
+  for (const missing of [
+    'batchId', 'memberId', 'runId', 'expectedMemberVersion',
+    'expectedInspectionEpoch', 'browserSurface',
+  ]) {
     const disposition = { ...bound };
     delete disposition[missing];
     assert.throws(() => registration.schema.parse({

@@ -31,6 +31,8 @@ const applyExecutionDispositionSchema = z.object({
   batchId: z.number().int().min(1),
   memberId: z.number().int().min(1),
   runId: z.number().int().min(1),
+  expectedMemberVersion: z.number().int().min(1),
+  expectedInspectionEpoch: z.number().int().min(0),
   probeOnlyNoDraft: z.boolean().optional(),
   browserSurface: z.enum(APPLY_BROWSER_SURFACES),
 }).strict();
