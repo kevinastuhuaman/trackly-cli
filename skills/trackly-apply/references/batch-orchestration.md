@@ -75,9 +75,9 @@ Record live probe results through
 value-free classifications: `accessible`, `authentication_required`,
 `account_creation_required`, `otp_required`, `captcha_before_form`,
 `captcha_at_submit`, `manual_only`, and `unknown_unobservable`. Every public
-disposition is a `live_probe` and must include the exact current-wave `batchId`,
-`memberId`, `runId`, `expectedMemberVersion`, `expectedInspectionEpoch`, and
-`browserSurface`. These optimistic member bindings reject observations from a
+disposition is a `live_probe` and must include the exact current-wave `jobId`,
+`batchId`, `memberId`, `runId`, `expectedMemberVersion`,
+`expectedInspectionEpoch`, and `browserSurface`. These optimistic member bindings reject observations from a
 superseded browser inspection after recovery. Cache hints and static-policy
 classifications are server-owned scheduling concepts: the agent cannot submit
 or synthesize them. They may prioritize a probe, but they never authorize

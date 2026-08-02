@@ -527,6 +527,10 @@ test('agent doctor accepts the legacy MCP contract only while accessible executi
   }, clients);
   assert.equal(enabled.mcpContractCompatible, false);
   assert.equal(enabled.compatible, false);
+
+  const missingCapability = agent.evaluateApplyCompatibility(base, clients);
+  assert.equal(missingCapability.mcpContractCompatible, false);
+  assert.equal(missingCapability.compatible, false);
 });
 
 test('agent doctor fails browser readiness closed unless a full semantic surface exists', () => {
