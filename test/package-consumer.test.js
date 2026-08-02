@@ -159,6 +159,12 @@ test('clean npm install runs the packed CLI, MCP, agent setup, and audit command
   writeMcpRequest(mcp, 2, 'tools/list', {});
   const toolNames = (await listed).result.tools.map((tool) => tool.name);
   assert.ok(toolNames.includes('trackly_get_apply_protocol'));
+  assert.ok(toolNames.includes('trackly_start_apply_execution'));
+  assert.ok(toolNames.includes('trackly_get_active_apply_execution'));
+  assert.ok(toolNames.includes('trackly_get_apply_execution'));
+  assert.ok(toolNames.includes('trackly_advance_apply_execution'));
+  assert.ok(toolNames.includes('trackly_record_apply_execution_dispositions'));
+  assert.ok(toolNames.includes('trackly_stop_apply_execution'));
   assert.ok(toolNames.includes('trackly_create_apply_batch'));
   await terminateChild(mcp);
 

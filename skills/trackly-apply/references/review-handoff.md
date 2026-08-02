@@ -50,6 +50,15 @@ For a frozen batch, first summarize unresolved human actions, then provide one
 review block per run that reached `review_ready`. Continue processing other
 members before presenting the first-pass handoff.
 
+For an accessible execution, show the server-authoritative funnel before the
+per-run review blocks: `target`, `durablyReviewReady`, `submitted`,
+`reservedReviewSlots`, `currentlyFilling`, `awaitingAnswer`, `authParked`,
+`excluded`, `conflicted`, `attempted`, `remainingCandidates`,
+`queueExhausted`, `targetReached`, and `nextAction`. Do not infer these counts
+from visible tabs. Authentication-gated and excluded jobs remain in Check Later
+and are listed separately; they are not failed applications and do not consume
+the target.
+
 ## Grouped actions
 
 Group recoverable actions in this order:
@@ -87,6 +96,13 @@ consented external-agent preflight in
 [inbox-receipt-preflight.md](inbox-receipt-preflight.md). Trackly never accesses
 the mailbox. Hash the proof locally and never send confirmation text, page text,
 receipt identifiers, message metadata, or URLs as evidence.
+
+After either success-page evidence or explicit confirmation, record
+`submitted`, refetch, and require both member `submitted` and job
+`applied_confirmed`. Only then may the saved cleanup preference authorize
+closing the exact mapped tab. Verify controller/user inventory absence and
+record closure evidence before finalizing the member. Tab closure never becomes
+submission evidence.
 
 Do not claim the batch is ready until every frozen member is either
 `review_ready`, has an explicit resumable human action, is user-revoked, or has

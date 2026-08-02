@@ -2,6 +2,34 @@
 
 Run this gate after each semantic selection and again across the entire form before review.
 
+## Local field ownership
+
+Maintain a private local field ledger keyed by execution, run, inspection
+epoch, and semantic field fingerprint. Record one provenance state:
+`agent_filled`, `user_edited`, `parser_filled`, `employer_default`, or
+`unknown_external_change`. Keep only fingerprints and provenance in the
+ledger; never send form values to Trackly.
+
+Take an initial field snapshot before any mutation. When no trusted ledger
+entry exists yet, classify non-empty values observed in that initial fresh-page
+snapshot as `employer_default`; do not misclassify browser autofill or stale ATS
+defaults as user edits merely because there is no prior agent fingerprint.
+Compare canonical contact data before correcting an `employer_default` value,
+and then record the correction as `agent_filled`.
+
+After the initial snapshot, before writing a non-empty field, compare the live
+value fingerprint with the last agent-written fingerprint. Any unexplained
+difference becomes `user_edited`; preserve it byte-for-byte and never rewrite
+it unless the user explicitly asks. Snapshot every field before and after resume upload so a
+`parser_filled` change is distinguishable from a later user edit. React
+rerenders, validation sweeps, recovery, parser correction, and final review
+cannot downgrade or overwrite user ownership.
+
+After context loss without a trusted ledger, classify every unknown non-empty
+value as `unknown_external_change` and preserve it byte-for-byte. Refill only
+empty controls or values whose current fingerprint exactly matches the last
+agent-written fingerprint.
+
 ## Browser-control continuity
 
 - If the semantic browser bridge becomes unavailable, stop before the next form mutation. Coordinate-only computer use is not a safe substitute for semantic field control.

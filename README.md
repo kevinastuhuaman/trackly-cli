@@ -35,7 +35,7 @@ trackly jobs --function product
 
 ## At a Glance
 
-1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 36 local MCP tools
+1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 42 local MCP tools
 
 ## CLI Commands
 
@@ -104,7 +104,7 @@ trackly agent setup --client codex    # or claude / both
 trackly agent doctor
 ```
 
-The skill uses the profile and default resume in your Trackly account, asks only missing questions, fills user-approved saved jobs, and always stops before Submit. Support is fetched from Trackly at the start of every run: Greenhouse is full, Ashby and Lever are best effort, and 27 additional named ATS/provider classes use constrained guided mode. Employer-hosted unknown forms run only when Trackly binds them to a verified company domain. LinkedIn-hosted forms and unverified origins remain manual-only; a separately stored external application URL is evaluated under its own ATS and origin policy.
+The skill uses the profile and default resume in your Trackly account, asks only missing questions, fills user-approved saved jobs, and always stops before Submit. “Fill the next N” continues through the original recent-first Check Later snapshot until N unauthenticated forms are durably ready for your manual review; authentication walls and exclusions are reported separately and do not consume the target. An explicit “inspect the next N records” request still uses one fixed immutable batch. Support is fetched from Trackly at the start of every run: Greenhouse is full, Ashby and Lever are best effort, and 27 additional named ATS/provider classes use constrained guided mode. Employer-hosted unknown forms run only when Trackly binds them to a verified company domain. LinkedIn-hosted forms and unverified origins remain manual-only; a separately stored external application URL is evaluated under its own ATS and origin policy.
 
 Guided mode is deliberately fail-closed. The agent stops on credential entry, OTP/email verification, CAPTCHA/human verification, an unexpected employer or origin, a submit-only transition, or any field whose committed state cannot be observed. `trackly agent doctor` checks the local skill, MCP registration, protocol compatibility, declared browser/computer-use configuration, profile completeness, and default-resume metadata. Live semantic browser capability and the exact resume bytes are verified at the start of a real run.
 
@@ -177,6 +177,12 @@ Then use natural language in any of these clients:
 | trackly_get_application_profile | Get versioned profile answers and provenance |
 | trackly_get_profile_onboarding | Get schema plus missing questions |
 | trackly_update_application_profile | Save scoped answers with optimistic concurrency; revoking sensitive storage takes a two-step confirmation |
+| trackly_start_apply_execution | Start a target-counted accessible Apply execution |
+| trackly_get_active_apply_execution | Recover the active execution before legacy batch recovery |
+| trackly_get_apply_execution | Read the authoritative progress funnel and immutable child waves |
+| trackly_advance_apply_execution | Transactionally create the next eligible immutable wave |
+| trackly_record_apply_execution_dispositions | Record typed, value-free access classifications |
+| trackly_stop_apply_execution | Stop an execution without changing saved-job state |
 | trackly_create_apply_batch | Freeze an exact recent-first approved batch |
 | trackly_get_active_apply_batch | Recover the newest unexpired active batch after context loss |
 | trackly_get_apply_batch | Read frozen membership with opaque pagination |
@@ -261,7 +267,7 @@ trackly config --base-url http://127.0.0.1:3000  # Point at a different backend
 | Job search + filters | Yes | Yes | Yes |
 | Apply/save/dismiss | Yes | Yes | Yes |
 | AI-powered search | Yes (trackly ask) | Yes | Yes |
-| MCP integration | Yes (36 local tools) | -- | -- |
+| MCP integration | Yes (42 local tools) | -- | -- |
 | Browser required | No | Yes | No |
 | Best for | Terminal + AI agents | Visual browsing | Custom integrations |
 
@@ -275,7 +281,7 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 **What MCP servers exist for job searching?**
 
-trackly-cli includes a built-in MCP server with 36 tools for job search, company lookup, discovery preferences, application tracking, frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
+trackly-cli includes a built-in MCP server with 42 tools for job search, company lookup, discovery preferences, application tracking, accessible execution and frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
 
 **How do I use Claude Code for job hunting?**
 

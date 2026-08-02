@@ -13,6 +13,34 @@ ownership state, and inspection epoch. Raw tab identifiers never go to the
 Trackly backend. If the host persists the ledger, store it in a private
 mode `0600` file and remove it when the batch expires.
 
+Alongside the tab mapping, keep a private field-provenance ledger keyed by
+execution, run, inspection epoch, and semantic field fingerprint. Allowed
+states are `agent_filled`, `user_edited`, `parser_filled`,
+`employer_default`, and `unknown_external_change`. Store only local
+fingerprints and provenance; never send form values to Trackly. After context
+loss without a trusted ledger, preserve every unknown non-empty value and mark
+it `unknown_external_change` rather than refilling it.
+
+## Access probes and cleanup preference
+
+A minimal access probe is eligible for no-draft cleanup only after proving all
+pre-close conditions: no private data was entered; no form control was changed;
+no employer draft exists; the typed blocker and stored requisition are durable;
+and complete current controller/user inventories identify the exact mapped tab.
+
+Auto-close such a probe tab only when the profile's confirmed cleanup
+preference is `submitted_and_probe_blockers`. `never` closes nothing;
+`submitted_only` permits only the existing post-submission close-proof path.
+Ask once when the preference is unknown and never silently default consent.
+After the three pre-close no-draft facts are proven, the value-free disposition
+may set `probeOnlyNoDraft: true` so the access wall does not reserve a target
+slot. That assertion is independent of cleanup consent and never authorizes tab
+closure. When the saved preference and the remaining pre-close conditions permit
+closure, close the exact mapped probe tab once, capture the close receipt, and
+verify post-close absence from both controller and user inventories. If closure
+or absence proof is ambiguous, leave the tab mapped; keep only the already-proven
+no-draft disposition and never claim closure. Tab closure never becomes submission evidence.
+
 For the optional inbox receipt preflight, also keep value-free state keyed by
 the normalized configured backend origin, exact batch ID, and a local hash of
 the immutable ordered frozen member IDs: `not_offered`, `declined`, `unavailable`,
