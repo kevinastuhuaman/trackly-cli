@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-01
+
+### Added
+
+- Trackly Apply skill 4.2.8 renders server-owned onboarding screens in their
+  published order, explains questions with user-facing rationales, validates
+  published consistency rules, and retains a legacy-schema fallback.
+- After a submitted application is durably reconciled, the skill can offer once
+  to learn the user's writing voice from one to three answers they approved.
+  Saving requires active sensitive-storage consent and an explicit yes; pasted
+  samples remain an optional fallback.
+
 ## [0.10.2] - 2026-08-01
 
 ### Changed
