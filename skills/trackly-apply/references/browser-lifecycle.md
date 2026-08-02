@@ -32,11 +32,14 @@ Auto-close such a probe tab only when the profile's confirmed cleanup
 preference is `submitted_and_probe_blockers`. `never` closes nothing;
 `submitted_only` permits only the existing post-submission close-proof path.
 Ask once when the preference is unknown and never silently default consent.
-After the preference and pre-close proof permit closure, close the exact mapped
-probe tab once, capture the close receipt, and verify post-close absence from
-both controller and user inventories. Only then record the disposition with
-`probeOnlyNoDraft: true`. If closure or absence proof is ambiguous, leave the
-tab mapped and do not assert the field. Tab closure never becomes submission evidence.
+After the three pre-close no-draft facts are proven, the value-free disposition
+may set `probeOnlyNoDraft: true` so the access wall does not reserve a target
+slot. That assertion is independent of cleanup consent and never authorizes tab
+closure. When the saved preference and the remaining pre-close conditions permit
+closure, close the exact mapped probe tab once, capture the close receipt, and
+verify post-close absence from both controller and user inventories. If closure
+or absence proof is ambiguous, leave the tab mapped; keep only the already-proven
+no-draft disposition and never claim closure. Tab closure never becomes submission evidence.
 
 For the optional inbox receipt preflight, also keep value-free state keyed by
 the normalized configured backend origin, exact batch ID, and a local hash of

@@ -187,6 +187,13 @@ test('execution contract uses bounded targets, revisions, idempotency, and typed
   ]);
   assert.deepEqual(contract.constants.applyExecutionDispositionSources, ['live_probe']);
   assert.match(tools, /source: z\.enum\(APPLY_EXECUTION_DISPOSITION_SOURCES\)/);
+  const skill = read('skills/trackly-apply/SKILL.md');
+  const orchestration = read('skills/trackly-apply/references/batch-orchestration.md');
+  const lifecycle = read('skills/trackly-apply/references/browser-lifecycle.md');
+  assert.match(skill, /exact current-wave `jobId`, `batchId`, `memberId`, `runId`/);
+  assert.match(skill, /assertion releases scheduling capacity but never authorizes closing the tab/i);
+  assert.match(orchestration, /`response\.progress\.nextAction`/);
+  assert.match(lifecycle, /assertion is independent of cleanup consent and never authorizes tab\s+closure/i);
 });
 
 test('local MCP accepts only fully bound live-probe dispositions', () => {

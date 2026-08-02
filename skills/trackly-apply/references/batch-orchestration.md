@@ -22,8 +22,8 @@ hidden from legacy recovery. When disabled and one is active, recover it
 read-only and permit only get or stop operations; never start, advance, or
 record dispositions until the capability is enabled. When disabled and none
 is active, continue through the fixed-batch compatibility path.
-Never create a second execution because context or tabs were lost. Read the
-server's progress and `nextAction`; never reconstruct execution progress from
+Never create a second execution because context or tabs were lost. Read
+`response.progress` and `response.progress.nextAction`; never reconstruct execution progress from
 chat, browser tabs, or a client-side queue.
 If a new fill/apply request changes the target from the active execution,
 explain the mismatch and obtain explicit confirmation. Then stop the old
@@ -31,19 +31,19 @@ execution with reason `target_changed`, refetch and verify its terminal state,
 and only then start the new target. If the user asks to stop, stop it with
 reason `user_requested` using the latest revision and a fresh idempotency key,
 then refetch and verify `stopped` or `closed` before reporting completion.
-The start call itself returns that authoritative progress funnel and
-`nextAction`. Consume that response immediately before opening, claiming, or
+The start call itself returns that authoritative funnel at `response.progress`
+and its directive at `response.progress.nextAction`. Consume that response immediately before opening, claiming, or
 mutating a browser surface; do not issue a blind advance or infer a first wave.
 For start, active-recovery, and get responses, recover every entry in
 `response.execution.unresolvedWaves` in ascending `waveOrder`. This list is the
 authoritative browser-handoff set, including an older wave that still has a
 draft, question, review, submission, or closure obligation after a newer
 replacement wave was created. Use `response.execution.currentWave.batchId`
-only as the latest scheduling identity when following `nextAction`; it is not
+only as the latest scheduling identity when following `response.progress.nextAction`; it is not
 the complete recovery set. For an advance response that creates a wave, use
 its top-level `response.batchId`. Never guess across those response shapes. If
 the applicable field is null or `unresolvedWaves` is empty, follow
-`nextAction` rather than guessing a prior batch.
+`response.progress.nextAction` rather than guessing a prior batch.
 
 ## Parent execution and child waves
 
