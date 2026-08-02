@@ -23,17 +23,20 @@ it `unknown_external_change` rather than refilling it.
 
 ## Access probes and cleanup preference
 
-A minimal access probe is `probe_only_no_draft` only after proving all of the
-following: No private data was entered; No form control was changed; No
-employer draft exists; the typed blocker and stored requisition are durable;
-and complete controller/user inventories can prove a close receipt and
-post-close absence.
+A minimal access probe is eligible for no-draft cleanup only after proving all
+pre-close conditions: no private data was entered; no form control was changed;
+no employer draft exists; the typed blocker and stored requisition are durable;
+and complete current controller/user inventories identify the exact mapped tab.
 
 Auto-close such a probe tab only when the profile's confirmed cleanup
 preference is `submitted_and_probe_blockers`. `never` closes nothing;
 `submitted_only` permits only the existing post-submission close-proof path.
 Ask once when the preference is unknown and never silently default consent.
-Tab closure never becomes submission evidence.
+After the preference and pre-close proof permit closure, close the exact mapped
+probe tab once, capture the close receipt, and verify post-close absence from
+both controller and user inventories. Only then record the disposition with
+`probeOnlyNoDraft: true`. If closure or absence proof is ambiguous, leave the
+tab mapped and do not assert the field. Tab closure never becomes submission evidence.
 
 For the optional inbox receipt preflight, also keep value-free state keyed by
 the normalized configured backend origin, exact batch ID, and a local hash of

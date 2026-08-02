@@ -10,10 +10,17 @@ epoch, and semantic field fingerprint. Record one provenance state:
 `unknown_external_change`. Keep only fingerprints and provenance in the
 ledger; never send form values to Trackly.
 
-Before writing a non-empty field, compare the live value fingerprint with the
-last agent-written fingerprint. Any unexplained difference becomes
-`user_edited`; preserve it byte-for-byte and never rewrite it unless the user
-explicitly asks. Snapshot every field before and after resume upload so a
+Take an initial field snapshot before any mutation. When no trusted ledger
+entry exists yet, classify non-empty values observed in that initial fresh-page
+snapshot as `employer_default`; do not misclassify browser autofill or stale ATS
+defaults as user edits merely because there is no prior agent fingerprint.
+Compare canonical contact data before correcting an `employer_default` value,
+and then record the correction as `agent_filled`.
+
+After the initial snapshot, before writing a non-empty field, compare the live
+value fingerprint with the last agent-written fingerprint. Any unexplained
+difference becomes `user_edited`; preserve it byte-for-byte and never rewrite
+it unless the user explicitly asks. Snapshot every field before and after resume upload so a
 `parser_filled` change is distinguishable from a later user edit. React
 rerenders, validation sweeps, recovery, parser correction, and final review
 cannot downgrade or overwrite user ownership.

@@ -57,7 +57,7 @@ MCP setup for Claude Code:
 claude mcp add --scope user trackly -- trackly mcp
 ```
 
-The 36 MCP tools include the complete search, network, profile, and Trackly Apply set documented in `docs/trackly-tools.md`. Keep this count synchronized with `mcp/server.js`, `README.md`, and the docs-drift tests.
+The 42 MCP tools include the complete search, network, profile, and Trackly Apply set documented in `docs/trackly-tools.md`. Keep this count synchronized with `mcp/server.js`, `README.md`, and the docs-drift tests.
 
 Job function values — **14 canonical values** that match backend `ALL_JOB_FUNCTIONS` at `granola-followup-app/src/routes/jobscout-filter-utils.ts:17-21`, the backend `job_function` DB column, and the local mirror `JOB_FUNCTIONS` in `mcp/server.js`: `product`, `engineering`, `design`, `data`, `marketing`, `sales`, `partnerships`, `finance`, `strategy`, `operations`, `people`, `legal`, `support`, `other`. `partnerships` is documented in CHANGELOG `0.2.1`; any doc still listing 13 values is stale. The MCP test at `test/mcp-schema.test.js` locks this local/backend mapping.
 

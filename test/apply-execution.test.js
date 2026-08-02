@@ -316,6 +316,9 @@ test('skill 4.3 recovers executions before legacy batches and distinguishes comp
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);
   assert.match(skill, /explicit[^\n]*inspect[^\n]*fixed[^\n]*batch/i);
+  assert.match(skill, /stop it with reason `target_changed`/i);
+  assert.match(tools, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
+  assert.match(tools, /generic queue-first instruction applies only when resuming that already-active legacy 3\.2/i);
   assert.match(orchestration, /original recent-first[^\n]*snapshot/i);
   assert.match(orchestration, /immutable child batch/i);
   assert.match(orchestration, /newly saved jobs[^\n]*next execution/i);
@@ -345,17 +348,26 @@ test('field provenance preserves user and unknown external edits across recovery
     assert.match(`${integrity}\n${lifecycle}`, new RegExp(provenance));
   }
   assert.match(integrity, /compare[\s\S]*?last agent-written fingerprint/i);
+  assert.match(integrity, /initial field snapshot[\s\S]*?employer_default/i);
+  assert.match(integrity, /do not misclassify[\s\S]*?browser autofill[\s\S]*?user edits/i);
   assert.match(integrity, /preserve[\s\S]*?byte-for-byte/i);
   assert.match(lifecycle, /context\s+loss[\s\S]*?preserve every unknown non-empty value/i);
   assert.match(`${integrity}\n${lifecycle}`, /never send[\s\S]*?form values[\s\S]*?Trackly/i);
 });
 
 test('probe-only cleanup is consented, no-draft, and separate from submission proof', () => {
-  assert.match(lifecycle, /probe_only_no_draft/);
+  assert.match(`${skill}\n${lifecycle}`, /probeOnlyNoDraft: true/);
   assert.match(lifecycle, /never|submitted_only|submitted_and_probe_blockers/);
   assert.match(lifecycle, /No private data was entered/i);
   assert.match(lifecycle, /No form control was changed/i);
   assert.match(lifecycle, /No\s+employer draft exists/i);
+  assert.match(lifecycle, /pre-close[\s\S]*close receipt[\s\S]*post-close absence/i);
   assert.match(lifecycle, /tab closure never becomes submission evidence/i);
   assert.match(handoff, /submitted[\s\S]*applied_confirmed[\s\S]*clos/i);
+});
+
+test('redirected access probes report only fresh live evidence and never synthesize cache fields', () => {
+  assert.doesNotMatch(tools, /cacheHint=false/);
+  assert.match(tools, /report only the fresh live disposition[\s\S]*backend invalidate its own hint/i);
+  assert.match(skill, /redirect or contradictory result[\s\S]*current live observation/i);
 });

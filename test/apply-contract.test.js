@@ -505,7 +505,7 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
   assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.3\.0 or newer/i);
-  assert.match(promptRegion, /Protocol 3\.2 remains valid only for the explicit legacy single-run workflow/i);
+  assert.match(promptRegion, /Protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
