@@ -26,7 +26,31 @@ if (!fs.existsSync(hostedContractPath)) {
 
 const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
+
+for (const constantName of [
+  'applyExecutionMaxTarget',
+  'applyBrowserSurfaces',
+  'applyAccessClassifications',
+  'applyExecutionDispositionSources',
+  'applyExecutionStopReasonCodes',
+]) {
+  assert.deepEqual(
+    hosted.constants[constantName],
+    local.constants[constantName],
+    `${constantName} drifted between hosted and local execution contracts`,
+  );
+}
+assert.equal(
+  local.tools.trackly_record_apply_execution_dispositions,
+  hosted.tools.trackly_record_apply_execution_dispositions,
+  'trackly_record_apply_execution_dispositions schema alias drifted',
+);
 assert.deepEqual(hosted, local, 'Hosted and local Trackly Apply MCP contracts drifted');
+assert.match(
+  local.tools.trackly_record_apply_execution_dispositions,
+  /applyExecutionDispositionSchema/,
+  'Disposition tool must reference the named executable schema',
+);
 
 function schemaDefinition(source, name, sourcePath) {
   const declaration = new RegExp(`const\\s+${name}\\s*=\\s*`).exec(source);
@@ -63,6 +87,7 @@ const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])
 const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
 const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
 for (const schemaName of [
+  'applyExecutionDispositionSchema',
   'truthCertificationCommon',
   'truthCertificationSchema',
   'startApplyRunSchema',

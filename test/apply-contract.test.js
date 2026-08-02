@@ -99,12 +99,12 @@ test('documented local MCP tool count matches every registered tool', () => {
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
-  assert.equal(registeredTools.length, 36);
+  assert.equal(registeredTools.length, 42);
   assert.equal(new Set(registeredTools).size, registeredTools.length);
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.4.0');
+  assert.equal(contract.contractVersion, '3.5.0');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -176,6 +176,7 @@ test('Apply contract owns value-free bulk checkpoint semantics', () => {
   assert.deepEqual(contract.constants.applyCheckpointActionCodes, [
     'answer/unknown',
     'auth/sign_in',
+    'auth/account_creation',
     'auth/otp',
     'captcha/before_form',
     'captcha/at_submit',
@@ -467,6 +468,22 @@ test('Apply observation contract accepts redacted browser scenario metadata', ()
   assert.doesNotMatch(schema, /answerValue|pageText/);
 });
 
+test('hosted parity verifier compares execution disposition body, alias, and constants', () => {
+  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
+
+  assert.match(verifier, /'applyExecutionDispositionSchema'/);
+  assert.match(verifier, /trackly_record_apply_execution_dispositions schema alias drifted/);
+  for (const constantName of [
+    'applyExecutionMaxTarget',
+    'applyBrowserSurfaces',
+    'applyAccessClassifications',
+    'applyExecutionDispositionSources',
+    'applyExecutionStopReasonCodes',
+  ]) {
+    assert.match(verifier, new RegExp(`'${constantName}'`));
+  }
+});
+
 test('Apply MCP prompt gates resume preparation on the same browser binding', () => {
   const browserGate = source.indexOf('Reclaim semantic browser control');
   const prepare = source.indexOf('prepare the run-bound resume locally', browserGate);
@@ -475,7 +492,7 @@ test('Apply MCP prompt gates resume preparation on the same browser binding', ()
   assert.match(source.slice(browserGate, prepare), /browser_ready attestation/);
 });
 
-test('Apply MCP evidence preserves custom bounds and prompt gates new batches on protocol 3.3.1', () => {
+test('Apply MCP evidence preserves custom bounds and prompt gates new executions on protocol 3.4', () => {
   const evidenceRegion = source.slice(
     source.indexOf("'trackly_get_apply_evidence'"),
     source.indexOf("'trackly_get_apply_protocol'"),
@@ -487,19 +504,19 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require(?:s)? skill 4\.2\.8 or newer/i);
-  assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
+  assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.3\.0 or newer/i);
+  assert.match(promptRegion, /Protocol 3\.2 remains valid only for the explicit legacy single-run workflow/i);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.8 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.3 requires protocol 3.4 for executions and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.8 requires protocol major 3 and protocol 3\.3\.1 or newer/);
-  assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
-  assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
+  assert.match(skill, /Skill 4\.3\.0 requires protocol 3\.4\.0 or newer/);
+  assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
+  assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.8/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.3\.0/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 

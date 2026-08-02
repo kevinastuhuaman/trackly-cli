@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-01
+
+### Added
+
+- Apply protocol 3.4 and skill 4.3 add server-owned accessible executions:
+  “fill the next N” now continues through one recent-first Check Later snapshot
+  until N unauthenticated forms are durably ready for manual review.
+- Six execution MCP tools expose recovery, authoritative progress, immutable
+  continuation waves, typed access dispositions, transactional advance, and
+  safe stop behavior.
+- The browser harness now preserves user-edited and unknown non-empty fields
+  with a private local provenance ledger and supports consented no-draft probe
+  cleanup without weakening origin, resume, truth, or manual-Submit gates.
+
+### Changed
+
+- Explicit “inspect the next N records” requests keep the existing immutable
+  fixed-batch behavior. Authentication walls and static exclusions remain in
+  Check Later and no longer consume accessible-completion targets.
+
 ## [0.11.0] - 2026-08-01
 
 ### Added

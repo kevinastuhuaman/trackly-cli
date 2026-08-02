@@ -13,6 +13,28 @@ ownership state, and inspection epoch. Raw tab identifiers never go to the
 Trackly backend. If the host persists the ledger, store it in a private
 mode `0600` file and remove it when the batch expires.
 
+Alongside the tab mapping, keep a private field-provenance ledger keyed by
+execution, run, inspection epoch, and semantic field fingerprint. Allowed
+states are `agent_filled`, `user_edited`, `parser_filled`,
+`employer_default`, and `unknown_external_change`. Store only local
+fingerprints and provenance; never send form values to Trackly. After context
+loss without a trusted ledger, preserve every unknown non-empty value and mark
+it `unknown_external_change` rather than refilling it.
+
+## Access probes and cleanup preference
+
+A minimal access probe is `probe_only_no_draft` only after proving all of the
+following: No private data was entered; No form control was changed; No
+employer draft exists; the typed blocker and stored requisition are durable;
+and complete controller/user inventories can prove a close receipt and
+post-close absence.
+
+Auto-close such a probe tab only when the profile's confirmed cleanup
+preference is `submitted_and_probe_blockers`. `never` closes nothing;
+`submitted_only` permits only the existing post-submission close-proof path.
+Ask once when the preference is unknown and never silently default consent.
+Tab closure never becomes submission evidence.
+
 For the optional inbox receipt preflight, also keep value-free state keyed by
 the normalized configured backend origin, exact batch ID, and a local hash of
 the immutable ordered frozen member IDs: `not_offered`, `declined`, `unavailable`,
