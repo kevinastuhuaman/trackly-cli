@@ -22,8 +22,11 @@ chat, browser tabs, or a client-side queue.
 The start call itself returns that authoritative progress funnel and
 `nextAction`. Consume that response immediately before opening, claiming, or
 mutating a browser surface; do not issue a blind advance or infer a first wave.
-Use the returned `currentWave.batchId` as the only child-batch recovery target;
-if it is null, follow `nextAction` rather than guessing a prior batch.
+For start, active-recovery, and get responses, use
+`response.execution.currentWave.batchId` as the only child-batch recovery
+target. For an advance response that creates a wave, use its top-level
+`response.batchId`. Never guess across those response shapes. If the applicable
+field is null, follow `nextAction` rather than guessing a prior batch.
 
 ## Parent execution and child waves
 
