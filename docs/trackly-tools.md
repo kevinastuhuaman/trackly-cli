@@ -107,7 +107,7 @@ API-key creation attempts.
 - **trackly_get_active_apply_execution** — Recover the active execution before legacy batch recovery.
 - **trackly_get_apply_execution** — Read an execution's latest current-wave identity and authoritative aggregate progress funnel.
 - **trackly_advance_apply_execution** — Transactionally select the next wave from the execution's original recent-first snapshot for the declared `browserSurface`. Same-key retries return current authoritative progress and the current execution revision.
-- **trackly_record_apply_execution_dispositions** — Record typed, value-free live-probe classifications for the current wave. Every item requires the exact `batchId`, `memberId`, `runId`, `expectedMemberVersion`, `expectedInspectionEpoch`, and `browserSurface`; cache/static scheduling records are server-owned and cannot be submitted through MCP.
+- **trackly_record_apply_execution_dispositions** — Record typed, value-free live-probe classifications for the current wave. Every item requires `jobId`, one allowed `classification`, `source: 'live_probe'`, and the exact `batchId`, `memberId`, `runId`, `expectedMemberVersion`, `expectedInspectionEpoch`, and `browserSurface`; cache/static scheduling records are server-owned and cannot be submitted through MCP.
 - **trackly_stop_apply_execution** — Stop an execution with optimistic revision and idempotency guards.
 - **trackly_create_apply_batch** — Freeze an exact recent-first set of approved jobs with an idempotency key.
 - **trackly_get_active_apply_batch** — Recover the newest unexpired active batch before creating another after chat or browser context loss.

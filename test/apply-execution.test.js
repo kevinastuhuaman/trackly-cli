@@ -17,6 +17,8 @@ const orchestration = read('skills/trackly-apply/references/batch-orchestration.
 const integrity = read('skills/trackly-apply/references/form-integrity.md');
 const lifecycle = read('skills/trackly-apply/references/browser-lifecycle.md');
 const handoff = read('skills/trackly-apply/references/review-handoff.md');
+const toolDocs = read('docs/trackly-tools.md');
+const contributorDocs = read('CLAUDE.md');
 const agent = read('lib/agent.js');
 
 const executionTools = [
@@ -374,4 +376,16 @@ test('redirected access probes report only fresh live evidence and never synthes
   assert.doesNotMatch(tools, /cacheHint=false/);
   assert.match(tools, /report only the fresh live disposition[\s\S]*backend invalidate its own hint/i);
   assert.match(skill, /redirect or contradictory result[\s\S]*current live observation/i);
+});
+
+test('execution documentation includes strict disposition inputs and every public endpoint', () => {
+  assert.match(toolDocs, /`jobId`[\s\S]*`classification`[\s\S]*`source: 'live_probe'`/);
+  for (const suffix of [
+    '/apply/executions`',
+    '/apply/executions/active`',
+    '/apply/executions/:executionId`',
+    '/apply/executions/:executionId/advance`',
+    '/apply/executions/:executionId/dispositions`',
+    '/apply/executions/:executionId/stop`',
+  ]) assert.match(contributorDocs, new RegExp(suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
