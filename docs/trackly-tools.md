@@ -110,6 +110,7 @@ API-key creation attempts.
 - **trackly_record_apply_execution_dispositions** — Record typed, value-free live-probe classifications for the current wave. Every item requires `jobId`, one allowed `classification`, `source: 'live_probe'`, and the exact `batchId`, `memberId`, `runId`, `expectedMemberVersion`, `expectedInspectionEpoch`, and `browserSurface`; cache/static scheduling records are server-owned and cannot be submitted through MCP.
 - **trackly_stop_apply_execution** — Stop an execution with optimistic revision and idempotency guards.
 - **trackly_create_apply_batch** — Freeze an exact recent-first set of approved jobs with an idempotency key.
+- **trackly_cancel_apply_batch** — Retire a legacy fixed batch after explicit user confirmation while preserving job state, submitted work, and browser tabs.
 - **trackly_get_active_apply_batch** — Recover the newest unexpired active batch before creating another after chat or browser context loss.
 - **trackly_get_apply_batch** — Page a server-owned frozen batch without reordering or replacing members.
 - **trackly_claim_apply_batch** — Acquire or renew the optimistic browser-mutation lease.

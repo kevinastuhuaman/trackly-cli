@@ -45,6 +45,25 @@ its top-level `response.batchId`. Never guess across those response shapes. If
 the applicable field is null or `unresolvedWaves` is empty, follow
 `response.progress.nextAction` rather than guessing a prior batch.
 
+## Replace an obsolete fixed batch
+
+An active legacy fixed batch and a new accessible execution are mutually
+exclusive. Explain the mismatch and summarize the batch's submitted,
+review-ready, and unresolved members before changing it. If the user chooses
+to finish it, recover only that batch. If the user says “start from scratch,”
+“leave the previous batch,” “replace it,” “discard it,” or an equivalent
+instruction, that is explicit permission to retire the fixed batch.
+
+Refetch the batch, then call `trackly_cancel_apply_batch` with its latest
+revision, a fresh idempotency key, and reason `user_requested_restart`. Refetch
+again and prove no active fixed batch remains before starting the requested
+execution in the same turn. Cancellation preserves Check Later and Applied job
+states, submitted members, and all browser tabs. It invalidates pending run,
+action, attestation, and form-mutation authority. Never wait for expiry or
+offer a scheduled continuation as the normal escape path. A
+`submission_in_progress` conflict is fail-closed: preserve everything and ask
+the user to finish or resolve that submission before retrying cancellation.
+
 ## Parent execution and child waves
 
 The execution freezes one original recent-first queue snapshot and ordering
@@ -272,11 +291,16 @@ approval, prepared-resume verification, and truth-certification endpoints.
 Never send either value to observations, application answers, analytics, logs,
 or employer form fields.
 
-Prepare the resume for every run that exposes a real Resume or CV control. Show
-one consolidated proof with every run/path plus the shared resume identity,
-filename, size, and SHA-256. After explicit user approval, call
-`trackly_approve_apply_batch_resume` for the complete current run set. Reuse that
-content approval only while every returned immutable dependency remains exact.
+Prepare the resume only for runs that expose a real Resume or CV control. Show
+one consolidated file proof with every prepared run/path plus the shared resume
+identity, filename, size, and SHA-256. Separately show the complete current
+eligible frozen run set covered by the content approval, including runs whose
+forms have no upload control. After explicit user approval, call
+`trackly_approve_apply_batch_resume` for that complete current run set. This
+approves the exact content for the listed batch runs; it does not upload the
+file or create an attachment control where none exists. Never send only a
+subset, because a partial batch approval is ambiguous. Reuse that content
+approval only while every returned immutable dependency remains exact.
 Ordinary checkpoints may advance member versions without invalidating approval
 for unchanged resume bytes and run membership. Immediately before each
 attachment, call `trackly_verify_prepared_resume` with that run's resume ID and

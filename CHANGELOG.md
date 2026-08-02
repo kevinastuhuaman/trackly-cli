@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-02
+
+### Fixed
+
+- Added an explicit, idempotent legacy fixed-batch cancellation path so a
+  user-confirmed “start fresh” request can begin accessible execution
+  immediately without waiting for batch expiry or losing job and tab state.
+- Clarified that resume content approval covers the complete current eligible
+  run set, while local file preparation and upload happen only for forms that
+  actually expose a Resume/CV control.
+- Preserved structured Apply conflict codes so agents can distinguish stale
+  state, active submission, and execution-owned child batches.
+- Updated Trackly Apply skill 4.3.1 to preserve cancelled-batch tabs, revoke
+  their mutation authority, and never offer expiry reminders as the normal
+  recovery path.
+
 ## [0.12.0] - 2026-08-01
 
 ### Added

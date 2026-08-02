@@ -1,5 +1,5 @@
 {
-  "contractVersion": "3.5.0",
+  "contractVersion": "3.5.1",
   "constants": {
     "applyExecutionMaxTarget": 20,
     "applyScenarioCodes": ["browser_reclaim", "resume_upload", "resume_parser_recheck", "semantic_boolean_commit", "custom_select_commit", "multi_step_navigation", "free_text_voice", "required_error_sweep", "final_consent", "handoff_reclaim", "critical_contact_integrity", "manual_submit_boundary", "job_identity_match"],
@@ -9,6 +9,8 @@
     "applyExecutionDispositionSources": ["live_probe"],
     "applyProbeCleanupPreferences": ["never", "submitted_only", "submitted_and_probe_blockers"],
     "applyExecutionStopReasonCodes": ["user_requested", "target_changed", "session_ended", "execution_restarted", "operator_stop"],
+    "applyBatchConflictCodes": ["state_changed", "lease_unavailable", "idempotency_key_reused", "fixed_batch_not_found", "execution_child_batch", "fixed_batch_not_active", "fixed_batch_revision_changed", "submission_in_progress", "attestation_dependencies_changed", "legacy_fixed_batch_active"],
+    "fixedApplyBatchCancelReasonCodes": ["user_requested_restart"],
     "applyCheckpointPacketPhases": ["first_pass", "delta"],
     "applySurfaceBindingReasons": ["initial_binding", "recovery_binding"],
     "applySurfaceEvidenceTypes": ["surface_inventory_reconciled", "surface_missing", "surface_close_attempted", "surface_close_receipt", "surface_post_close_absent", "surface_close_failed"],
@@ -28,6 +30,7 @@
     "trackly_record_apply_execution_dispositions": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),dispositions:z.array(applyExecutionDispositionSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET)}",
     "trackly_stop_apply_execution": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),reasonCode:z.enum(APPLY_EXECUTION_STOP_REASON_CODES).optional()}",
     "trackly_create_apply_batch": "{limit:z.number().int().min(1).max(100),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
+    "trackly_cancel_apply_batch": "{batchId:z.number().int().min(1),expectedRevision:z.number().int().min(1),reasonCode:z.enum(FIXED_APPLY_BATCH_CANCEL_REASON_CODES),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_get_active_apply_batch": "{limit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),cursor:z.string().min(1).max(2048).optional(),actionLimit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),actionCursor:z.string().min(1).max(2048).optional()}",
     "trackly_get_apply_batch": "{batchId:z.number().int().min(1),limit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),cursor:z.string().min(1).max(2048).optional(),actionLimit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),actionCursor:z.string().min(1).max(2048).optional()}",
     "trackly_claim_apply_batch": "{batchId:z.number().int().min(1),expectedRevision:z.number().int().min(1),leaseOwner:z.string().min(1).max(1024),leaseToken:z.string().min(1).max(1024),leaseDurationMs:z.number().int().min(15000).max(300000)}",
