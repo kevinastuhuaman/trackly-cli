@@ -331,7 +331,11 @@ test('skill 4.3 recovers executions before legacy batches and distinguishes comp
   assert.match(skill, /asks to stop[\s\S]*reason `user_requested`[\s\S]*refetch[\s\S]*`stopped` or `closed`/i);
   assert.match(skill, /even when `batchOrchestration\.accessibleExecution\.enabled` is false/i);
   assert.match(skill, /When disabled and an execution is active[\s\S]*read-only[\s\S]*never start, advance, or record dispositions/i);
-  assert.match(tools, /always call trackly_get_active_apply_execution[\s\S]*even when accessible execution is disabled/i);
+  assert.match(tools, /Only when the fetched protocol is 3\.4 or newer call trackly_get_active_apply_execution/i);
+  assert.match(tools, /For protocol 3\.3, skip the execution endpoint[\s\S]*active immutable fixed batch/i);
+  assert.match(tools, /execution\.unresolvedWaves in ascending waveOrder[\s\S]*execution\.currentWave is only the latest scheduling identity/i);
+  assert.match(tools, /immutable fixed batch is active[\s\S]*incompatible mode[\s\S]*explicit confirmation before browser mutation/i);
+  assert.match(skill, /asks for `complete_next_n_accessible` while an immutable fixed batch is active[\s\S]*explicit confirmation before any further browser mutation/i);
   assert.match(tools, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(tools, /generic queue-first instruction applies only when resuming that already-active legacy 3\.2/i);
   assert.match(orchestration, /original recent-first[^\n]*snapshot/i);
