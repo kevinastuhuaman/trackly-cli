@@ -4,8 +4,9 @@ Use this reference for free-text questions such as "Why this company?", motivati
 
 ## Calibrate once
 
-- Read `writing.voice_sample` and `writing.style_instructions` from the resolved Trackly profile.
-- Offer both optional fields during profile setup, but never block an application run when they are unknown. If a free-text question appears before the user has set them, ask once before drafting and synchronize the answer. Let the user decline a voice sample, choose intentionally blank style instructions, or continue with the plain default style for the current run.
+- Read `writing.voice_sample` and `writing.style_instructions` from the resolved Trackly profile. A voice sample is learned from free-text answers the user actually approved, not requested as an onboarding prerequisite.
+- These fields never block an application run when they are unknown. The user can continue with the plain default style for the current run or use saved style instructions; asking the user to paste a sample is a fallback only when they explicitly want to calibrate before a completed run provides approved text.
+- Only after durable submitted/applied reconciliation, offer once to save one to three of the user's approved free-text answers as the global `writing.voice_sample`. Show which answers would be included, require an explicit yes, and save nothing on silence or ambiguity. Because the field is sensitive, make the offer only with active sensitive-storage consent; otherwise ask for consent first or skip it. If the user chooses to decline a voice sample, save `writing.voice_sample` with state `declined` at global scope and no answer text so the offer is not repeated. The user may also choose intentionally blank style instructions.
 - Treat the sample and preferences as private user data. Never copy them into the public skill, logs, observations, or another user's defaults.
 - A separate humanizer or writing skill may be used when available, but it is optional. This gate remains authoritative and self-contained.
 

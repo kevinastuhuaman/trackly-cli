@@ -487,19 +487,19 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new batches on
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require(?:s)? skill 4\.2\.7 or newer/i);
+  assert.match(promptRegion, /require(?:s)? skill 4\.2\.8 or newer/i);
   assert.match(promptRegion, /Protocol 3\.2 remains valid for the explicit legacy single-run workflow/);
   assert.match(promptRegion, /keep submission request, success-page or explicit user-confirmation, provider receipt, and three-part surface-close proof separate and redacted/);
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.2.7 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
+test('Apply skill 4.2.8 requires protocol 3.3.1 for batches and preserves 3.2 single-run compatibility', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.2\.7 requires protocol major 3 and protocol 3\.3\.1 or newer/);
+  assert.match(skill, /Skill 4\.2\.8 requires protocol major 3 and protocol 3\.3\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid for the explicit legacy single-run workflow/i);
   assert.match(skill, /an explicit 3\.2 single run may start or finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.7/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.2\.8/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 
@@ -529,6 +529,7 @@ test('Apply skill reconciles exact current-epoch submission confirmations withou
 test('Apply MCP prompt does not retain superseded compatibility wording', () => {
   const promptRegion = source.slice(source.indexOf("server.registerPrompt('trackly-apply'"));
   assert.doesNotMatch(promptRegion, /skill 4\.2\.5 or newer/i);
+  assert.doesNotMatch(promptRegion, /skill 4\.2\.7 or newer/i);
   assert.doesNotMatch(promptRegion, /Only when both the fetched protocol and the stored run protocol are 3\.3\.2 or newer/i);
   assert.match(promptRegion, /With fetched Apply protocol 3\.3\.2 or newer, stale-projection reconciliation is available for current-epoch exact-requisition success-page or explicit user-confirmation evidence/i);
   assert.match(promptRegion, /stored protocol 3\.3\.1 run may be repaired only from retained current-epoch explicit user-confirmation evidence/i);
@@ -807,8 +808,11 @@ test('Apply skill calibrates free-text answers without requiring an external hum
 
   assert.match(skill, /Do not require a separate writing or humanizer skill/);
   assert.match(writing, /`writing\.voice_sample` and `writing\.style_instructions`/);
+  assert.match(writing, /learned from free-text answers the user actually approved/i);
   assert.match(writing, /never block an application run when they are unknown/);
-  assert.match(writing, /ask once before drafting and synchronize the answer/);
+  assert.match(writing, /paste a sample.*fallback/i);
+  assert.match(writing, /one to three.*approved free-text answers/i);
+  assert.match(writing, /explicit yes/i);
   assert.match(writing, /decline a voice sample/);
   assert.match(writing, /intentionally blank style instructions/);
   assert.match(writing, /continue with the plain default style for the current run/);
@@ -819,4 +823,28 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /When a voice sample exists, compare the final response with it/);
   assert.match(writing, /When the sample was declined or remains unknown for the current run/);
   assert.match(writing, /use the saved style instructions or plain default instead/);
+});
+
+test('Apply skill consumes server-owned onboarding screens and consistency rules with a legacy fallback', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+
+  assert.match(skill, /`schema\.screens` in ascending `order`/i);
+  assert.match(skill, /one grouped question packet per screen/i);
+  assert.match(skill, /category `order` and then field `order`/i);
+  assert.match(skill, /user-facing `rationale`/i);
+  assert.match(skill, /honor `consistencyRules` before submitting/i);
+  assert.match(skill, /when `schema\.screens` is absent[\s\S]*legacy/i);
+});
+
+test('Apply skill offers voice learning only after durable submission reconciliation', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+
+  assert.match(skill, /only after the refetch proves member lifecycle `submitted` and job state `applied_confirmed`/i);
+  assert.match(skill, /never between truth certification and outcome recording/i);
+  assert.match(skill, /one to three user-approved free-text answers/i);
+  assert.match(skill, /`writing\.voice_sample` at global scope/i);
+  assert.match(skill, /sensitive-storage consent is active/i);
+  assert.match(skill, /ask for that consent first or skip the offer/i);
+  assert.match(skill, /save the field as `declined` at global scope with no answer text/i);
+  assert.match(skill, /Never save a voice sample without the user's explicit yes/i);
 });
