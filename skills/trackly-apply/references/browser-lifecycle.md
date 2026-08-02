@@ -244,3 +244,12 @@ If the recovered origin or identity differs, semantic controls are
 unobservable, or access is blocked by credentials or a pre-form challenge,
 stop private-data mutation and create the appropriate human action. Continue
 the other frozen batch members.
+
+## Tabs from a cancelled fixed batch
+
+Cancelling a legacy fixed batch retires Trackly's mutation authority; it does
+not close browser tabs or prove that an employer draft was saved. Preserve each
+mapped tab in the user-visible browser, remove it from any active mutation keep
+set, and never continue filling it after cancellation. Close it only when the
+user explicitly requests cleanup and the normal controller/user inventory
+absence proof succeeds. Cancellation is never submission evidence.

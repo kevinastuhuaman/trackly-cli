@@ -60,7 +60,7 @@ function registerRuntimeTools(apiResponse = { ok: true }) {
 }
 
 test('protocol 3.4 publishes all accessible execution tools', () => {
-  assert.equal(contract.contractVersion, '3.5.0');
+  assert.equal(contract.contractVersion, '3.5.1');
   for (const name of executionTools) {
     assert.ok(contract.tools[name], `${name} missing from contract fixture`);
     assert.match(tools, new RegExp(`['"]${name}['"]`));
@@ -153,6 +153,32 @@ test('execution tools validate and send the exact HTTP contract', async () => {
     await registration.handler(parsed);
     assert.deepEqual(calls.at(-1), expectedCall, name);
   }
+});
+
+test('explicit start-fresh confirmation cancels a legacy fixed batch without waiting for expiry', async () => {
+  const { registrations, calls } = registerRuntimeTools();
+  const registration = registrations.get('trackly_cancel_apply_batch');
+  assert.ok(registration);
+  const idempotencyKey = 'cancel-fixed-batch-key-0001';
+  await registration.handler(registration.schema.parse({
+    batchId: 19,
+    expectedRevision: 6,
+    reasonCode: 'user_requested_restart',
+    idempotencyKey,
+  }));
+  assert.deepEqual(calls.at(-1), [
+    'POST',
+    '/api/jobscout/apply/batches/19/cancel',
+    { expectedRevision: 6, reasonCode: 'user_requested_restart' },
+    false,
+    false,
+    'trackly-mcp/test',
+    { 'Idempotency-Key': idempotencyKey },
+  ]);
+  assert.match(skill, /start fresh[\s\S]*trackly_cancel_apply_batch[\s\S]*same turn/i);
+  assert.match(skill, /Never wait for expiry/i);
+  assert.match(tools, /start fresh[\s\S]*trackly_cancel_apply_batch[\s\S]*Never wait for batch expiry/i);
+  assert.match(lifecycle, /Cancelling a legacy fixed batch[\s\S]*does\s+not close browser tabs/i);
 });
 
 test('execution contract uses bounded targets, revisions, idempotency, and typed value-free dispositions', () => {
@@ -319,9 +345,9 @@ test('advance replay returns the backend current revision and progress unchanged
 });
 
 test('skill 4.3 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
-  assert.match(agent, /const SKILL_VERSION = '4\.3\.0'/);
-  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.4\.0'/);
-  assert.match(skill, /Skill 4\.3\.0 requires protocol 3\.4\.0 or newer/);
+  assert.match(agent, /const SKILL_VERSION = '4\.3\.1'/);
+  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.4\.1'/);
+  assert.match(skill, /Skill 4\.3\.1 requires protocol 3\.4\.1 or newer/);
   assert.match(skill, /trackly_get_active_apply_execution[\s\S]*before[\s\S]*trackly_get_active_apply_batch/i);
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);
@@ -334,8 +360,8 @@ test('skill 4.3 recovers executions before legacy batches and distinguishes comp
   assert.match(tools, /Only when the fetched protocol is 3\.4 or newer call trackly_get_active_apply_execution/i);
   assert.match(tools, /For protocol 3\.3, skip the execution endpoint[\s\S]*active immutable fixed batch/i);
   assert.match(tools, /execution\.unresolvedWaves in ascending waveOrder[\s\S]*execution\.currentWave is only the latest scheduling identity/i);
-  assert.match(tools, /immutable fixed batch is active[\s\S]*incompatible mode[\s\S]*explicit confirmation before browser mutation/i);
-  assert.match(skill, /asks for `complete_next_n_accessible` while an immutable fixed batch is active[\s\S]*explicit confirmation before any further browser mutation/i);
+  assert.match(tools, /immutable fixed batch is active[\s\S]*start fresh[\s\S]*trackly_cancel_apply_batch/i);
+  assert.match(skill, /asks for `complete_next_n_accessible` while an immutable fixed batch is active[\s\S]*trackly_cancel_apply_batch[\s\S]*same turn/i);
   assert.match(tools, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(tools, /generic queue-first instruction applies only when resuming that already-active legacy 3\.2/i);
   assert.match(orchestration, /original recent-first[^\n]*snapshot/i);

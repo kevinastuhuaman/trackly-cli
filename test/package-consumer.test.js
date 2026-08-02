@@ -166,6 +166,7 @@ test('clean npm install runs the packed CLI, MCP, agent setup, and audit command
   assert.ok(toolNames.includes('trackly_record_apply_execution_dispositions'));
   assert.ok(toolNames.includes('trackly_stop_apply_execution'));
   assert.ok(toolNames.includes('trackly_create_apply_batch'));
+  assert.ok(toolNames.includes('trackly_cancel_apply_batch'));
   await terminateChild(mcp);
 
   for (const requested of ['codex', 'claude', 'both']) {

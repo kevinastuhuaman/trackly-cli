@@ -99,12 +99,12 @@ test('documented local MCP tool count matches every registered tool', () => {
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
-  assert.equal(registeredTools.length, 42);
+  assert.equal(registeredTools.length, 43);
   assert.equal(new Set(registeredTools).size, registeredTools.length);
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.5.0');
+  assert.equal(contract.contractVersion, '3.5.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -271,6 +271,12 @@ test('Apply contract separates exact resume approval from late truth certificati
   assert.match(source, /\/resume-approval/);
   assert.match(source, /\/truth-certification/);
   assert.match(source, /never becomes a profile answer/i);
+  assert.match(source, /complete current eligible frozen run set/i);
+  const orchestration = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'),
+    'utf8',
+  );
+  assert.match(orchestration, /complete current[\s\S]*eligible frozen run set covered by the content approval/i);
 });
 
 test('local MCP freezes, reads, claims, and binds server-owned batches', () => {
@@ -289,6 +295,9 @@ test('local MCP freezes, reads, claims, and binds server-owned batches', () => {
 
   assert.match(createRegion, /\/api\/jobscout\/apply\/batches/);
   assert.match(createRegion, /'Idempotency-Key': idempotencyKey/);
+  assert.match(createRegion, /trackly_cancel_apply_batch/);
+  assert.match(source, /fixedApplyBatchCancelReasonCodes/);
+  assert.match(source, /trackly_cancel_apply_batch/);
   assert.match(claimRegion, /expectedRevision/);
   assert.match(claimRegion, /leaseToken/);
   for (const key of [
@@ -504,7 +513,7 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.3\.0 or newer/i);
+  assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.3\.1 or newer/i);
   assert.match(promptRegion, /Only when the fetched protocol is 3\.4 or newer call trackly_get_active_apply_execution/i);
   assert.match(promptRegion, /protocol 3\.3, skip the execution endpoint/i);
   assert.match(promptRegion, /execution\.unresolvedWaves in ascending waveOrder/i);
@@ -513,13 +522,13 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.3 requires protocol 3.4 for executions and preserves active legacy recovery', () => {
+test('Apply skill 4.3.1 requires protocol 3.4.1 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.3\.0 requires protocol 3\.4\.0 or newer/);
+  assert.match(skill, /Skill 4\.3\.1 requires protocol 3\.4\.1 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.3\.0/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.3\.1/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
 });
 

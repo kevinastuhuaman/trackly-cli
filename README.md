@@ -35,7 +35,7 @@ trackly jobs --function product
 
 ## At a Glance
 
-1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 42 local MCP tools
+1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 43 local MCP tools
 
 ## CLI Commands
 
@@ -184,6 +184,7 @@ Then use natural language in any of these clients:
 | trackly_record_apply_execution_dispositions | Record typed, value-free access classifications |
 | trackly_stop_apply_execution | Stop an execution without changing saved-job state |
 | trackly_create_apply_batch | Freeze an exact recent-first approved batch |
+| trackly_cancel_apply_batch | Retire a legacy fixed batch after explicit user confirmation |
 | trackly_get_active_apply_batch | Recover the newest unexpired active batch after context loss |
 | trackly_get_apply_batch | Read frozen membership with opaque pagination |
 | trackly_claim_apply_batch | Acquire or renew a batch mutation lease |
@@ -267,7 +268,7 @@ trackly config --base-url http://127.0.0.1:3000  # Point at a different backend
 | Job search + filters | Yes | Yes | Yes |
 | Apply/save/dismiss | Yes | Yes | Yes |
 | AI-powered search | Yes (trackly ask) | Yes | Yes |
-| MCP integration | Yes (42 local tools) | -- | -- |
+| MCP integration | Yes (43 local tools) | -- | -- |
 | Browser required | No | Yes | No |
 | Best for | Terminal + AI agents | Visual browsing | Custom integrations |
 
@@ -281,7 +282,7 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 **What MCP servers exist for job searching?**
 
-trackly-cli includes a built-in MCP server with 42 tools for job search, company lookup, discovery preferences, application tracking, accessible execution and frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
+trackly-cli includes a built-in MCP server with 43 tools for job search, company lookup, discovery preferences, application tracking, accessible execution and frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
 
 **How do I use Claude Code for job hunting?**
 
