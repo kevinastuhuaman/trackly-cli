@@ -1141,6 +1141,7 @@ async function cmdAgent(args) {
       console.log(`Exists: ${report.exists ? 'yes' : 'no'}; tested ancestor: ${report.testedAncestor}`);
       console.log(`Mount: ${report.filesystem.mountPoint || 'unobserved'}; device: ${report.filesystem.device || 'unobserved'}`);
       console.log(`Free bytes: ${report.filesystem.freeBytes ?? 'unobserved'}; available inodes: ${report.filesystem.availableInodes ?? 'unobserved'}`);
+      if (report.filesystem.errorCode) console.log(`Filesystem inspection error: ${report.filesystem.errorCode}`);
       if (report.exactFileAccess.observed) {
         console.log(`Exact file access: readable=${report.exactFileAccess.readable}; writable=${report.exactFileAccess.writable}${report.exactFileAccess.writeErrorCode ? ` (${report.exactFileAccess.writeErrorCode})` : ''}`);
       }

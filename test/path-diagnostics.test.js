@@ -5,7 +5,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { diagnoseLocalPath } = require('../lib/path-diagnostics');
+const { diagnoseLocalPath, parseFilesystemMountLine } = require('../lib/path-diagnostics');
+
+test('filesystem mount parsing preserves mount points containing spaces', () => {
+  assert.deepEqual(
+    parseFilesystemMountLine('/dev/disk3s1 1000 100 900 10% /Volumes/Trackly Data'),
+    { device: '/dev/disk3s1', mountPoint: '/Volumes/Trackly Data', observed: true },
+  );
+  assert.deepEqual(
+    parseFilesystemMountLine('malformed'),
+    { device: null, mountPoint: null, observed: false },
+  );
+});
 
 test('path diagnosis tests the exact filesystem without deleting user files', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-path-diagnostic-'));
