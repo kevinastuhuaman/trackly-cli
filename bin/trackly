@@ -1138,7 +1138,9 @@ async function cmdAgent(args) {
       if (isJSON()) return printJson(report);
       console.log(color('bold', 'Trackly exact-path diagnosis'));
       console.log(`Path: ${report.exactPath}`);
-      console.log(`Exists: ${report.exists ? 'yes' : 'no'}; tested ancestor: ${report.testedAncestor}`);
+      const existsLabel = report.exists === null ? 'unknown' : (report.exists ? 'yes' : 'no');
+      console.log(`Exists: ${existsLabel}; tested ancestor: ${report.testedAncestor}`);
+      if (report.pathInspectionErrorCode) console.log(`Path inspection error: ${report.pathInspectionErrorCode}`);
       console.log(`Mount: ${report.filesystem.mountPoint || 'unobserved'}; device: ${report.filesystem.device || 'unobserved'}`);
       console.log(`Free bytes: ${report.filesystem.freeBytes ?? 'unobserved'}; available inodes: ${report.filesystem.availableInodes ?? 'unobserved'}`);
       if (report.filesystem.errorCode) console.log(`Filesystem inspection error: ${report.filesystem.errorCode}`);

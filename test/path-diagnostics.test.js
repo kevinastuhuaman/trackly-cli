@@ -47,6 +47,19 @@ test('path diagnosis accepts only real uppercase errno-shaped codes', async () =
   );
 });
 
+test('path diagnosis returns structured evidence when parent traversal is denied', async () => {
+  const denied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+  const result = await diagnoseLocalPath('/private/blocked/application.pdf', {}, {
+    stat: async () => { throw denied; },
+  });
+  assert.equal(result.exists, null);
+  assert.equal(result.pathInspectionErrorCode, 'EACCES');
+  assert.equal(result.writableProbe.ok, false);
+  assert.equal(result.writableProbe.errorCode, 'EACCES');
+  assert.equal(result.writableProbe.scope, 'not_attempted_path_inspection_failed');
+  assert.equal(result.writableProbe.testedPath, '/private/blocked/application.pdf');
+});
+
 test('path diagnosis reports exact-file permission failure instead of sibling writability', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-path-permission-'));
   const userFile = path.join(directory, 'read-only.txt');
