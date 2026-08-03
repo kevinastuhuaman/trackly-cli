@@ -33,11 +33,15 @@ Never create a second execution because context or tabs were lost. Read
 chat, browser tabs, or a client-side queue.
 If a new fill/apply request changes the target from the active execution,
 explain the mismatch and obtain explicit confirmation. Then stop the old
-execution with reason `target_changed`, refetch until it reports `active: false`
-and `preserved: true`, and only then start the new target without continuing
-the stopped wave. If the user asks to stop, stop it with
-reason `user_requested` using the latest revision and a fresh idempotency key,
-then refetch until `active: false`, verify `stopped` or `closed`, and never
+execution with reason `target_changed`, verify the exact execution reports
+`stopped` or `closed` from the stop response or
+`trackly_get_apply_execution`, and refetch until the active-execution response
+says `active: false`. A terminal execution is returned with `preserved: true`
+only when reconciliation evidence remains; its absence is not a blocker after
+the exact execution is terminal. Only then start the new target without
+continuing the stopped wave. If the user asks to stop, use reason
+`user_requested` with the latest revision and a fresh idempotency key, verify
+the exact terminal status, then refetch until `active: false` and never
 continue its unresolved waves before reporting completion.
 The start call itself returns that authoritative funnel at `response.progress`
 and its directive at `response.progress.nextAction`. Consume that response immediately before opening, claiming, or

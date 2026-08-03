@@ -419,8 +419,9 @@ test('skill 4.4.1 recovers executions before legacy batches and distinguishes co
   assert.match(skill, /durablyReviewReady/);
   assert.match(skill, /explicit[^\n]*inspect[^\n]*fixed[^\n]*batch/i);
   assert.match(skill, /stop it with reason `target_changed`/i);
-  assert.match(skill, /target differs[\s\S]*explicit confirmation[\s\S]*reason `target_changed`[\s\S]*`active: false`[\s\S]*`preserved: true`/i);
-  assert.match(skill, /asks to stop[\s\S]*reason `user_requested`[\s\S]*refetch[\s\S]*`active: false`[\s\S]*`stopped` or `closed`/i);
+  assert.match(skill, /target differs[\s\S]*explicit confirmation[\s\S]*reason `target_changed`[\s\S]*exact execution reached `stopped` or `closed`[\s\S]*`active: false`/i);
+  assert.match(skill, /absence is not a blocker after the exact execution is terminal/i);
+  assert.match(skill, /asks to stop[\s\S]*reason `user_requested`[\s\S]*exact execution reached `stopped` or `closed`[\s\S]*`active: false`/i);
   assert.match(skill, /even when `batchOrchestration\.accessibleExecution\.enabled` is false/i);
   assert.match(skill, /When disabled and an execution is active[\s\S]*read-only[\s\S]*never start, advance, or record dispositions/i);
   assert.match(tools, /Only when the fetched protocol is 3\.4 or newer call trackly_get_active_apply_execution/i);
