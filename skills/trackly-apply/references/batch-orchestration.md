@@ -22,15 +22,23 @@ hidden from legacy recovery. When disabled and one is active, recover it
 read-only and permit only get or stop operations; never start, advance, or
 record dispositions until the capability is enabled. When disabled and none
 is active, continue through the fixed-batch compatibility path.
+Only `active: true` identifies resumable execution work. When the response is
+`active: false` and `preserved: true`, the returned terminal execution exists
+only so submission and browser evidence can be reconciled. Do not fetch its
+compact snapshot, mutate a member, reopen an unresolved wave, or follow its
+historical funnel. Require `progress.nextAction: none`; then continue the
+user's current request through the normal new-execution or legacy-batch gate.
 Never create a second execution because context or tabs were lost. Read
 `response.progress` and `response.progress.nextAction`; never reconstruct execution progress from
 chat, browser tabs, or a client-side queue.
 If a new fill/apply request changes the target from the active execution,
 explain the mismatch and obtain explicit confirmation. Then stop the old
-execution with reason `target_changed`, refetch and verify its terminal state,
-and only then start the new target. If the user asks to stop, stop it with
+execution with reason `target_changed`, refetch until it reports `active: false`
+and `preserved: true`, and only then start the new target without continuing
+the stopped wave. If the user asks to stop, stop it with
 reason `user_requested` using the latest revision and a fresh idempotency key,
-then refetch and verify `stopped` or `closed` before reporting completion.
+then refetch until `active: false`, verify `stopped` or `closed`, and never
+continue its unresolved waves before reporting completion.
 The start call itself returns that authoritative funnel at `response.progress`
 and its directive at `response.progress.nextAction`. Consume that response immediately before opening, claiming, or
 mutating a browser surface; do not issue a blind advance or infer a first wave.
