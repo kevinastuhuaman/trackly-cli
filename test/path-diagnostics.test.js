@@ -60,6 +60,19 @@ test('path diagnosis returns structured evidence when parent traversal is denied
   assert.equal(result.writableProbe.testedPath, '/private/blocked/application.pdf');
 });
 
+test('path diagnosis never deletes a colliding probe file it did not create', async () => {
+  const collision = Object.assign(new Error('already exists'), { code: 'EEXIST' });
+  let unlinkCalls = 0;
+  const result = await diagnoseLocalPath(path.join(os.tmpdir(), 'missing-application.pdf'), {}, {
+    open: async () => { throw collision; },
+    unlink: async () => { unlinkCalls += 1; },
+    randomBytes: () => Buffer.alloc(6),
+  });
+  assert.equal(result.writableProbe.ok, false);
+  assert.equal(result.writableProbe.errorCode, 'EEXIST');
+  assert.equal(unlinkCalls, 0);
+});
+
 test('path diagnosis reports exact-file permission failure instead of sibling writability', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-path-permission-'));
   const userFile = path.join(directory, 'read-only.txt');
