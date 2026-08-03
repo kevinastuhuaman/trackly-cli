@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-08-03
+
+### Fixed
+
+- Trackly Apply skill 4.4.1 now distinguishes a mutable active execution from
+  a preserved terminal execution. Stopped or closed waves remain visible for
+  reconciliation but are never reopened, mutated, or continued.
+- Recovery now requires `active: true` before fetching a compact snapshot or
+  following execution work. A `preserved: true` response is read-only and its
+  only valid next action is `none`.
+
 ## [0.13.0] - 2026-08-02
 
 ### Added

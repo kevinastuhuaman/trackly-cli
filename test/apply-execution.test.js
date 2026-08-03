@@ -410,17 +410,18 @@ test('advance replay returns the backend current revision and progress unchanged
   assert.deepEqual(result, response);
 });
 
-test('skill 4.4 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
-  assert.match(agent, /const SKILL_VERSION = '4\.4\.0'/);
+test('skill 4.4.1 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
+  assert.match(agent, /const SKILL_VERSION = '4\.4\.1'/);
   assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.5\.0'/);
-  assert.match(skill, /Skill 4\.4\.0 requires protocol 3\.5\.0 or newer/);
+  assert.match(skill, /Skill 4\.4\.1 requires protocol 3\.5\.0 or newer/);
   assert.match(skill, /trackly_get_active_apply_execution[\s\S]*before[\s\S]*trackly_get_active_apply_batch/i);
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);
   assert.match(skill, /explicit[^\n]*inspect[^\n]*fixed[^\n]*batch/i);
   assert.match(skill, /stop it with reason `target_changed`/i);
-  assert.match(skill, /target differs[\s\S]*explicit confirmation[\s\S]*reason `target_changed`[\s\S]*terminal state/i);
-  assert.match(skill, /asks to stop[\s\S]*reason `user_requested`[\s\S]*refetch[\s\S]*`stopped` or `closed`/i);
+  assert.match(skill, /target differs[\s\S]*explicit confirmation[\s\S]*reason `target_changed`[\s\S]*exact execution reached `stopped` or `closed`[\s\S]*`active: false`/i);
+  assert.match(skill, /absence is not a blocker after the exact execution is terminal/i);
+  assert.match(skill, /asks to stop[\s\S]*reason `user_requested`[\s\S]*exact execution reached `stopped` or `closed`[\s\S]*`active: false`/i);
   assert.match(skill, /even when `batchOrchestration\.accessibleExecution\.enabled` is false/i);
   assert.match(skill, /When disabled and an execution is active[\s\S]*read-only[\s\S]*never start, advance, or record dispositions/i);
   assert.match(tools, /Only when the fetched protocol is 3\.4 or newer call trackly_get_active_apply_execution/i);

@@ -529,19 +529,34 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.4.0 requires protocol 3.5.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.4.1 requires protocol 3.5.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.0 requires protocol 3\.5\.0 or newer/);
+  assert.match(skill, /Skill 4\.4\.1 requires protocol 3\.5\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.4\.0/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.4\.1/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
   const orchestration = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'), 'utf8');
   assert.match(orchestration, /protocol 3\.5 or newer and the compact-snapshot capability enabled/i);
   assert.match(orchestration, /protocol 3\.4 execution remains get-or-stop-only legacy recovery/i);
+});
+
+test('terminal Apply executions remain visible but are never resumed', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /Resume execution work only when the response says `active: true`/);
+  assert.match(skill, /`preserved: true` and `active: false` exposes a stopped, closed, or otherwise terminal execution only for read-only reconciliation/);
+  assert.match(skill, /never continue its unresolved waves/i);
+
+  const orchestration = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'), 'utf8');
+  assert.match(orchestration, /Only `active: true` identifies resumable execution work/);
+  assert.match(orchestration, /Require `progress\.nextAction: none`/);
+
+  const tools = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
+  assert.match(tools, /only active=true identifies resumable execution work/i);
+  assert.match(tools, /active=false and preserved=true is terminal read-only reconciliation evidence/i);
 });
 
 test('compact execution snapshots require an explicit non-empty member projection', () => {
@@ -880,12 +895,12 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.4 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.4.1 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.0/);
+  assert.match(skill, /Skill 4\.4\.1/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);
