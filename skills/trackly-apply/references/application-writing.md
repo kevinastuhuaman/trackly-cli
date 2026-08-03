@@ -30,8 +30,14 @@ Before entering the response:
 
 1. Remove generic praise, inflated claims, vague transitions, boilerplate conclusions, and chatbot phrases.
 2. Rewrite `not just X, but Y`, ornamental rule-of-three lists, and dangling `-ing` clauses unless the user's sample clearly uses them naturally.
-3. Use no em dash by default. Use one only when the user's sample or saved instructions show that punctuation is part of their voice.
+3. Resolve `writing.em_dash_policy`; unanswered defaults to `forbid`. Build the complete local claim-reference packet and set `claimsComplete: true` only after checking the whole draft. Call `trackly_lint_application_text` and treat its deterministic lint as a blocking gate. Missing claim metadata is a failure, even for an apparently claim-free draft. Never enter text with a failed lint result. `allow_if_voice_sample` requires explicit saved evidence that the approved sample uses that punctuation.
 4. Vary sentence length and structure. Avoid a sequence of equally sized, equally formal sentences.
 5. Prefer active verbs, concrete nouns, real numbers, and named examples already supported by the profile.
 6. Read the answer aloud. If it sounds like a press release, generic cover letter, or assistant response, rewrite it.
 7. When a voice sample exists, compare the final response with it for rhythm and register. When the sample was declined or remains unknown for the current run, use the saved style instructions or plain default instead. In every case, confirm each factual claim again.
+
+## Strategically useful optional questions
+
+When `writing.optional_question_policy` permits it, answer a strategically useful optional motivation, experience, product, or role-overlap question when every fact is supported. Optional does not mean skip. Leave demographic, consent, legal, compensation, and employer-relationship questions unanswered when their canonical value is unknown. Group those unknowns into the consolidated question packet.
+
+Before entering any answer, supply value-free claim fingerprints and evidence-reference codes to the local linter. It returns only a draft hash, length, policy, and violation codes. It never echoes or sends the draft to Trackly.

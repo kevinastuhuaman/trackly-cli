@@ -1,5 +1,5 @@
 {
-  "contractVersion": "3.5.1",
+  "contractVersion": "3.6.0",
   "constants": {
     "applyExecutionMaxTarget": 20,
     "applyScenarioCodes": ["browser_reclaim", "resume_upload", "resume_parser_recheck", "semantic_boolean_commit", "custom_select_commit", "multi_step_navigation", "free_text_voice", "required_error_sweep", "final_consent", "handoff_reclaim", "critical_contact_integrity", "manual_submit_boundary", "job_identity_match"],
@@ -26,6 +26,9 @@
     "trackly_start_apply_execution": "{mode:z.literal('complete_next_n_accessible'),target:z.number().int().min(1).max(APPLY_EXECUTION_MAX_TARGET),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_get_active_apply_execution": "{}",
     "trackly_get_apply_execution": "{executionId:z.number().int().min(1)}",
+    "trackly_get_apply_execution_snapshot": "{executionId:z.number().int().min(1),memberIds:z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET).optional(),profileKeys:z.array(z.string().min(1).max(200)).max(100).optional(),browserSurface:z.enum(APPLY_BROWSER_SURFACES)}",
+    "trackly_resume_parked_apply_member": "{executionId:z.number().int().min(1),memberId:z.number().int().min(1),expectedRevision:z.number().int().min(1),browserSurface:z.enum(APPLY_BROWSER_SURFACES),explicitUserResume:z.literal(true),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
+    "trackly_approve_apply_execution_resume": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),originalSnapshotHash:z.string().regex(/^[a-f0-9]{64}$/),profileRevision:z.number().int().min(1),resumeId:z.number().int().min(1),resumeSha256:z.string().regex(/^[a-f0-9]{64}$/),resumeFilename:z.string().min(1).max(255),resumeSizeBytes:z.number().int().min(1),expiresAt:z.string().datetime(),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_advance_apply_execution": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),browserSurface:z.enum(APPLY_BROWSER_SURFACES),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_record_apply_execution_dispositions": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),dispositions:z.array(applyExecutionDispositionSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET)}",
     "trackly_stop_apply_execution": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),reasonCode:z.enum(APPLY_EXECUTION_STOP_REASON_CODES).optional()}",
@@ -48,6 +51,8 @@
     "trackly_record_application_outcome": "{runId:z.number().int().min(1),batchId:z.number().int().min(1).optional(),memberId:z.number().int().min(1).optional(),inspectionEpoch:z.number().int().min(0).optional(),leaseToken:z.string().min(1).max(1024).optional(),outcome:z.enum(['review_ready','submitted','failed','blocked']),confirmation:z.enum(['user_confirmation','success_page']).optional()}",
     "trackly_record_application_outcomes": "{outcomes:z.array(z.object({runId:z.number().int().min(1),batchId:z.number().int().min(1),memberId:z.number().int().min(1),inspectionEpoch:z.number().int().min(0),leaseToken:z.string().min(1).max(1024),outcome:z.enum(['review_ready','submitted','failed','blocked']),confirmation:z.enum(['user_confirmation','success_page']).optional()})).min(1).max(APPLY_BATCH_MAX_BULK_MUTATIONS)}",
     "trackly_prepare_resume": "{runId:z.number().int().min(1),browserSurface:z.enum(APPLY_BROWSER_SURFACES),browserBindingHash:z.string().regex(/^[a-f0-9]{64}$/)}",
+    "trackly_lint_application_text": "{text:z.string().max(20000),emDashPolicy:z.enum(['forbid','allow_if_voice_sample','allow']).optional(),voiceSampleAllowsEmDash:z.boolean().optional(),prohibitedPhrases:z.array(z.string().min(1).max(200)).max(50).optional(),minLength:z.number().int().min(0).max(20000).optional(),maxLength:z.number().int().min(0).max(20000).optional(),claims:z.array(z.object({claimFingerprint:z.string().regex(/^[a-f0-9]{64}$/),evidenceRefs:z.array(z.string().regex(SAFE_OBSERVATION_CODE)).max(20)}).strict()).max(100),claimsComplete:z.literal(true)}",
+    "trackly_diagnose_local_path": "{exactPath:z.string().min(1).max(4096),originalErrno:z.string().regex(ERRNO_PATTERN).optional()}",
     "trackly_verify_prepared_resume": {
       "local": "{runId:z.number().int().min(1),resumeId:z.number().int().min(1),confirmationId:z.string().min(1).max(200),exactLocalPath:z.string().min(1).max(4096),sha256:z.string().regex(/^[a-f0-9]{64}$/i),sizeBytes:z.number().int().min(1),expiresAt:z.string().datetime()}",
       "hosted": "{runId:z.number().int().min(1),confirmationId:z.string().min(1).max(200)}"

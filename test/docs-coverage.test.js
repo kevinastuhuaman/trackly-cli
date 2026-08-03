@@ -87,6 +87,7 @@ const serverSrc = [
 ].join('\n');
 const readmeSrc = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 const docsSrc = fs.readFileSync(path.join(ROOT, 'docs/trackly-tools.md'), 'utf8');
+const contributorSrc = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
 
 test('tool extraction is not vacuous and matches every raw registration call', () => {
   const names = extractToolNames(serverSrc);
@@ -114,6 +115,15 @@ test('README "N tools" count claims all match the real tool count', () => {
   assert.ok(claims.length > 0, 'expected at least one "N tools" claim in README');
   for (const c of claims) {
     assert.equal(c, count, `README claims ${c} tools but the MCP modules register ${count}`);
+  }
+});
+
+test('contributor guide MCP tool counts match the real tool count', () => {
+  const count = extractToolNames(serverSrc).length;
+  const claims = toolCountClaims(contributorSrc);
+  assert.ok(claims.length > 0, 'expected at least one tool-count claim in CLAUDE.md');
+  for (const claim of claims) {
+    assert.equal(claim, count, `CLAUDE.md claims ${claim} tools but the MCP modules register ${count}`);
   }
 });
 

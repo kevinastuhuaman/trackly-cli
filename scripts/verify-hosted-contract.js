@@ -26,6 +26,12 @@ if (!fs.existsSync(hostedContractPath)) {
 
 const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
+const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
+const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
+const LOCAL_ONLY_TOOLS = [
+  'trackly_lint_application_text',
+  'trackly_diagnose_local_path',
+];
 
 for (const constantName of [
   'applyExecutionMaxTarget',
@@ -46,7 +52,16 @@ assert.equal(
   hosted.tools.trackly_record_apply_execution_dispositions,
   'trackly_record_apply_execution_dispositions schema alias drifted',
 );
-assert.deepEqual(hosted, local, 'Hosted and local Trackly Apply MCP contracts drifted');
+for (const toolName of LOCAL_ONLY_TOOLS) {
+  assert.ok(local.tools[toolName], `${toolName} is missing from the local contract`);
+  assert.equal(hosted.tools[toolName], undefined, `${toolName} must not be advertised by hosted MCP`);
+  assert.doesNotMatch(hostedApplySource, new RegExp(`['"]${toolName}['"]`), `${toolName} must not be registered by hosted MCP`);
+}
+const sharedLocal = {
+  ...local,
+  tools: Object.fromEntries(Object.entries(local.tools).filter(([name]) => !LOCAL_ONLY_TOOLS.includes(name))),
+};
+assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented local-only tools');
 assert.match(
   local.tools.trackly_record_apply_execution_dispositions,
   /applyExecutionDispositionSchema/,
@@ -85,8 +100,6 @@ function schemaDefinition(source, name, sourcePath) {
 }
 
 const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
-const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
-const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
 for (const schemaName of [
   'applyExecutionDispositionSchema',
   'truthCertificationCommon',
