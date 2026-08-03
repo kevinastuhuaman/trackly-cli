@@ -265,7 +265,7 @@ function registerApplyTools(
     'Fetch a compact, bounded projection for one Apply execution. Request only the current members and profile keys needed for the visible form. The response owns mutability, allowed operations, milestones, lease timing, and progress.',
     {
       executionId: z.number().int().min(1),
-      memberIds: z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET).optional(),
+      memberIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET),
       profileKeys: z.array(z.string().min(1).max(200)).max(100).optional(),
       browserSurface: z.enum(APPLY_BROWSER_SURFACES),
     },

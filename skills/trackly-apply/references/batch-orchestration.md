@@ -68,6 +68,8 @@ the user to finish or resolve that submission before retrying cancellation.
 
 With protocol 3.5 or newer and the compact-snapshot capability enabled, prefer `trackly_get_apply_execution_snapshot` after start or recovery instead of repeatedly fetching the full profile and ATS matrix. Request only current member IDs and profile keys needed by the visible forms. Treat each member's `mutable`, `allowedOperations`, access classification, blocker, milestone, and fresh-probe requirement as server authority. An already-active protocol 3.4 execution remains get-or-stop-only legacy recovery and must not call the 3.5-only snapshot, resume, approval, advance, or disposition tools. A parked member is not actionable browser work. Resume it only through `trackly_resume_parked_apply_member` after explicit user instruction, then perform the required fresh non-mutating probe.
 
+Every compact snapshot request must contain a non-empty list of current member IDs. Never use an empty member projection as shorthand for all members.
+
 The execution freezes one original recent-first queue snapshot and ordering
 version. Newly saved jobs wait for the next execution. Every continuation is a
 new immutable child batch linked in wave order; never append, replace, reorder,

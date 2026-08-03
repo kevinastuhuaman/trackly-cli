@@ -544,6 +544,19 @@ test('Apply skill 4.4.0 requires protocol 3.5.0 for new work and preserves activ
   assert.match(orchestration, /protocol 3\.4 execution remains get-or-stop-only legacy recovery/i);
 });
 
+test('compact execution snapshots require an explicit non-empty member projection', () => {
+  const contract = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'contracts', 'trackly-apply-tools.json'),
+    'utf8',
+  ));
+  const schema = contract.tools.trackly_get_apply_execution_snapshot;
+  assert.match(schema, /memberIds:z\.array\(.+\)\.min\(1\)\.max\(APPLY_EXECUTION_MAX_TARGET\)/);
+  assert.doesNotMatch(schema, /memberIds:[^,]+\.optional\(\)/);
+
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /compact snapshot request must contain a non-empty list/i);
+});
+
 test('Apply skill separates current employment from most recent history and preserves row order', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   assert.match(skill, /education and employment-history rows in reverse chronological order/i);
