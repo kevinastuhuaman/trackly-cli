@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-02
+
+### Added
+
+- Added compact Apply execution snapshots, explicit parked-member resumption,
+  and execution-scoped exact-resume approval through MCP contract 3.6.0.
+- Added local, value-free application-text linting and exact-path filesystem
+  diagnosis, including `trackly agent diagnose-path`.
+- Published a fail-closed semantic browser upload contract and Trackly Apply
+  skill 4.4.0 progress, approval-scope, legal-clarification, and parked-job gates.
+
+### Changed
+
+- Accessible executions now treat backend-provided mutability and allowed
+  operations as authoritative and reuse unchanged resume content approval
+  without weakening immediate per-run file verification.
+
 ## [0.12.1] - 2026-08-02
 
 ### Fixed

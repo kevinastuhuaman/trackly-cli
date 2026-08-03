@@ -1,5 +1,24 @@
 # Review handoff
 
+## Live progress receipt
+
+Send this after every durable milestone and at least once every 60 seconds during active work:
+
+```text
+Current operation:
+Last durable milestone:
+User action now: wait / act
+Next milestone / next update:
+Delay source: browser / Trackly / ATS / user
+Funnel: target=; ready=; submitted=; filling=; awaitingAnswer=; authParked=; excluded=; remaining=
+```
+
+Use the compact execution snapshot as authority. Give a bounded next-update estimate, not an invented overall completion time.
+
+## Approval scope receipt
+
+Before persisting a broad statement such as “always,” show which separate categories it will update: personal facts, consent choices, writing preferences, resume approval, and truthfulness certification. Never let approval of one category authorize another. Consolidate genuinely unknown questions into one packet after filling everything already known. Explain legal terms in plain language using the protocol glossary; do not expose internal action codes or routing labels.
+
 For one application, provide this compact block and stop only after the exact
 review tab has documented visibility proof:
 

@@ -28,6 +28,9 @@ const executionTools = [
   'trackly_advance_apply_execution',
   'trackly_record_apply_execution_dispositions',
   'trackly_stop_apply_execution',
+  'trackly_get_apply_execution_snapshot',
+  'trackly_resume_parked_apply_member',
+  'trackly_approve_apply_execution_resume',
 ];
 
 function registerRuntimeTools(apiResponse = { ok: true }) {
@@ -60,7 +63,7 @@ function registerRuntimeTools(apiResponse = { ok: true }) {
 }
 
 test('protocol 3.4 publishes all accessible execution tools', () => {
-  assert.equal(contract.contractVersion, '3.5.1');
+  assert.equal(contract.contractVersion, '3.6.0');
   for (const name of executionTools) {
     assert.ok(contract.tools[name], `${name} missing from contract fixture`);
     assert.match(tools, new RegExp(`['"]${name}['"]`));
@@ -82,6 +85,49 @@ test('execution tools validate and send the exact HTTP contract', async () => {
       ['GET', '/api/jobscout/apply/executions/active', null, false, false, 'trackly-mcp/test', undefined]],
     ['trackly_get_apply_execution', { executionId: 41 },
       ['GET', '/api/jobscout/apply/executions/41', null, false, false, 'trackly-mcp/test', undefined]],
+    ['trackly_get_apply_execution_snapshot', {
+      executionId: 41,
+      memberIds: [2, 3],
+      profileKeys: ['writing.em_dash_policy'],
+      browserSurface: 'codex_in_app',
+    }, ['POST', '/api/jobscout/apply/executions/41/snapshot', {
+      memberIds: [2, 3],
+      profileKeys: ['writing.em_dash_policy'],
+      browserSurface: 'codex_in_app',
+    }, false, false, 'trackly-mcp/test', undefined]],
+    ['trackly_resume_parked_apply_member', {
+      executionId: 41,
+      memberId: 2,
+      expectedRevision: 7,
+      browserSurface: 'codex_in_app',
+      explicitUserResume: true,
+      idempotencyKey,
+    }, ['POST', '/api/jobscout/apply/executions/41/parked/2/resume', {
+      expectedRevision: 7,
+      browserSurface: 'codex_in_app',
+      explicitUserResume: true,
+    }, false, false, 'trackly-mcp/test', { 'Idempotency-Key': idempotencyKey }]],
+    ['trackly_approve_apply_execution_resume', {
+      executionId: 41,
+      expectedRevision: 8,
+      originalSnapshotHash: 'a'.repeat(64),
+      profileRevision: 12,
+      resumeId: 9,
+      resumeSha256: 'b'.repeat(64),
+      resumeFilename: 'Resume.pdf',
+      resumeSizeBytes: 1024,
+      expiresAt: '2026-08-02T23:00:00.000Z',
+      idempotencyKey,
+    }, ['POST', '/api/jobscout/apply/executions/41/resume-approval', {
+      expectedRevision: 8,
+      originalSnapshotHash: 'a'.repeat(64),
+      profileRevision: 12,
+      resumeId: 9,
+      resumeSha256: 'b'.repeat(64),
+      resumeFilename: 'Resume.pdf',
+      resumeSizeBytes: 1024,
+      expiresAt: '2026-08-02T23:00:00.000Z',
+    }, false, false, 'trackly-mcp/test', { 'Idempotency-Key': idempotencyKey }]],
     ['trackly_advance_apply_execution', {
       executionId: 41,
       expectedRevision: 3,
@@ -153,6 +199,26 @@ test('execution tools validate and send the exact HTTP contract', async () => {
     await registration.handler(parsed);
     assert.deepEqual(calls.at(-1), expectedCall, name);
   }
+  assert.throws(() => registrations.get('trackly_resume_parked_apply_member').schema.parse({
+    executionId: 41,
+    memberId: 2,
+    expectedRevision: 7,
+    browserSurface: 'codex_in_app',
+    explicitUserResume: false,
+    idempotencyKey,
+  }));
+  assert.throws(() => registrations.get('trackly_approve_apply_execution_resume').schema.parse({
+    executionId: 41,
+    expectedRevision: 8,
+    originalSnapshotHash: 'a'.repeat(64),
+    profileRevision: 0,
+    resumeId: 9,
+    resumeSha256: 'b'.repeat(64),
+    resumeFilename: 'Resume.pdf',
+    resumeSizeBytes: 1024,
+    expiresAt: '2026-08-02T23:00:00.000Z',
+    idempotencyKey,
+  }));
 });
 
 test('explicit start-fresh confirmation cancels a legacy fixed batch without waiting for expiry', async () => {
@@ -344,10 +410,10 @@ test('advance replay returns the backend current revision and progress unchanged
   assert.deepEqual(result, response);
 });
 
-test('skill 4.3 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
-  assert.match(agent, /const SKILL_VERSION = '4\.3\.1'/);
-  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.4\.1'/);
-  assert.match(skill, /Skill 4\.3\.1 requires protocol 3\.4\.1 or newer/);
+test('skill 4.4 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
+  assert.match(agent, /const SKILL_VERSION = '4\.4\.0'/);
+  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.5\.0'/);
+  assert.match(skill, /Skill 4\.4\.0 requires protocol 3\.5\.0 or newer/);
   assert.match(skill, /trackly_get_active_apply_execution[\s\S]*before[\s\S]*trackly_get_active_apply_batch/i);
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);

@@ -168,6 +168,31 @@ test('trackly --version prints the package version', () => {
   assert.equal(result.stdout.trim(), pkg.version);
 });
 
+test('agent diagnose-path reports the exact measured path as JSON', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-cli-diagnose-'));
+  try {
+    const result = spawnSync(process.execPath, [BIN_PATH, 'agent', 'diagnose-path', directory, '--errno', 'ENOSPC', '--json'], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.exactPath, path.resolve(directory));
+    assert.equal(report.originalErrno, 'ENOSPC');
+    assert.equal(report.writableProbe.ok, true);
+    assert.ok(report.filesystem.freeBytes >= 0);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('agent diagnose-path rejects a bare --errno flag', () => {
+  const result = spawnSync(process.execPath, [BIN_PATH, 'agent', 'diagnose-path', os.tmpdir(), '--errno', '--json'], {
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Missing value for --errno/);
+});
+
 test('human maintenance output retains code, statuses, request ID, and resume guidance', () => {
   const rendered = cli.formatMaintenanceForHuman({
     message: 'Trackly is migrating. Retry in about 5 minutes.',

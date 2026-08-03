@@ -35,7 +35,7 @@ trackly jobs --function product
 
 ## At a Glance
 
-1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 43 local MCP tools
+1,900+ companies | 128K+ jobs | 40+ ATS types | CLI + MCP | 48 local MCP tools
 
 ## CLI Commands
 
@@ -77,6 +77,7 @@ trackly whoami                        # Show current user
 trackly logout                        # Clear credentials
 trackly agent setup --client both    # Install Trackly Apply for Codex + Claude Code
 trackly agent doctor                 # Verify setup, profile, resume, and compatibility
+trackly agent diagnose-path /path/to/upload.pdf --errno ENOSPC --json  # Diagnose one exact local path
 ```
 
 Add `--json` to any command for JSON output. Use `--api-key <key>` or `--base-url <url>` as one-off global flags when needed.
@@ -180,6 +181,9 @@ Then use natural language in any of these clients:
 | trackly_start_apply_execution | Start a target-counted accessible Apply execution |
 | trackly_get_active_apply_execution | Recover the active execution before legacy batch recovery |
 | trackly_get_apply_execution | Read the authoritative progress funnel and immutable child waves |
+| trackly_get_apply_execution_snapshot | Fetch a compact bounded projection for current execution members and required profile keys |
+| trackly_resume_parked_apply_member | Explicitly resume one parked member for a fresh non-mutating access probe |
+| trackly_approve_apply_execution_resume | Approve one exact resume identity for an unchanged execution snapshot |
 | trackly_advance_apply_execution | Transactionally create the next eligible immutable wave |
 | trackly_record_apply_execution_dispositions | Record typed, value-free access classifications |
 | trackly_stop_apply_execution | Stop an execution without changing saved-job state |
@@ -198,6 +202,8 @@ Then use natural language in any of these clients:
 | trackly_get_apply_evidence | Get aggregate, value-free beta evidence and release readiness |
 | trackly_get_apply_protocol | Get current workflow and compatibility rules |
 | trackly_report_apply_observation | Send redacted ATS mechanics feedback |
+| trackly_lint_application_text | Locally lint application writing and return only value-free violations plus a draft hash |
+| trackly_diagnose_local_path | Locally diagnose the exact implicated filesystem path without deleting files |
 | trackly_report_apply_observations | Bulk-send up to 20 leased, batch-bound redacted observations |
 | trackly_record_application_outcome | Record review or confirmed submission outcome |
 | trackly_record_application_outcomes | Bulk-record up to 20 leased batch outcomes with per-member conflicts |
@@ -268,7 +274,7 @@ trackly config --base-url http://127.0.0.1:3000  # Point at a different backend
 | Job search + filters | Yes | Yes | Yes |
 | Apply/save/dismiss | Yes | Yes | Yes |
 | AI-powered search | Yes (trackly ask) | Yes | Yes |
-| MCP integration | Yes (43 local tools) | -- | -- |
+| MCP integration | Yes (48 local tools) | -- | -- |
 | Browser required | No | Yes | No |
 | Best for | Terminal + AI agents | Visual browsing | Custom integrations |
 
@@ -282,7 +288,7 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 **What MCP servers exist for job searching?**
 
-trackly-cli includes a built-in MCP server with 43 tools for job search, company lookup, discovery preferences, application tracking, accessible execution and frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
+trackly-cli includes a built-in MCP server with 48 tools for job search, company lookup, discovery preferences, application tracking, accessible execution and frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
 
 **How do I use Claude Code for job hunting?**
 

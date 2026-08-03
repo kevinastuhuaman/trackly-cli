@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { version: VERSION } = require('../package.json');
 const { doctorAgent, resumeValidationStatus, setupAgent } = require('../lib/agent');
+const { diagnoseLocalPath } = require('../lib/path-diagnostics');
 
 const BOOLEAN_FLAGS = new Set(['help', 'h', 'json', 'version', 'v', 'clear-api-key', 'clear-base-url', 'refresh', 'remote']);
 const VALUE_FLAGS = new Set([
@@ -42,6 +43,7 @@ const VALUE_FLAGS = new Set([
   'url',
   'window-days',
   'target-reviewed-runs',
+  'errno',
 ]);
 
 // Flags accepted on ANY command. `api-key`/`base-url` are global overrides consumed
@@ -79,7 +81,7 @@ const COMMAND_FLAGS = {
   'request-company': ['url', 'notes'],
   'api-key': ['name'],
   config: ['api-key', 'base-url', 'clear-api-key', 'clear-base-url'],
-  agent: ['client', 'window-days', 'target-reviewed-runs'],
+  agent: ['client', 'window-days', 'target-reviewed-runs', 'errno'],
 };
 const AUTH_HELP_TEXT = `Not authenticated.
   Existing member: trackly login                 (Google OAuth)
@@ -1127,6 +1129,32 @@ async function cmdMcp() {
 
 async function cmdAgent(args) {
   const subcommand = args._[0];
+  if (subcommand === 'diagnose-path') {
+    const targetPath = args._[1];
+    if (!targetPath) return failNow('Missing path. Usage: trackly agent diagnose-path <path> [--errno ENOSPC] [--json]');
+    if (args.errno === null) return failNow('Missing value for --errno. Usage: --errno ENOSPC');
+    try {
+      const report = await diagnoseLocalPath(targetPath, { originalErrno: args.errno || null });
+      if (isJSON()) return printJson(report);
+      console.log(color('bold', 'Trackly exact-path diagnosis'));
+      console.log(`Path: ${report.exactPath}`);
+      const existsLabel = report.exists === null ? 'unknown' : (report.exists ? 'yes' : 'no');
+      console.log(`Exists: ${existsLabel}; tested ancestor: ${report.testedAncestor}`);
+      if (report.pathInspectionErrorCode) console.log(`Path inspection error: ${report.pathInspectionErrorCode}`);
+      console.log(`Mount: ${report.filesystem.mountPoint || 'unobserved'}; device: ${report.filesystem.device || 'unobserved'}`);
+      console.log(`Free bytes: ${report.filesystem.freeBytes ?? 'unobserved'}; available inodes: ${report.filesystem.availableInodes ?? 'unobserved'}`);
+      if (report.filesystem.errorCode) console.log(`Filesystem inspection error: ${report.filesystem.errorCode}`);
+      if (report.exactFileAccess.observed) {
+        console.log(`Exact file access: readable=${report.exactFileAccess.readable}; writable=${report.exactFileAccess.writable}${report.exactFileAccess.writeErrorCode ? ` (${report.exactFileAccess.writeErrorCode})` : ''}`);
+      }
+      console.log(`Filesystem write probe (${report.writableProbe.scope}): ${report.writableProbe.ok ? 'pass' : `failed (${report.writableProbe.errorCode})`}`);
+      console.log(`Quota: ${report.quota.status}`);
+      if (report.originalErrno) console.log(`Original errno: ${report.originalErrno}`);
+      return;
+    } catch (error) {
+      return setErrorExit(error.message || String(error));
+    }
+  }
   if (subcommand === 'setup') {
     if (args.client === null) return failNow('Missing value for --client. Use codex, claude, or both.');
     const client = String(args.client || 'both').toLowerCase();
@@ -1232,7 +1260,7 @@ async function cmdAgent(args) {
       return;
     }
   }
-  failNow('Unknown agent subcommand. Use: trackly agent setup --client codex|claude|both | trackly agent doctor | trackly agent evidence');
+  failNow('Unknown agent subcommand. Use: trackly agent setup --client codex|claude|both | trackly agent doctor | trackly agent evidence | trackly agent diagnose-path <path>');
 }
 
 function showHelp() {
@@ -1276,6 +1304,7 @@ ${color('bold', 'Commands:')}
   ${color('cyan', 'agent setup')}          Install Trackly Apply for Codex/Claude (--client codex|claude|both)
   ${color('cyan', 'agent doctor')}         Verify auth, MCP, skill, profile, resume, and compatibility
   ${color('cyan', 'agent evidence')}       Show value-free beta evidence (--window-days, --target-reviewed-runs)
+  ${color('cyan', 'agent diagnose-path')}  Diagnose one exact local filesystem path (--errno optional)
 
 ${color('bold', 'Flags:')}
   --api-key <key>       Use an API key for this command

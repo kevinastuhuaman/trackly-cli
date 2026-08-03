@@ -99,12 +99,12 @@ test('documented local MCP tool count matches every registered tool', () => {
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
-  assert.equal(registeredTools.length, 43);
+  assert.equal(registeredTools.length, 48);
   assert.equal(new Set(registeredTools).size, registeredTools.length);
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.5.1');
+  assert.equal(contract.contractVersion, '3.6.0');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -332,7 +332,7 @@ test('local MCP has no uncontracted Trackly Apply tools', () => {
     ...source.matchAll(/server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g),
   ]
     .map((match) => match[1])
-    .filter((name) => name.includes('apply') || name.includes('application_profile') || name.includes('application_outcome') || name.includes('profile_onboarding') || name === 'trackly_prepare_resume' || name === 'trackly_verify_prepared_resume')
+    .filter((name) => name.includes('apply') || name.includes('application_profile') || name.includes('application_outcome') || name.includes('profile_onboarding') || name === 'trackly_prepare_resume' || name === 'trackly_verify_prepared_resume' || name === 'trackly_lint_application_text' || name === 'trackly_diagnose_local_path')
     .sort();
   assert.deepEqual(names, Object.keys(contract.tools).sort());
 });
@@ -482,6 +482,10 @@ test('hosted parity verifier compares execution disposition body, alias, and con
 
   assert.match(verifier, /'applyExecutionDispositionSchema'/);
   assert.match(verifier, /trackly_record_apply_execution_dispositions schema alias drifted/);
+  assert.match(verifier, /trackly_lint_application_text/);
+  assert.match(verifier, /trackly_diagnose_local_path/);
+  assert.match(verifier, /must not be advertised by hosted MCP/);
+  assert.match(verifier, /must not be registered by hosted MCP/);
   for (const constantName of [
     'applyExecutionMaxTarget',
     'applyBrowserSurfaces',
@@ -513,7 +517,10 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.3\.1 or newer/i);
+  assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.4\.0 or newer/i);
+  assert.match(promptRegion, /Only protocol 3\.5 or newer with the compact-snapshot capability may call trackly_get_apply_execution_snapshot/i);
+  assert.doesNotMatch(promptRegion, /skill 4\.3\.1/i);
+  assert.doesNotMatch(promptRegion, /protocol 3\.4\.1 execution gate/i);
   assert.match(promptRegion, /Only when the fetched protocol is 3\.4 or newer call trackly_get_active_apply_execution/i);
   assert.match(promptRegion, /protocol 3\.3, skip the execution endpoint/i);
   assert.match(promptRegion, /execution\.unresolvedWaves in ascending waveOrder/i);
@@ -522,14 +529,32 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.3.1 requires protocol 3.4.1 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.4.0 requires protocol 3.5.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.3\.1 requires protocol 3\.4\.1 or newer/);
+  assert.match(skill, /Skill 4\.4\.0 requires protocol 3\.5\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.3\.1/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.4\.0/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
+  assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
+  assert.match(skill, /never call the 3\.5-only snapshot/i);
+  const orchestration = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'), 'utf8');
+  assert.match(orchestration, /protocol 3\.5 or newer and the compact-snapshot capability enabled/i);
+  assert.match(orchestration, /protocol 3\.4 execution remains get-or-stop-only legacy recovery/i);
+});
+
+test('compact execution snapshots require an explicit non-empty member projection', () => {
+  const contract = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'contracts', 'trackly-apply-tools.json'),
+    'utf8',
+  ));
+  const schema = contract.tools.trackly_get_apply_execution_snapshot;
+  assert.match(schema, /memberIds:z\.array\(.+\)\.min\(1\)\.max\(APPLY_EXECUTION_MAX_TARGET\)/);
+  assert.doesNotMatch(schema, /memberIds:[^,]+\.optional\(\)/);
+
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  assert.match(skill, /compact snapshot request must contain a non-empty list/i);
 });
 
 test('Apply skill separates current employment from most recent history and preserves row order', () => {
@@ -847,11 +872,32 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /continue with the plain default style for the current run/);
   assert.match(writing, /Never copy them into the public skill, logs, observations, or another user's defaults/);
   assert.match(writing, /This gate remains authoritative and self-contained/);
-  assert.match(writing, /Use no em dash by default/);
+  assert.match(writing, /unanswered defaults to `forbid`/);
+  assert.match(writing, /`trackly_lint_application_text`/);
   assert.match(writing, /generic company praise or unsupported enthusiasm/);
   assert.match(writing, /When a voice sample exists, compare the final response with it/);
   assert.match(writing, /When the sample was declined or remains unknown for the current run/);
   assert.match(writing, /use the saved style instructions or plain default instead/);
+});
+
+test('Apply skill 4.4 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
+  const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
+  const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
+  assert.match(skill, /Skill 4\.4\.0/);
+  assert.match(skill, /trackly_get_apply_execution_snapshot/);
+  assert.match(skill, /`mutable` and `allowedOperations`/);
+  assert.match(skill, /trackly_resume_parked_apply_member/);
+  assert.match(skill, /trackly_lint_application_text/);
+  assert.match(skill, /trackly_approve_apply_execution_resume/);
+  assert.match(writing, /deterministic lint/i);
+  assert.match(writing, /strategically useful optional/i);
+  assert.match(review, /Last durable milestone:/);
+  assert.match(review, /Delay source:/);
+  assert.match(review, /at least once every 60 seconds/i);
+  assert.match(upload, /file chooser/i);
+  assert.match(upload, /fail closed/i);
 });
 
 test('Apply skill consumes server-owned onboarding screens and consistency rules with a legacy fallback', () => {
