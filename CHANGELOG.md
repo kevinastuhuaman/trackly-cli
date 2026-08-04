@@ -9,20 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.13.3] - 2026-08-03
 
-- Validate jurisdiction-scoped application answers against the real ISO 3166-1
-  alpha-2 country list instead of accepting arbitrary two-letter placeholders.
-- Preserve retryable application-profile schema rollout errors through local MCP.
-
-## [0.13.2] - 2026-08-03
-
-### Fixed
-
-- Replaced stale current CLI, README, and MCP Registry scale claims with the
-  conservative public metrics snapshot: 170K+ active jobs across 3,800+
-  monitored companies.
-- Pinned patched HTTP and URI dependency versions required for a clean
-  production security audit.
-
 ### Added
 
 - Added jurisdiction and corporate-family context to the application-profile
@@ -34,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Validate jurisdiction-scoped application answers against the real ISO 3166-1
+  alpha-2 country list instead of accepting arbitrary two-letter placeholders.
+- Preserve retryable application-profile schema rollout errors through local MCP.
 - Trackly Apply skill 4.4.2 no longer declares existing profile answers to be
   schema gaps merely because a compact execution snapshot omitted contextual
   data.
@@ -42,8 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly complete user and controller inventories.
 - Review handoff now explains that Trackly saves verification state while the
   employer draft remains only in the live browser tab.
-- Pinned patched `hono`, `fast-uri`, and `ip-address` releases so clean package
-  installs pass the zero-exception security audit.
+
+## [0.13.2] - 2026-08-03
+
+### Fixed
+
+- Replaced stale current CLI, README, and MCP Registry scale claims with the
+  conservative public metrics snapshot: 170K+ active jobs across 3,800+
+  monitored companies.
+- Pinned patched HTTP and URI dependency versions required for a clean
+  production security audit.
 
 ## [0.13.1] - 2026-08-03
 
