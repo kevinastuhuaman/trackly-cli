@@ -479,7 +479,7 @@ test('agent doctor compatibility rejects stale CLI and MCP contract versions', (
 
   const staleCli = agent.evaluateApplyCompatibility({
     ...base,
-    compatibleCliMinimumVersion: '0.13.2',
+    compatibleCliMinimumVersion: '0.13.3',
   }, clients);
   assert.equal(staleCli.cliMinimumSatisfied, false);
   assert.equal(staleCli.compatible, false);
@@ -545,7 +545,7 @@ test('agent doctor fails browser readiness closed unless a full semantic surface
 test('agent doctor does not infer controller and user tab union inventory from plugin presence', async () => {
   await withTempAgentHomeAsync(async () => {
     const report = await agent.doctorAgent();
-    assert.equal(report.cliVersion, '0.13.1');
+    assert.equal(report.cliVersion, '0.13.2');
     assert.equal(report.mcpContractVersion, '3.6.0');
     assert.match(report.skillPackIntegrity.expectedDigest, /^[a-f0-9]{64}$/);
     assert.deepEqual(report.browserControl.tabInventory, {
