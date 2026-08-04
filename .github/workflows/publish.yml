@@ -166,6 +166,8 @@ jobs:
 
       - run: npm test
 
+      - run: npm run metrics:check
+
       - run: npm audit --audit-level=high
 
       - run: npm pack --dry-run

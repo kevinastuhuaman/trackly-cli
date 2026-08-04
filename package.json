@@ -8,6 +8,8 @@
   },
   "scripts": {
     "test": "node --test",
+    "metrics:check": "node scripts/sync-public-metrics.js --check",
+    "metrics:sync": "node scripts/sync-public-metrics.js",
     "test:contract-fixture": "node --test test/apply-contract.test.js",
     "test:hosted-contract": "node scripts/verify-hosted-contract.js",
     "security:audit": "node scripts/verify-audit-exceptions.js"
@@ -19,6 +21,8 @@
     "skills/",
     "contracts/",
     "docs/",
+    "metrics/",
+    "scripts/sync-public-metrics.js",
     "scripts/verify-audit-exceptions.js",
     "security/audit-exceptions.json",
     "npm-shrinkwrap.json",

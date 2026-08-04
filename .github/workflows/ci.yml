@@ -39,6 +39,8 @@ jobs:
 
       - run: npm test
 
+      - run: npm run metrics:check
+
       - name: Package smoke test
         run: npm pack --dry-run
 
