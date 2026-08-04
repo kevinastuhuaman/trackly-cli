@@ -36,6 +36,8 @@ function validateSource(source) {
 
 function render(source) {
   validateSource(source);
+  // Jobs keep one additional 10K safety bucket because the public job total is
+  // volatile; company count only needs normal round-down to the nearest 100.
   const conservativeJobs = Math.max(0, Math.floor(source.metrics.totalJobs / 10_000) * 10_000 - 10_000);
   const conservativeCompanies = Math.floor(source.metrics.totalCompanies / 100) * 100;
   return {
@@ -63,6 +65,9 @@ function isFreshForBuild(snapshot, now = new Date()) {
 }
 
 function publicDisplay(snapshot, now = new Date()) {
+  // The hard CI gate prevents stale numeric copy from shipping. This helper
+  // defines the nonnumeric fallback contract for renderers that consume the
+  // snapshot directly rather than publishing static package metadata.
   if (!snapshot || !isFreshForBuild(snapshot, now)) {
     return { jobs: 'Thousands of jobs', companies: 'Thousands of companies' };
   }
