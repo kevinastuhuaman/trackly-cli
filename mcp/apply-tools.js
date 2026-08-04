@@ -117,7 +117,7 @@ const startApplyRunSchema = z.object({
   }
 });
 
-const APPLY_RELIABILITY_PROMPT = 'Protocol 3.5 / skill 4.4.1 reliability gate: only active=true identifies resumable execution work. A response with active=false and preserved=true is terminal read-only reconciliation evidence. Require nextAction=none and never fetch its compact snapshot, continue an unresolved wave, mutate a member, or interpret historical funnel counts as current work. For an active execution recovery or start, fetch one compact execution snapshot with only the current member IDs and profile keys required by the visible forms. Treat mutable and allowedOperations as authoritative. Never reopen or mutate authentication, account-creation, OTP, pre-form-CAPTCHA, or manual-only members. Only an explicit user request may call trackly_resume_parked_apply_member, and the returned member still requires a fresh non-mutating access probe. Use execution-scoped exact-resume content approval across unchanged replacement waves, but immediately verify the exact local path, hash, size, run binding, and expiration before every upload. Run trackly_lint_application_text before entering free text and fail closed on every violation or unsupported claim. Diagnose I/O errors only against the exact implicated path. Report the server funnel and durable milestone after every state change and at least once every 60 seconds during active work. Never click Submit.';
+const APPLY_RELIABILITY_PROMPT = 'Protocol 3.5 / skill 4.4.2 reliability gate: only active=true identifies resumable execution work. A response with active=false and preserved=true is terminal read-only reconciliation evidence. Require nextAction=none and never fetch its compact snapshot, continue an unresolved wave, mutate a member, or interpret historical funnel counts as current work. For an active execution recovery or start, fetch one compact execution snapshot with only the current member IDs and profile keys required by the visible forms. Treat mutable and allowedOperations as authoritative. Never reopen or mutate authentication, account-creation, OTP, pre-form-CAPTCHA, or manual-only members. Only an explicit user request may call trackly_resume_parked_apply_member, and the returned member still requires a fresh non-mutating access probe. Use execution-scoped exact-resume content approval across unchanged replacement waves, but immediately verify the exact local path, hash, size, run binding, and expiration before every upload. Run trackly_lint_application_text before entering free text and fail closed on every violation or unsupported claim. Reconcile every newly supplied reusable answer to the canonical profile before review: save it, confirm it already matches, or report a schema gap. Never create app-shell tabs to reveal an already-bound browser tab without an exact focus receipt. Diagnose I/O errors only against the exact implicated path. Report the server funnel and durable milestone after every state change and at least once every 60 seconds during active work. Never click Submit.';
 
 function registerApplyTools(
   server,
@@ -162,12 +162,16 @@ function registerApplyTools(
       includeSensitive: z.boolean().optional(),
       provider: z.string().max(100).optional(),
       companyId: z.string().max(100).optional(),
+      jurisdiction: z.string().regex(/^[A-Za-z]{2}$/).optional(),
+      corporateFamily: z.string().min(1).max(100).optional(),
     },
-    wrapTool(async ({ includeSensitive, provider, companyId }) => {
+    wrapTool(async ({ includeSensitive, provider, companyId, jurisdiction, corporateFamily }) => {
       const qs = new URLSearchParams();
       if (includeSensitive) qs.set('includeSensitive', 'true');
       if (provider) qs.set('provider', provider);
       if (companyId) qs.set('companyId', companyId);
+      if (jurisdiction) qs.set('jurisdiction', jurisdiction);
+      if (corporateFamily) qs.set('corporateFamily', corporateFamily);
       return apiRequest('GET', `/api/jobscout/application-profile?${qs.toString()}`, null, false, false, MCP_USER_AGENT);
     }, 'Failed to fetch application profile')
   );
@@ -204,6 +208,16 @@ function registerApplyTools(
         z.object({
           key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
           value: z.any().optional(), scope: z.literal('company'), scopeValue: z.string().min(1).max(200),
+          questionLabel: z.string().max(1000).optional(),
+        }),
+        z.object({
+          key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
+          value: z.any().optional(), scope: z.literal('jurisdiction'), scopeValue: z.string().regex(/^[A-Za-z]{2}$/),
+          questionLabel: z.string().max(1000).optional(),
+        }),
+        z.object({
+          key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
+          value: z.any().optional(), scope: z.literal('corporate_family'), scopeValue: z.string().min(1).max(200),
           questionLabel: z.string().max(1000).optional(),
         }),
       ])).max(100).optional(),

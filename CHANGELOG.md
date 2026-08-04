@@ -17,6 +17,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pinned patched HTTP and URI dependency versions required for a clean
   production security audit.
 
+### Added
+
+- Added jurisdiction and corporate-family context to the application-profile
+  contract, plus reusable keys for country authorization, employer interview
+  history, corporate-family engagement, candidate-AI acknowledgement, and
+  consumer hardware / IoT / retail experience.
+- Added a deterministic answer-compounding receipt: one live-schema audit, one
+  bulk profile write, and one verification refetch per question packet.
+
+### Fixed
+
+- Trackly Apply skill 4.4.2 no longer declares existing profile answers to be
+  schema gaps merely because a compact execution snapshot omitted contextual
+  data.
+- Existing bound tabs are never revealed by creating replacement app-shell
+  tabs. Visibility and cleanup claims now require exact adapter receipts or
+  explicitly complete user and controller inventories.
+- Review handoff now explains that Trackly saves verification state while the
+  employer draft remains only in the live browser tab.
+- Pinned patched `hono`, `fast-uri`, and `ip-address` releases so clean package
+  installs pass the zero-exception security audit.
+
 ## [0.13.1] - 2026-08-03
 
 ### Fixed

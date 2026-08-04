@@ -186,6 +186,27 @@ continue. Do not checkpoint this condition: no run ID exists yet, and the
 checkpoint contract requires one. The unchanged frozen member is the durable
 resume point. Never detach that member into a legacy single run.
 
+### Fast path
+
+Speed comes from bounded batching, not weaker verification:
+
+- Fetch the compact execution snapshot once per stable wave and request only
+  fields needed by the visible forms. Do not repeatedly fetch the full profile
+  or ATS matrix after each control.
+- Fill independent accessible tabs concurrently only when the browser adapter
+  supports it, but serialize mutations within each tab and preserve every
+  run/tab binding.
+- Fill every known field before asking one consolidated question packet. After
+  the reply, use the one-write, one-refetch workflow in
+  [answer-compounding.md](answer-compounding.md).
+- Keep dispositions, observations, checkpoints, certifications, and outcomes
+  in their bounded bulk operations. Do not replace a working bulk call with
+  per-member writes merely because it is easier to narrate.
+- If a bulk mutation returns an ambiguous transport failure or HTTP 5xx, refetch
+  before splitting or retrying; never assume the request committed nothing.
+- Do not spend browser calls on visibility or app-shell reveal attempts during
+  filling. Focus/reveal the exact bound tabs only at the verified handoff.
+
 ### Request budget
 
 For a failure-free new 20-member batch, keep planning, initial binding, evidence,

@@ -25,6 +25,9 @@ review tab has documented visibility proof:
 ```text
 Ready for your review — not submitted
 
+Trackly saved the verification state. The employer's live draft still exists
+only in the open browser tab and may be lost if that tab is closed or reloaded.
+
 Company / role:
 ATS / URL:
 Resume:
@@ -77,6 +80,11 @@ per-run review blocks: `target`, `durablyReviewReady`, `submitted`,
 from visible tabs. Authentication-gated and excluded jobs remain in Check Later
 and are listed separately; they are not failed applications and do not consume
 the target.
+
+Use plain language around that funnel. Label `durablyReviewReady` as “verified
+and waiting for your manual submission,” while retaining the exact server key
+only in the authoritative count line. Never imply that Trackly stored the ATS
+form contents or can recreate the employer draft.
 
 ## Grouped actions
 
