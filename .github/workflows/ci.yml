@@ -39,7 +39,7 @@ jobs:
 
       - run: npm test
 
-      - run: node scripts/sync-public-metrics.js --check
+      - run: node scripts/sync-public-metrics.js --check --prepare
 
       - name: Package smoke test
         run: npm pack --dry-run

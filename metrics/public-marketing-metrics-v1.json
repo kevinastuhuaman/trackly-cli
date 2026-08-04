@@ -1,11 +1,15 @@
 {
+  "schemaVersion": 1,
   "report": "public-marketing-metrics-v1",
   "environment": "production",
   "database": "azure-blue",
   "sourceEndpoint": "/api/admin/public-marketing-metrics",
-  "generatedAt": "2026-08-03T18:00:00-07:00",
+  "generatedAt": "2026-08-04T00:40:19-07:00",
   "metrics": {
-    "totalJobs": 181760,
-    "totalCompanies": 3880
+    "totalJobs": 181898,
+    "totalCompanies": 3880,
+    "atsTypes": 48,
+    "mbaJobs": 6239,
+    "internships": 10923
   }
 }

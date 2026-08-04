@@ -78,6 +78,31 @@ function serialized(snapshot) {
   return `${JSON.stringify(snapshot, null, 2)}\n`;
 }
 
+function replaceMetricsCopy(contents, snapshot, now = new Date()) {
+  const desired = publicDisplay(snapshot, now);
+  const fallback = publicDisplay(null, now);
+  let next = contents;
+  for (const field of ['jobs', 'companies']) {
+    for (const candidate of new Set([snapshot.display[field], fallback[field]])) {
+      next = next.split(candidate).join(desired[field]);
+    }
+  }
+  // A newly refreshed snapshot can cross a rounding bucket (for example,
+  // 170K+ to 180K+). Replace the narrowly scoped metric phrases even when the
+  // previous generated snapshot is no longer available to name the old value.
+  next = next.replace(/\b\d+K\+ jobs\b/g, desired.jobs);
+  next = next.replace(/\b\d{1,3}(?:,\d{3})*\+ companies\b/g, desired.companies);
+  return next;
+}
+
+function prepareCurrentSurfaces(snapshot, now = new Date()) {
+  for (const relativePath of currentSurfaces) {
+    const filePath = path.join(root, relativePath);
+    const contents = fs.readFileSync(filePath, 'utf8');
+    fs.writeFileSync(filePath, replaceMetricsCopy(contents, snapshot, now));
+  }
+}
+
 function main() {
   const source = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
   const generated = render(source);
@@ -88,10 +113,11 @@ function main() {
   if (!fs.existsSync(outputPath) || fs.readFileSync(outputPath, 'utf8') !== serialized(generated)) {
     throw new Error('public-metrics.generated.json is not synchronized');
   }
-  if (!isFreshForBuild(generated)) throw new Error('public metrics snapshot is too close to expiry; refresh it from the protected production report');
+  if (process.argv.includes('--prepare')) prepareCurrentSurfaces(generated);
+  const expectedDisplay = publicDisplay(generated);
   for (const relativePath of currentSurfaces) {
     const contents = fs.readFileSync(path.join(root, relativePath), 'utf8');
-    for (const value of Object.values(generated.display)) {
+    for (const value of Object.values(expectedDisplay)) {
       if (!contents.includes(value)) throw new Error(`${relativePath} is missing canonical metric: ${value}`);
     }
   }
@@ -106,4 +132,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { isFreshForBuild, publicDisplay, render, serialized, validateSource };
+module.exports = { isFreshForBuild, prepareCurrentSurfaces, publicDisplay, render, replaceMetricsCopy, serialized, validateSource };

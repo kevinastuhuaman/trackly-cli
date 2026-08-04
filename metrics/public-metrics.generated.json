@@ -4,11 +4,11 @@
   "sourceEnvironment": "production",
   "sourceDatabase": "azure-blue",
   "sourceEndpoint": "/api/admin/public-marketing-metrics",
-  "sourceTimestamp": "2026-08-03T18:00:00-07:00",
+  "sourceTimestamp": "2026-08-04T00:40:19-07:00",
   "maximumAgeInDays": 45,
   "minimumBuildFreshnessDays": 7,
   "exact": {
-    "jobs": 181760,
+    "jobs": 181898,
     "companies": 3880
   },
   "display": {

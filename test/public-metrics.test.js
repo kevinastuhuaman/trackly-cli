@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '..');
 const currentSurfaces = ['package.json', 'server.json', 'README.md', 'CLAUDE.md', 'AGENTS.md'];
 const source = JSON.parse(fs.readFileSync(path.join(root, 'metrics', 'public-marketing-metrics-v1.json'), 'utf8'));
 const generated = JSON.parse(fs.readFileSync(path.join(root, 'metrics', 'public-metrics.generated.json'), 'utf8'));
-const { isFreshForBuild, publicDisplay, render } = require('../scripts/sync-public-metrics');
+const { isFreshForBuild, publicDisplay, render, replaceMetricsCopy } = require('../scripts/sync-public-metrics');
 
 test('current CLI and MCP metadata use the conservative public metrics snapshot', () => {
   assert.deepEqual(generated, render(source));
@@ -32,4 +32,23 @@ test('stale or missing metrics use nonnumeric public copy', () => {
     jobs: 'Thousands of jobs',
     companies: 'Thousands of companies',
   });
+  assert.equal(
+    replaceMetricsCopy(
+      'Search 170K+ jobs across 3,800+ companies.',
+      generated,
+      new Date('2026-10-01T00:00:00-07:00'),
+    ),
+    'Search Thousands of jobs across Thousands of companies.',
+  );
+});
+
+test('preparation replaces a previous numeric rounding bucket', () => {
+  assert.equal(
+    replaceMetricsCopy(
+      'Search 160K+ jobs across 3,700+ companies.',
+      generated,
+      new Date('2026-08-04T01:00:00-07:00'),
+    ),
+    'Search 170K+ jobs across 3,800+ companies.',
+  );
 });
