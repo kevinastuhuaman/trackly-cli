@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
-const currentSurfaces = ['package.json', 'server.json', 'README.md'];
+const currentSurfaces = ['package.json', 'server.json', 'README.md', 'CLAUDE.md', 'AGENTS.md'];
 
 test('current CLI and MCP metadata use the conservative public metrics snapshot', () => {
   for (const relativePath of currentSurfaces) {

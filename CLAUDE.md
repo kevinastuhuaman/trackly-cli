@@ -1,6 +1,6 @@
 # trackly-cli
 
-CLI + MCP server for the Trackly job tracker. Lets users search 128K+ jobs across 1,900+ companies from the terminal or through AI agents (Claude Code, Cursor) via MCP.
+CLI + MCP server for the Trackly job tracker. Lets users search 170K+ jobs across 3,800+ companies from the terminal or through AI agents (Claude Code, Cursor) via MCP.
 
 ## Tech Stack
 
@@ -132,9 +132,10 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 5. **`--json` flag or non-TTY stdout** triggers JSON output mode on all commands.
 6. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).
 7. **Keep dependencies minimal.** Direct runtime dependencies are
-   `@modelcontextprotocol/sdk`, `zod`, and a direct Hono declaration that
-   guarantees the SDK's audited patched resolution. The local MCP transport
-   remains stdio-only; do not add or initialize an HTTP server. The CLI HTTP
-   client uses raw `node:https`/`node:http`.
+   `@modelcontextprotocol/sdk`, `zod`, Hono, and exact `fast-uri` / `ip-address`
+   security pins that guarantee the SDK's audited patched resolution. The pins
+   must be reviewed and bumped manually when upstream constraints change. The
+   local MCP transport remains stdio-only; do not add or initialize an HTTP
+   server. The CLI HTTP client uses raw `node:https`/`node:http`.
 8. **Token refresh is automatic.** On 401, `apiRequest()` tries one refresh via `/api/auth/refresh` before failing. The `_isRetry` flag prevents infinite loops.
 9. **`/ask` backend drift is tracked outside this repo.** The CLI and MCP use DB-backed job function values directly. Backend PR #112 (`trackly-app/close-ai`) tracks the `/ask` prompt/URL migration to those same public values; verify production before claiming `/ask` round-trips are fixed.
