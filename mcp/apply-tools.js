@@ -217,7 +217,7 @@ function registerApplyTools(
         }),
         z.object({
           key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
-          value: z.any().optional(), scope: z.literal('corporate_family'), scopeValue: z.string().min(1).max(200),
+          value: z.any().optional(), scope: z.literal('corporate_family'), scopeValue: z.string().min(1).max(100),
           questionLabel: z.string().max(1000).optional(),
         }),
       ])).max(100).optional(),
