@@ -110,6 +110,15 @@ function createErrorResult(error, fallbackMessage, extra = {}) {
     payload.hint = 'Preferences changed elsewhere. Refetch with trackly_get_preferences, reconcile with the user, and never retry blindly with the newer revision.';
   }
 
+  if (
+    error?.status === 503
+    && error?.error === 'application_profile_schema_pending'
+    && error?.retryable === true
+  ) {
+    payload.code = error.error;
+    payload.retryable = true;
+  }
+
   if (error?.status === 429 && !payload.hint) {
     payload.hint = 'Daily limit reached (20 natural language queries per day).';
   }

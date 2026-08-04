@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const contract = require('../contracts/trackly-apply-tools.json');
+const contractHistory = require('../contracts/trackly-apply-contract-history.json');
 const packageManifest = require('../package.json');
 const serverManifest = require('../server.json');
 const packageLock = require('../package-lock.json');
@@ -104,12 +105,42 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.0');
+  assert.equal(contract.contractVersion, '3.6.2');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
     assert.equal(normalizeSchema(executableSchema), localSchema, `${name} schema drifted`);
   }
+});
+
+function toolsDigest(tools) {
+  const crypto = require('node:crypto');
+  const canonicalTools = Object.fromEntries(
+    Object.entries(tools).sort(([left], [right]) => left.localeCompare(right)),
+  );
+  return crypto.createHash('sha256').update(JSON.stringify(canonicalTools)).digest('hex');
+}
+
+function assertNoHistoricalVersionReuse(candidate) {
+  for (const [version, historical] of Object.entries(contractHistory)) {
+    if (toolsDigest(candidate.tools) !== historical.toolsSha256) {
+      assert.notEqual(candidate.contractVersion, version);
+    }
+  }
+}
+
+test('changed MCP schemas never reuse a historical contract version', () => {
+  assertNoHistoricalVersionReuse(contract);
+});
+
+test('contract history covers changes to every tool, not only profile tools', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.tools.trackly_get_apply_queue += ',mutation:z.boolean().optional()';
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
 });
 
 test('release manifests stay on one package version', () => {
@@ -517,7 +548,7 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.4\.0 or newer/i);
+  assert.match(promptRegion, /require the fetched compatibleSkillMinimumVersion or newer/i);
   assert.match(promptRegion, /Only protocol 3\.5 or newer with the compact-snapshot capability may call trackly_get_apply_execution_snapshot/i);
   assert.doesNotMatch(promptRegion, /skill 4\.3\.1/i);
   assert.doesNotMatch(promptRegion, /protocol 3\.4\.1 execution gate/i);
@@ -529,13 +560,13 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.4.1 requires protocol 3.5.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.4.2 requires protocol 3.5.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.1 requires protocol 3\.5\.0 or newer/);
+  assert.match(skill, /Skill 4\.4\.2 requires protocol 3\.5\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.4\.1/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.4\.2/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
@@ -895,12 +926,12 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.4.1 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.4.2 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.1/);
+  assert.match(skill, /Skill 4\.4\.2/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);
@@ -937,4 +968,52 @@ test('Apply skill offers voice learning only after durable submission reconcilia
   assert.match(skill, /ask for that consent first or skip the offer/i);
   assert.match(skill, /save the field as `declined` at global scope with no answer text/i);
   assert.match(skill, /Never save a voice sample without the user's explicit yes/i);
+});
+
+test('Apply skill compounds one answer packet with one write, one verification, and a complete receipt', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  const compounding = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'answer-compounding.md'), 'utf8');
+
+  assert.match(skill, /at most one bulk `trackly_update_application_profile` call and one verification refetch/i);
+  assert.match(skill, /`saved`, `already_matched`, `schema_missing`, or `run_only_contextual`/);
+  assert.match(compounding, /Never call\s+a field missing merely because it was absent from the compact execution\s+snapshot/i);
+  assert.match(compounding, /Do not write `already_matched` entries/);
+  assert.match(compounding, /ambiguous transport failure or HTTP 5xx, refetch/i);
+  assert.match(compounding, /Every answer supplied in the packet must appear exactly once in the receipt/i);
+  assert.match(compounding, /authorization\.legally_authorized_by_country/);
+  assert.match(compounding, /employment\.corporate_family_engagement_types_checked/);
+  assert.match(compounding, /policy question or published version as `questionLabel`/);
+  assert.match(compounding, /Policy acknowledgements are the exception:[\s\S]*audit-only, not[\s\S]*reusable answers/i);
+  assert.match(compounding, /company scope and `questionFingerprint`/i);
+  assert.match(compounding, /redacted, unknown, or absent[\s\S]*must not block truth certification or review/i);
+});
+
+test('Apply browser handoff never creates replacement app-shell tabs or overclaims inventory', () => {
+  const browser = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-lifecycle.md'), 'utf8');
+  const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
+
+  assert.match(browser, /Do not call `open_in_codex`/);
+  assert.match(browser, /Never say “only these tabs\s+remain,” “the blank tabs are gone,” or equivalent/i);
+  assert.match(browser, /user reports or shows an extra tab, treat that as positive\s+evidence/i);
+  assert.match(review, /verified\s+and waiting for your manual submission/i);
+  assert.match(review, /employer's live draft still exists\s+only in the open browser tab/i);
+});
+
+test('Apply MCP profile contract supports jurisdiction and keeps corporate-family answers company-scoped', () => {
+  const tools = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
+  const contract = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'trackly-apply-tools.json'), 'utf8'));
+  const answerCompounding = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'answer-compounding.md'),
+    'utf8',
+  );
+
+  assert.match(tools, /jurisdiction: iso3166Alpha2Schema\.optional\(\)/);
+  assert.match(tools, /scopeValue: iso3166Alpha2Schema/);
+  assert.match(tools, /scope: z\.literal\('jurisdiction'\)/);
+  assert.doesNotMatch(tools, /corporateFamily/);
+  assert.doesNotMatch(tools, /scope: z\.literal\('corporate_family'\)/);
+  assert.match(answerCompounding, /Corporate-family reuse is unavailable/i);
+  assert.match(answerCompounding, /exact `company`\s+scope/i);
+  assert.match(contract.tools.trackly_get_application_profile, /jurisdiction/);
+  assert.doesNotMatch(contract.tools.trackly_update_application_profile, /corporate_family/);
 });

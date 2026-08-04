@@ -63,7 +63,7 @@ function registerRuntimeTools(apiResponse = { ok: true }) {
 }
 
 test('protocol 3.4 publishes all accessible execution tools', () => {
-  assert.equal(contract.contractVersion, '3.6.0');
+  assert.equal(contract.contractVersion, '3.6.2');
   for (const name of executionTools) {
     assert.ok(contract.tools[name], `${name} missing from contract fixture`);
     assert.match(tools, new RegExp(`['"]${name}['"]`));
@@ -72,6 +72,61 @@ test('protocol 3.4 publishes all accessible execution tools', () => {
   assert.match(tools, /\/advance/);
   assert.match(tools, /\/dispositions/);
   assert.match(tools, /\/stop/);
+});
+
+test('profile jurisdiction tools validate ISO codes and forward the accepted spelling', async () => {
+  const { registrations, calls } = registerRuntimeTools();
+  const getProfile = registrations.get('trackly_get_application_profile');
+  const updateProfile = registrations.get('trackly_update_application_profile');
+
+  const getInput = getProfile.schema.parse({ jurisdiction: 'us' });
+  await getProfile.handler(getInput);
+  assert.deepEqual(calls.at(-1), [
+    'GET',
+    '/api/jobscout/application-profile?jurisdiction=us',
+    null,
+    false,
+    false,
+    'trackly-mcp/test',
+  ]);
+
+  const updateInput = updateProfile.schema.parse({
+    expectedRevision: 9,
+    changes: [{
+      key: 'authorization.legally_authorized_by_country',
+      state: 'answered',
+      value: true,
+      scope: 'jurisdiction',
+      scopeValue: 'pe',
+    }],
+  });
+  await updateProfile.handler(updateInput);
+  assert.deepEqual(calls.at(-1), [
+    'PATCH',
+    '/api/jobscout/application-profile',
+    updateInput,
+    false,
+    false,
+    'trackly-mcp/test',
+  ]);
+
+  assert.throws(
+    () => getProfile.schema.parse({ jurisdiction: 'XX' }),
+    /ISO 3166-1 alpha-2 country code/i,
+  );
+  assert.throws(
+    () => updateProfile.schema.parse({
+      expectedRevision: 9,
+      changes: [{
+        key: 'authorization.legally_authorized_by_country',
+        state: 'answered',
+        value: true,
+        scope: 'jurisdiction',
+        scopeValue: 'ZZ',
+      }],
+    }),
+    /ISO 3166-1 alpha-2 country code/i,
+  );
 });
 
 test('execution tools validate and send the exact HTTP contract', async () => {
@@ -410,10 +465,10 @@ test('advance replay returns the backend current revision and progress unchanged
   assert.deepEqual(result, response);
 });
 
-test('skill 4.4.1 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
-  assert.match(agent, /const SKILL_VERSION = '4\.4\.1'/);
+test('skill 4.4.2 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
+  assert.match(agent, /const SKILL_VERSION = '4\.4\.2'/);
   assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.5\.0'/);
-  assert.match(skill, /Skill 4\.4\.1 requires protocol 3\.5\.0 or newer/);
+  assert.match(skill, /Skill 4\.4\.2 requires protocol 3\.5\.0 or newer/);
   assert.match(skill, /trackly_get_active_apply_execution[\s\S]*before[\s\S]*trackly_get_active_apply_batch/i);
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);

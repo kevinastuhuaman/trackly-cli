@@ -155,6 +155,19 @@ Before saying that a form is open, visible, ready for review, or preserved:
 3. Report the actual browser surface and any tab that could not be proven
    visible. Never convert controller ownership into a visibility claim.
 
+Do not call `open_in_codex`, open a new app-shell page, or create a replacement
+tab merely to reveal an already-bound application. Such calls can create blank
+or duplicate tabs without presenting the real form. Use only the adapter's
+exact-tab focus/reveal primitive when it returns a current tab-bound visibility
+receipt. If no such primitive exists, preserve the bound tab and report
+visibility as unverified.
+
+Controller inventory is not the complete app-shell or user-visible inventory
+unless the adapter explicitly declares it complete. Never say “only these tabs
+remain,” “the blank tabs are gone,” or equivalent based on controller inventory
+alone. When the user reports or shows an extra tab, treat that as positive
+evidence, reconcile every available surface, and correct the claim.
+
 If the selected path can provide neither its required reachability proof nor
 an exact visibility receipt, preserve the tab but say that visibility is
 unverified. Do not tell the user to submit a form that has not been proven
