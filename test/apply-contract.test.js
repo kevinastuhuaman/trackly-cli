@@ -104,7 +104,7 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.1');
+  assert.equal(contract.contractVersion, '3.6.0');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -517,7 +517,7 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
 
   assert.match(evidenceRegion, /const query = qs\.toString\(\)/);
   assert.match(evidenceRegion, /const suffix = query \? `\?\$\{query\}` : ''/);
-  assert.match(promptRegion, /require(?:s)? Trackly Apply skill 4\.4\.0 or newer/i);
+  assert.match(promptRegion, /require the fetched compatibleSkillMinimumVersion or newer/i);
   assert.match(promptRegion, /Only protocol 3\.5 or newer with the compact-snapshot capability may call trackly_get_apply_execution_snapshot/i);
   assert.doesNotMatch(promptRegion, /skill 4\.3\.1/i);
   assert.doesNotMatch(promptRegion, /protocol 3\.4\.1 execution gate/i);
@@ -968,11 +968,17 @@ test('Apply browser handoff never creates replacement app-shell tabs or overclai
 test('Apply MCP profile contract supports jurisdiction and corporate-family scopes', () => {
   const tools = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
   const contract = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'trackly-apply-tools.json'), 'utf8'));
+  const answerCompounding = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'answer-compounding.md'),
+    'utf8',
+  );
 
   assert.match(tools, /jurisdiction: z\.string\(\)\.regex\(\/\^\[A-Za-z\]\{2\}\$\/\)\.optional\(\)/);
-  assert.match(tools, /corporateFamily: z\.string\(\)\.min\(1\)\.max\(100\)\.optional\(\)/);
+  assert.match(tools, /corporateFamily: z\.string\(\)\.regex\(\/\^cf_\[a-z0-9\]\{16,64\}\$\/\)\.optional\(\)/);
   assert.match(tools, /scope: z\.literal\('jurisdiction'\)/);
   assert.match(tools, /scope: z\.literal\('corporate_family'\)/);
+  assert.match(answerCompounding, /Never derive one from employer\s+names/i);
+  assert.match(answerCompounding, /Without a Trackly-issued family ID, save both\s+fields at the exact `company` scope/i);
   assert.match(contract.tools.trackly_get_application_profile, /jurisdiction/);
   assert.match(contract.tools.trackly_update_application_profile, /corporate_family/);
 });

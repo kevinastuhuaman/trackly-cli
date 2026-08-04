@@ -431,7 +431,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
   }];
   const current = agent.evaluateApplyCompatibility({
     version: '3.5.0',
-    mcpContractVersion: '3.6.1',
+    mcpContractVersion: '3.6.0',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.4.0',
@@ -444,7 +444,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
 
   const future = agent.evaluateApplyCompatibility({
     version: '3.5.0',
-    mcpContractVersion: '3.6.1',
+    mcpContractVersion: '3.6.0',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.5.0',
@@ -455,7 +455,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
 
   const missingMinimum = agent.evaluateApplyCompatibility({
     version: '3.4.1',
-    mcpContractVersion: '3.6.1',
+    mcpContractVersion: '3.6.0',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
   }, installed);
@@ -471,7 +471,7 @@ test('agent doctor compatibility rejects stale CLI and MCP contract versions', (
   }];
   const base = {
     version: '3.5.0',
-    mcpContractVersion: '3.6.1',
+    mcpContractVersion: '3.6.0',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.4.0',
@@ -546,7 +546,7 @@ test('agent doctor does not infer controller and user tab union inventory from p
   await withTempAgentHomeAsync(async () => {
     const report = await agent.doctorAgent();
     assert.equal(report.cliVersion, '0.13.2');
-    assert.equal(report.mcpContractVersion, '3.6.1');
+    assert.equal(report.mcpContractVersion, '3.6.0');
     assert.match(report.skillPackIntegrity.expectedDigest, /^[a-f0-9]{64}$/);
     assert.deepEqual(report.browserControl.tabInventory, {
       controllerOwnedTabs: 'runtime_verification_required',

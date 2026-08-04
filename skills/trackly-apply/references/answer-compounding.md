@@ -8,8 +8,10 @@ questions and piecemeal profile writes.
 
 1. Collect all newly supplied answers from the current question packet.
 2. Fetch the current profile schema and the smallest relevant profile
-   projection once. Include `provider`, `company`, `jurisdiction`, or
-   `corporateFamily` only when that context is known and required.
+   projection once. Include `provider`, `company`, and `jurisdiction` when that
+   context is known and required. Include `corporateFamily` only when Trackly
+   itself supplied a stable `cf_...` family ID. Never derive one from employer
+   names, logos, page text, parent-company knowledge, or search results.
 3. Map each answer to an exposed canonical key and permitted scope. Never call
    a field missing merely because it was absent from the compact execution
    snapshot; contextual fields require a targeted profile fetch.
@@ -64,10 +66,12 @@ claim that Trackly learned it.
 - Employment, contracting, consulting, temporary work, or similar engagement
   with an employer's corporate family:
   `employment.previously_engaged_with_corporate_family` at
-  `corporate_family` scope, paired with
+  `corporate_family` scope only when Trackly supplied a stable `cf_...` ID,
+  paired with
   `employment.corporate_family_engagement_types_checked` at the same scope.
   Reuse a negative answer only when the new question is no broader than the
-  recorded relationship types.
+  recorded relationship types. Without a Trackly-issued family ID, save both
+  fields at the exact `company` scope and never reuse them for affiliates.
 - Employer candidate-AI policy acknowledgement:
   `consent.candidate_ai_guidance_acknowledged` at `company` scope. Send the
   exact policy question or published version as `questionLabel`; Trackly returns
