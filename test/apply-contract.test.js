@@ -983,6 +983,9 @@ test('Apply skill compounds one answer packet with one write, one verification, 
   assert.match(compounding, /authorization\.legally_authorized_by_country/);
   assert.match(compounding, /employment\.corporate_family_engagement_types_checked/);
   assert.match(compounding, /policy question or published version as `questionLabel`/);
+  assert.match(compounding, /Policy acknowledgements are the exception:[\s\S]*audit-only, not[\s\S]*reusable answers/i);
+  assert.match(compounding, /company scope and `questionFingerprint`/i);
+  assert.match(compounding, /redacted, unknown, or absent[\s\S]*must not block truth certification or review/i);
 });
 
 test('Apply browser handoff never creates replacement app-shell tabs or overclaims inventory', () => {

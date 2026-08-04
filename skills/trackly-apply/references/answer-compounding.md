@@ -34,8 +34,12 @@ questions and piecemeal profile writes.
 - If the bulk write returns an ambiguous transport failure or HTTP 5xx, refetch
   the same projection before retrying. The first request may have committed.
   Retry only the still-unapplied changes with a fresh expected revision.
-- Refetch once after the write and verify every `saved` and `already_matched`
-  entry at its exact scope. Do not perform a fetch after each answer.
+- Refetch once after the write and verify every reusable `saved` and
+  `already_matched` entry at its exact scope. Do not perform a fetch after each
+  answer. Policy acknowledgements are the exception: they are audit-only, not
+  reusable answers. Verify their company scope and `questionFingerprint` when
+  the backend exposes that metadata, never require a reusable state or value,
+  and retain the ask-again behavior described below.
 - Keep restricted values out of mechanics observations and progress messages.
 
 ## Required receipt
@@ -74,8 +78,11 @@ claim that Trackly learned it.
 - Employer candidate-AI policy acknowledgement:
   `consent.candidate_ai_guidance_acknowledged` at `company` scope. Send the
   exact policy question or published version as `questionLabel`. Treat this as
-  run-specific and ask again: Trackly may retain the prior fingerprint for
-  audit, but no client may reuse it until the backend can prove a match.
+  `run_only_contextual` for answer reuse and ask again: Trackly may retain the
+  prior company-scoped fingerprint for audit, but no client may reuse it until
+  the backend can prove a match. A write receipt or refetch verifies only the
+  company scope and `questionFingerprint`; a redacted, unknown, or absent
+  reusable value is expected and must not block truth certification or review.
 - Consumer hardware, IoT, or retail experience level and supporting summary:
   the two global `employment.consumer_hardware_iot_retail_experience_*` fields.
 - Residential city and EEO sexual orientation remain their existing canonical

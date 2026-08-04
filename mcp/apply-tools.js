@@ -174,7 +174,7 @@ function registerApplyTools(
       if (provider) qs.set('provider', provider);
       if (companyId) qs.set('companyId', companyId);
       if (jurisdiction) qs.set('jurisdiction', jurisdiction);
-      return apiRequest('GET', `/api/jobscout/application-profile?${qs.toString()}`, null, false, false, MCP_USER_AGENT);
+      return applyApiRequest('GET', `/api/jobscout/application-profile?${qs.toString()}`, null, false, false, MCP_USER_AGENT);
     }, 'Failed to fetch application profile')
   );
 
@@ -236,7 +236,7 @@ function registerApplyTools(
       // with the challenge unless the token matches. Forward the full params —
       // including sensitiveRevocationConfirmToken — so no client-side copy of
       // the guard can drift or be bypassed by version skew.
-      return apiRequest('PATCH', '/api/jobscout/application-profile', params, false, false, MCP_USER_AGENT);
+      return applyApiRequest('PATCH', '/api/jobscout/application-profile', params, false, false, MCP_USER_AGENT);
     }, 'Failed to update application profile')
   );
 

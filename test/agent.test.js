@@ -523,6 +523,26 @@ test('agent doctor accepts the local MCP contract during an explicit overlap win
   assert.deepEqual(result.compatibleMcpContractVersions, ['3.6.0', '3.6.1', '3.6.2']);
 });
 
+test('agent doctor treats an explicit MCP compatibility window as authoritative', () => {
+  const result = agent.evaluateApplyCompatibility({
+    version: '3.5.1',
+    mcpContractVersion: '3.6.2',
+    preferredMcpContractVersion: '3.6.3',
+    compatibleMcpContractVersions: ['3.6.3'],
+    compatibleCliMinimumVersion: '0.13.1',
+    compatibleSkillMajor: 4,
+    compatibleSkillMinimumVersion: '4.4.1',
+    batchOrchestration: { accessibleExecution: { enabled: true } },
+  }, [{
+    client: 'codex',
+    installed: true,
+    installedSkillVersion: '4.4.2',
+  }]);
+
+  assert.equal(result.mcpContractCompatible, false);
+  assert.equal(result.compatible, false);
+});
+
 test('agent doctor accepts the legacy MCP contract only while accessible execution is disabled', () => {
   const clients = [{
     client: 'codex',

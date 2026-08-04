@@ -74,6 +74,61 @@ test('protocol 3.4 publishes all accessible execution tools', () => {
   assert.match(tools, /\/stop/);
 });
 
+test('profile jurisdiction tools validate ISO codes and forward the accepted spelling', async () => {
+  const { registrations, calls } = registerRuntimeTools();
+  const getProfile = registrations.get('trackly_get_application_profile');
+  const updateProfile = registrations.get('trackly_update_application_profile');
+
+  const getInput = getProfile.schema.parse({ jurisdiction: 'us' });
+  await getProfile.handler(getInput);
+  assert.deepEqual(calls.at(-1), [
+    'GET',
+    '/api/jobscout/application-profile?jurisdiction=us',
+    null,
+    false,
+    false,
+    'trackly-mcp/test',
+  ]);
+
+  const updateInput = updateProfile.schema.parse({
+    expectedRevision: 9,
+    changes: [{
+      key: 'authorization.legally_authorized_by_country',
+      state: 'answered',
+      value: true,
+      scope: 'jurisdiction',
+      scopeValue: 'pe',
+    }],
+  });
+  await updateProfile.handler(updateInput);
+  assert.deepEqual(calls.at(-1), [
+    'PATCH',
+    '/api/jobscout/application-profile',
+    updateInput,
+    false,
+    false,
+    'trackly-mcp/test',
+  ]);
+
+  assert.throws(
+    () => getProfile.schema.parse({ jurisdiction: 'XX' }),
+    /ISO 3166-1 alpha-2 country code/i,
+  );
+  assert.throws(
+    () => updateProfile.schema.parse({
+      expectedRevision: 9,
+      changes: [{
+        key: 'authorization.legally_authorized_by_country',
+        state: 'answered',
+        value: true,
+        scope: 'jurisdiction',
+        scopeValue: 'ZZ',
+      }],
+    }),
+    /ISO 3166-1 alpha-2 country code/i,
+  );
+});
+
 test('execution tools validate and send the exact HTTP contract', async () => {
   const { registrations, calls } = registerRuntimeTools();
   const idempotencyKey = 'runtime-contract-key-0001';
