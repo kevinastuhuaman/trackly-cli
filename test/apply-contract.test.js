@@ -113,14 +113,34 @@ test('local MCP Apply schemas match each complete versioned input schema', () =>
   }
 });
 
-test('changed MCP schemas never reuse a historical contract version', () => {
+function toolsDigest(tools) {
   const crypto = require('node:crypto');
-  for (const [version, historicalTools] of Object.entries(contractHistory)) {
-    const changed = Object.entries(historicalTools).some(([name, historicalDigest]) => (
-      crypto.createHash('sha256').update(contract.tools[name]).digest('hex') !== historicalDigest
-    ));
-    if (changed) assert.notEqual(contract.contractVersion, version);
+  const canonicalTools = Object.fromEntries(
+    Object.entries(tools).sort(([left], [right]) => left.localeCompare(right)),
+  );
+  return crypto.createHash('sha256').update(JSON.stringify(canonicalTools)).digest('hex');
+}
+
+function assertNoHistoricalVersionReuse(candidate) {
+  for (const [version, historical] of Object.entries(contractHistory)) {
+    if (toolsDigest(candidate.tools) !== historical.toolsSha256) {
+      assert.notEqual(candidate.contractVersion, version);
+    }
   }
+}
+
+test('changed MCP schemas never reuse a historical contract version', () => {
+  assertNoHistoricalVersionReuse(contract);
+});
+
+test('contract history covers changes to every tool, not only profile tools', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.tools.trackly_get_apply_queue += ',mutation:z.boolean().optional()';
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
 });
 
 test('release manifests stay on one package version', () => {

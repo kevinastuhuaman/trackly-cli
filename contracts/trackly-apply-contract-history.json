@@ -1,6 +1,8 @@
 {
   "3.6.0": {
-    "trackly_get_application_profile": "ce59dc912982a8a9f648cc0a28192f4449fdaf786d4c331a6f19715df39c231f",
-    "trackly_update_application_profile": "8b5ec6d2712cbdb6285a95e694e7af8d601e6cc4adbdc34f20758587ad0064b3"
+    "toolsSha256": "d3e856817b5b94b8e091bff2d57954e99a6abea82f41d029f2671dbbbccccd41"
+  },
+  "3.6.1": {
+    "toolsSha256": "0d5dfa89c79ad2b75304a3288603825c287a118a9f3e0b2c0e5a2c4a80f8cca2"
   }
 }
