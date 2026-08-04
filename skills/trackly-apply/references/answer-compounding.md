@@ -9,9 +9,9 @@ questions and piecemeal profile writes.
 1. Collect all newly supplied answers from the current question packet.
 2. Fetch the current profile schema and the smallest relevant profile
    projection once. Include `provider`, `company`, and `jurisdiction` when that
-   context is known and required. Include `corporateFamily` only when Trackly
-   itself supplied a stable `cf_...` family ID. Never derive one from employer
-   names, logos, page text, parent-company knowledge, or search results.
+   context is known and required. Corporate-family reuse is unavailable until
+   Trackly has an authoritative company-family registry; never derive a family
+   identity from names, logos, page text, parent-company knowledge, or search.
 3. Map each answer to an exposed canonical key and permitted scope. Never call
    a field missing merely because it was absent from the compact execution
    snapshot; contextual fields require a targeted profile fetch.
@@ -65,18 +65,17 @@ claim that Trackly learned it.
   `employment.previously_interviewed_at_employer` at `company` scope.
 - Employment, contracting, consulting, temporary work, or similar engagement
   with an employer's corporate family:
-  `employment.previously_engaged_with_corporate_family` at
-  `corporate_family` scope only when Trackly supplied a stable `cf_...` ID,
-  paired with
-  `employment.corporate_family_engagement_types_checked` at the same scope.
+  `employment.previously_engaged_with_corporate_family` at exact `company`
+  scope, paired with `employment.corporate_family_engagement_types_checked`
+  at the same scope.
   Reuse a negative answer only when the new question is no broader than the
-  recorded relationship types. Without a Trackly-issued family ID, save both
-  fields at the exact `company` scope and never reuse them for affiliates.
+  recorded relationship types and concerns the same company. Never reuse these
+  fields for affiliates.
 - Employer candidate-AI policy acknowledgement:
   `consent.candidate_ai_guidance_acknowledged` at `company` scope. Send the
-  exact policy question or published version as `questionLabel`; Trackly returns
-  its fingerprint. Reconfirm when the current fingerprint cannot be proven to
-  match; the acknowledgement is not broad AI consent.
+  exact policy question or published version as `questionLabel`. Treat this as
+  run-specific and ask again: Trackly may retain the prior fingerprint for
+  audit, but no client may reuse it until the backend can prove a match.
 - Consumer hardware, IoT, or retail experience level and supporting summary:
   the two global `employment.consumer_hardware_iot_retail_experience_*` fields.
 - Residential city and EEO sexual orientation remain their existing canonical

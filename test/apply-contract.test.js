@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const contract = require('../contracts/trackly-apply-tools.json');
+const contractHistory = require('../contracts/trackly-apply-contract-history.json');
 const packageManifest = require('../package.json');
 const serverManifest = require('../server.json');
 const packageLock = require('../package-lock.json');
@@ -104,11 +105,21 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.0');
+  assert.equal(contract.contractVersion, '3.6.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
     assert.equal(normalizeSchema(executableSchema), localSchema, `${name} schema drifted`);
+  }
+});
+
+test('changed MCP schemas never reuse a historical contract version', () => {
+  const crypto = require('node:crypto');
+  for (const [version, historicalTools] of Object.entries(contractHistory)) {
+    const changed = Object.entries(historicalTools).some(([name, historicalDigest]) => (
+      crypto.createHash('sha256').update(contract.tools[name]).digest('hex') !== historicalDigest
+    ));
+    if (changed) assert.notEqual(contract.contractVersion, version);
   }
 });
 
@@ -965,7 +976,7 @@ test('Apply browser handoff never creates replacement app-shell tabs or overclai
   assert.match(review, /employer's live draft still exists\s+only in the open browser tab/i);
 });
 
-test('Apply MCP profile contract supports jurisdiction and corporate-family scopes', () => {
+test('Apply MCP profile contract supports jurisdiction and keeps corporate-family answers company-scoped', () => {
   const tools = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
   const contract = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'trackly-apply-tools.json'), 'utf8'));
   const answerCompounding = fs.readFileSync(
@@ -974,11 +985,11 @@ test('Apply MCP profile contract supports jurisdiction and corporate-family scop
   );
 
   assert.match(tools, /jurisdiction: z\.string\(\)\.regex\(\/\^\[A-Za-z\]\{2\}\$\/\)\.optional\(\)/);
-  assert.match(tools, /corporateFamily: z\.string\(\)\.regex\(\/\^cf_\[a-z0-9\]\{16,64\}\$\/\)\.optional\(\)/);
   assert.match(tools, /scope: z\.literal\('jurisdiction'\)/);
-  assert.match(tools, /scope: z\.literal\('corporate_family'\)/);
-  assert.match(answerCompounding, /Never derive one from employer\s+names/i);
-  assert.match(answerCompounding, /Without a Trackly-issued family ID, save both\s+fields at the exact `company` scope/i);
+  assert.doesNotMatch(tools, /corporateFamily/);
+  assert.doesNotMatch(tools, /scope: z\.literal\('corporate_family'\)/);
+  assert.match(answerCompounding, /Corporate-family reuse is unavailable/i);
+  assert.match(answerCompounding, /exact `company`\s+scope/i);
   assert.match(contract.tools.trackly_get_application_profile, /jurisdiction/);
-  assert.match(contract.tools.trackly_update_application_profile, /corporate_family/);
+  assert.doesNotMatch(contract.tools.trackly_update_application_profile, /corporate_family/);
 });

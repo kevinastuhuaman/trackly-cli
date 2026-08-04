@@ -163,15 +163,13 @@ function registerApplyTools(
       provider: z.string().max(100).optional(),
       companyId: z.string().max(100).optional(),
       jurisdiction: z.string().regex(/^[A-Za-z]{2}$/).optional(),
-      corporateFamily: z.string().regex(/^cf_[a-z0-9]{16,64}$/).optional(),
     },
-    wrapTool(async ({ includeSensitive, provider, companyId, jurisdiction, corporateFamily }) => {
+    wrapTool(async ({ includeSensitive, provider, companyId, jurisdiction }) => {
       const qs = new URLSearchParams();
       if (includeSensitive) qs.set('includeSensitive', 'true');
       if (provider) qs.set('provider', provider);
       if (companyId) qs.set('companyId', companyId);
       if (jurisdiction) qs.set('jurisdiction', jurisdiction);
-      if (corporateFamily) qs.set('corporateFamily', corporateFamily);
       return apiRequest('GET', `/api/jobscout/application-profile?${qs.toString()}`, null, false, false, MCP_USER_AGENT);
     }, 'Failed to fetch application profile')
   );
@@ -213,11 +211,6 @@ function registerApplyTools(
         z.object({
           key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
           value: z.any().optional(), scope: z.literal('jurisdiction'), scopeValue: z.string().regex(/^[A-Za-z]{2}$/),
-          questionLabel: z.string().max(1000).optional(),
-        }),
-        z.object({
-          key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
-          value: z.any().optional(), scope: z.literal('corporate_family'), scopeValue: z.string().regex(/^cf_[a-z0-9]{16,64}$/),
           questionLabel: z.string().max(1000).optional(),
         }),
       ])).max(100).optional(),
