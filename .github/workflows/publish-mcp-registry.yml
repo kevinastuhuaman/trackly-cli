@@ -15,6 +15,9 @@ jobs:
       # Pinned to commit SHA to prevent supply-chain attacks via tag re-pointing.
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
+      - name: Prepare current public metrics copy
+        run: node scripts/sync-public-metrics.js --check --prepare
+
       # Keep in lockstep with .github/workflows/publish.yml — same version, same SHA256.
       - name: Install mcp-publisher (pinned + SHA256-verified)
         env:

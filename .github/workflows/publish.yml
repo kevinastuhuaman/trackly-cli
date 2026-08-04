@@ -166,6 +166,8 @@ jobs:
 
       - run: npm test
 
+      - run: node scripts/sync-public-metrics.js --check --prepare
+
       - run: npm audit --audit-level=high
 
       - run: npm pack --dry-run

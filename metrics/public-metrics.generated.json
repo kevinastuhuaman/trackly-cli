@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "sourceReport": "public-marketing-metrics-v1",
+  "sourceEnvironment": "production",
+  "sourceDatabase": "azure-blue",
+  "sourceEndpoint": "/api/admin/public-marketing-metrics",
+  "sourceTimestamp": "2026-08-04T00:40:19-07:00",
+  "maximumAgeInDays": 45,
+  "minimumBuildFreshnessDays": 7,
+  "exact": {
+    "jobs": 181898,
+    "companies": 3880
+  },
+  "display": {
+    "jobs": "170K+ jobs",
+    "companies": "3,800+ companies"
+  }
+}
