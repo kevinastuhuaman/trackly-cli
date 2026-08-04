@@ -105,7 +105,7 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.1');
+  assert.equal(contract.contractVersion, '3.6.2');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -1004,7 +1004,8 @@ test('Apply MCP profile contract supports jurisdiction and keeps corporate-famil
     'utf8',
   );
 
-  assert.match(tools, /jurisdiction: z\.string\(\)\.regex\(\/\^\[A-Za-z\]\{2\}\$\/\)\.optional\(\)/);
+  assert.match(tools, /jurisdiction: iso3166Alpha2Schema\.optional\(\)/);
+  assert.match(tools, /scopeValue: iso3166Alpha2Schema/);
   assert.match(tools, /scope: z\.literal\('jurisdiction'\)/);
   assert.doesNotMatch(tools, /corporateFamily/);
   assert.doesNotMatch(tools, /scope: z\.literal\('corporate_family'\)/);

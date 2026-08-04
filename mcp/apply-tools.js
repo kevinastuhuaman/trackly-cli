@@ -5,6 +5,7 @@ const { apiRequest } = require('../lib/client');
 const { prepareResume, verifyPreparedResume } = require('../lib/agent');
 const { lintApplicationText } = require('../lib/application-text');
 const { diagnoseLocalPath, ERRNO_PATTERN } = require('../lib/path-diagnostics');
+const { isIso3166Alpha2 } = require('../lib/iso-country-codes');
 const APPLY_CONTRACT = require('../contracts/trackly-apply-tools.json');
 
 const APPLY_BROWSER_SURFACES = APPLY_CONTRACT.constants.applyBrowserSurfaces;
@@ -28,6 +29,9 @@ const APPLY_BATCH_MAX_BULK_MUTATIONS = 20;
 
 const SAFE_OBSERVATION_CODE = /^[a-z0-9][a-z0-9_:-]{0,99}$/;
 const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
+const iso3166Alpha2Schema = z.string().regex(/^[A-Za-z]{2}$/).refine(isIso3166Alpha2, {
+  message: 'Expected an ISO 3166-1 alpha-2 country code',
+});
 const applyExecutionDispositionSchema = z.object({
   jobId: z.number().int().min(1),
   classification: z.enum(APPLY_EXECUTION_ACCESS_CLASSIFICATIONS),
@@ -162,7 +166,7 @@ function registerApplyTools(
       includeSensitive: z.boolean().optional(),
       provider: z.string().max(100).optional(),
       companyId: z.string().max(100).optional(),
-      jurisdiction: z.string().regex(/^[A-Za-z]{2}$/).optional(),
+      jurisdiction: iso3166Alpha2Schema.optional(),
     },
     wrapTool(async ({ includeSensitive, provider, companyId, jurisdiction }) => {
       const qs = new URLSearchParams();
@@ -210,7 +214,7 @@ function registerApplyTools(
         }),
         z.object({
           key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
-          value: z.any().optional(), scope: z.literal('jurisdiction'), scopeValue: z.string().regex(/^[A-Za-z]{2}$/),
+          value: z.any().optional(), scope: z.literal('jurisdiction'), scopeValue: iso3166Alpha2Schema,
           questionLabel: z.string().max(1000).optional(),
         }),
       ])).max(100).optional(),

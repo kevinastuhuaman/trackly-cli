@@ -79,6 +79,19 @@ test('local MCP preserves permanent and transient controlled-access errors', () 
   assert.match(unavailablePayload.message, /try again/i);
 });
 
+test('local MCP preserves retryable application-profile schema rollout errors', () => {
+  const result = createErrorResult({
+    status: 503,
+    error: 'application_profile_schema_pending',
+    retryable: true,
+  }, 'Failed to update application profile');
+  const payload = JSON.parse(result.content[0].text);
+
+  assert.equal(payload.status, 503);
+  assert.equal(payload.code, 'application_profile_schema_pending');
+  assert.equal(payload.retryable, true);
+});
+
 test('local MCP resource errors use JSON-RPC -32002 with structured maintenance data', () => {
   const maintenanceError = createMaintenanceError({
     status: 'maintenance',

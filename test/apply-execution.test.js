@@ -63,7 +63,7 @@ function registerRuntimeTools(apiResponse = { ok: true }) {
 }
 
 test('protocol 3.4 publishes all accessible execution tools', () => {
-  assert.equal(contract.contractVersion, '3.6.1');
+  assert.equal(contract.contractVersion, '3.6.2');
   for (const name of executionTools) {
     assert.ok(contract.tools[name], `${name} missing from contract fixture`);
     assert.match(tools, new RegExp(`['"]${name}['"]`));

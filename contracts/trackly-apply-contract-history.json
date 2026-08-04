@@ -4,5 +4,8 @@
   },
   "3.6.1": {
     "toolsSha256": "0d5dfa89c79ad2b75304a3288603825c287a118a9f3e0b2c0e5a2c4a80f8cca2"
+  },
+  "3.6.2": {
+    "toolsSha256": "d9d24da4b79a4cc65aec589debd2b9072e41b309fd6bf6a65e95dd4b5bef3c08"
   }
 }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-08-03
+
+- Validate jurisdiction-scoped application answers against the real ISO 3166-1
+  alpha-2 country list instead of accepting arbitrary two-letter placeholders.
+- Preserve retryable application-profile schema rollout errors through local MCP.
+
 ## [0.13.2] - 2026-08-03
 
 ### Fixed
