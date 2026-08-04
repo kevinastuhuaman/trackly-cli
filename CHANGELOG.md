@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced stale current CLI, README, and MCP Registry scale claims with the
   conservative public metrics snapshot: 170K+ active jobs across 3,800+
   monitored companies.
+- Pinned patched HTTP and URI dependency versions required for a clean
+  production security audit.
 
 ## [0.13.1] - 2026-08-03
 
