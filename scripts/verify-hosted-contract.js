@@ -31,6 +31,12 @@ const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
   'trackly_diagnose_local_path',
+  'trackly_validate_apply_tab_keep_set',
+  'trackly_validate_apply_resume_upload',
+];
+const LOCAL_ONLY_CONSTANTS = [
+  'applyUploadStages',
+  'applyUploadFailureCodes',
 ];
 
 for (const constantName of [
@@ -40,6 +46,8 @@ for (const constantName of [
   'applyExecutionDispositionSources',
   'applyExecutionStopReasonCodes',
   'applyProbeCleanupPreferences',
+  'applyExecutionRecoveryEligibilityCodes',
+  'applyHandoffReconciliationClassifications',
 ]) {
   assert.deepEqual(
     hosted.constants[constantName],
@@ -59,6 +67,9 @@ for (const toolName of LOCAL_ONLY_TOOLS) {
 }
 const sharedLocal = {
   ...local,
+  constants: Object.fromEntries(
+    Object.entries(local.constants).filter(([name]) => !LOCAL_ONLY_CONSTANTS.includes(name)),
+  ),
   tools: Object.fromEntries(Object.entries(local.tools).filter(([name]) => !LOCAL_ONLY_TOOLS.includes(name))),
 };
 assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented local-only tools');

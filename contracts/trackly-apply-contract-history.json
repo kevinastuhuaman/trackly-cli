@@ -7,5 +7,11 @@
   },
   "3.6.2": {
     "toolsSha256": "d9d24da4b79a4cc65aec589debd2b9072e41b309fd6bf6a65e95dd4b5bef3c08"
+  },
+  "3.7.0": {
+    "toolsSha256": "8380e2a9fabef4da18ea731f55c8994aef5a4738bb6e7daef9be4ce6ebfec64f"
+  },
+  "3.7.1": {
+    "toolsSha256": "0631d32f7bcc98ecb6c4b087ae51adffb3cf212d697282670f3cadf5f703359e"
   }
 }

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-05
+
+### Added
+
+- Added protocol 3.6 exact-member recovery discovery and recovery tools with
+  bounded, validated MCP results and no replacement candidates.
+- Added scoped review-handoff claims so broad manual-submission statements are
+  reconciled only against one explicit member set.
+- Added local-only tab keep-set and resume-upload proof validators. Browser tab
+  IDs, filenames, paths, form values, and page text remain local.
+- Updated Trackly Apply skill 4.5.0 with independent tab/form/authority
+  recovery receipts, provider-positive success detection, deterministic
+  operator handoffs, and capability-negotiated upload stages.
+
 ## [0.13.3] - 2026-08-03
 
 ### Added

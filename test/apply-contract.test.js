@@ -100,12 +100,12 @@ test('documented local MCP tool count matches every registered tool', () => {
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
-  assert.equal(registeredTools.length, 48);
+  assert.equal(registeredTools.length, 54);
   assert.equal(new Set(registeredTools).size, registeredTools.length);
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.2');
+  assert.equal(contract.contractVersion, '3.7.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -515,6 +515,8 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   assert.match(verifier, /trackly_record_apply_execution_dispositions schema alias drifted/);
   assert.match(verifier, /trackly_lint_application_text/);
   assert.match(verifier, /trackly_diagnose_local_path/);
+  assert.match(verifier, /trackly_validate_apply_tab_keep_set/);
+  assert.match(verifier, /trackly_validate_apply_resume_upload/);
   assert.match(verifier, /must not be advertised by hosted MCP/);
   assert.match(verifier, /must not be registered by hosted MCP/);
   for (const constantName of [
@@ -523,6 +525,8 @@ test('hosted parity verifier compares execution disposition body, alias, and con
     'applyAccessClassifications',
     'applyExecutionDispositionSources',
     'applyExecutionStopReasonCodes',
+    'applyExecutionRecoveryEligibilityCodes',
+    'applyHandoffReconciliationClassifications',
   ]) {
     assert.match(verifier, new RegExp(`'${constantName}'`));
   }
@@ -560,13 +564,13 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.4.2 requires protocol 3.5.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.5.0 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.2 requires protocol 3\.5\.0 or newer/);
+  assert.match(skill, /Skill 4\.5\.0 requires protocol 3\.6\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.4\.2/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.5\.0/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
@@ -926,12 +930,12 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.4.2 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.5.0 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.2/);
+  assert.match(skill, /Skill 4\.5\.0/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);
@@ -944,6 +948,20 @@ test('Apply skill 4.4.2 uses compact snapshots, parked-member controls, local li
   assert.match(review, /at least once every 60 seconds/i);
   assert.match(upload, /file chooser/i);
   assert.match(upload, /fail closed/i);
+  assert.match(upload, /trackly_validate_apply_resume_upload/);
+});
+
+test('Apply skill recovers exact members and reconciles only an explicit handoff receipt', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  const orchestration = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'), 'utf8');
+  const handoff = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
+  assert.match(skill, /trackly_list_recoverable_apply_executions/);
+  assert.match(skill, /trackly_recover_exact_apply_members/);
+  assert.match(orchestration, /tab was restored/);
+  assert.match(orchestration, /mutation authority/);
+  assert.match(handoff, /trackly_claim_apply_review_handoff/);
+  assert.match(handoff, /`detected`, `user_confirmed`, `unresolved`, or `contradictory`/);
+  assert.match(handoff, /unchanged URL or page title is never evidence/i);
 });
 
 test('Apply skill consumes server-owned onboarding screens and consistency rules with a legacy fallback', () => {

@@ -5,6 +5,12 @@ const { apiRequest } = require('../lib/client');
 const { prepareResume, verifyPreparedResume } = require('../lib/agent');
 const { lintApplicationText } = require('../lib/application-text');
 const { diagnoseLocalPath, ERRNO_PATTERN } = require('../lib/path-diagnostics');
+const { validateApplyTabKeepSet } = require('../lib/apply-tab-set');
+const {
+  APPLY_UPLOAD_FAILURE_CODES,
+  APPLY_UPLOAD_STAGES,
+  validateApplyResumeUpload,
+} = require('../lib/apply-upload');
 const { isIso3166Alpha2 } = require('../lib/iso-country-codes');
 const APPLY_CONTRACT = require('../contracts/trackly-apply-tools.json');
 
@@ -22,6 +28,8 @@ const APPLY_SURFACE_EVIDENCE_TYPES = APPLY_CONTRACT.constants.applySurfaceEviden
 const APPLY_SURFACE_OWNERSHIP_STATES = APPLY_CONTRACT.constants.applySurfaceOwnershipStates;
 const APPLY_SUBMISSION_EVIDENCE_TYPES = APPLY_CONTRACT.constants.applySubmissionEvidenceTypes;
 const APPLY_SUBMISSION_EVIDENCE_SOURCES = APPLY_CONTRACT.constants.applySubmissionEvidenceSources;
+const APPLY_EXECUTION_RECOVERY_ELIGIBILITY_CODES = APPLY_CONTRACT.constants.applyExecutionRecoveryEligibilityCodes;
+const APPLY_HANDOFF_RECONCILIATION_CLASSIFICATION_CODES = APPLY_CONTRACT.constants.applyHandoffReconciliationClassifications;
 const APPLY_BATCH_MAX_MEMBERS = 100;
 const APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST = 20;
 const APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT = 25;
@@ -32,6 +40,12 @@ const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
 const iso3166Alpha2Schema = z.string().regex(/^[A-Za-z]{2}$/).refine(isIso3166Alpha2, {
   message: 'Expected an ISO 3166-1 alpha-2 country code',
 });
+const opaqueTabIdSchema = z.union([
+  z.number().int().safe(),
+  z.string().min(1).max(512).refine((value) => value.trim().length > 0, {
+    message: 'Expected a nonblank opaque tab ID',
+  }),
+]);
 const applyExecutionDispositionSchema = z.object({
   jobId: z.number().int().min(1),
   classification: z.enum(APPLY_EXECUTION_ACCESS_CLASSIFICATIONS),
@@ -44,6 +58,45 @@ const applyExecutionDispositionSchema = z.object({
   probeOnlyNoDraft: z.boolean().optional(),
   browserSurface: z.enum(APPLY_BROWSER_SURFACES),
 }).strict();
+const recoverableCandidateSchema = z.object({
+  candidateId: z.number().int().min(1),
+  jobId: z.number().int().min(1),
+  queuePosition: z.number().int().min(0),
+  eligibilityCode: z.enum(APPLY_EXECUTION_RECOVERY_ELIGIBILITY_CODES),
+}).strict();
+const recoverableExecutionSourceSchema = z.object({
+  sourceExecutionId: z.number().int().min(1),
+  sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  recoverableUntil: z.string().datetime(),
+  candidates: z.array(recoverableCandidateSchema).max(APPLY_EXECUTION_MAX_TARGET),
+}).strict();
+const recoverableExecutionsResponseSchema = z.object({
+  success: z.literal(true),
+  sources: z.array(recoverableExecutionSourceSchema).max(APPLY_EXECUTION_MAX_TARGET),
+}).strict();
+const exactRecoveryResponseSchema = z.object({
+  success: z.literal(true),
+  replay: z.boolean(),
+  execution: z.object({
+    id: z.number().int().min(1),
+    mode: z.literal('recover_exact_members'),
+  }).passthrough(),
+  assertedCandidateIds: z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET),
+  eligibleCandidateIds: z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET),
+  eligibility: z.array(recoverableCandidateSchema).max(APPLY_EXECUTION_MAX_TARGET),
+}).passthrough();
+const handoffClaimMemberSchema = z.object({
+  memberId: z.number().int().min(1),
+  classification: z.enum(APPLY_HANDOFF_RECONCILIATION_CLASSIFICATION_CODES),
+}).strict();
+const handoffClaimResponseSchema = z.object({
+  success: z.literal(true),
+  handoffId: z.number().int().min(1),
+  executionId: z.number().int().min(1),
+  orderedMemberSetHash: z.string().regex(/^[a-f0-9]{64}$/),
+  members: z.array(handoffClaimMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+  transition: z.literal('claimed'),
+}).passthrough();
 
 const truthCertificationCommon = {
   batchId: z.number().int().min(1),
@@ -121,7 +174,7 @@ const startApplyRunSchema = z.object({
   }
 });
 
-const APPLY_RELIABILITY_PROMPT = 'Protocol 3.5 / skill 4.4.2 reliability gate: only active=true identifies resumable execution work. A response with active=false and preserved=true is terminal read-only reconciliation evidence. Require nextAction=none and never fetch its compact snapshot, continue an unresolved wave, mutate a member, or interpret historical funnel counts as current work. For an active execution recovery or start, fetch one compact execution snapshot with only the current member IDs and profile keys required by the visible forms. Treat mutable and allowedOperations as authoritative. Never reopen or mutate authentication, account-creation, OTP, pre-form-CAPTCHA, or manual-only members. Only an explicit user request may call trackly_resume_parked_apply_member, and the returned member still requires a fresh non-mutating access probe. Use execution-scoped exact-resume content approval across unchanged replacement waves, but immediately verify the exact local path, hash, size, run binding, and expiration before every upload. Run trackly_lint_application_text before entering free text and fail closed on every violation or unsupported claim. Reconcile every newly supplied reusable answer to the canonical profile before review: save it, confirm it already matches, or report a schema gap. Never create app-shell tabs to reveal an already-bound browser tab without an exact focus receipt. Diagnose I/O errors only against the exact implicated path. Report the server funnel and durable milestone after every state change and at least once every 60 seconds during active work. Never click Submit.';
+const APPLY_RELIABILITY_PROMPT = 'Protocol 3.6 / skill 4.5.0 reliability gate: recover active work first. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
 
 function registerApplyTools(
   server,
@@ -269,6 +322,66 @@ function registerApplyTools(
     wrapTool(async ({ executionId }) => applyControlRequest(
       'GET', `/api/jobscout/apply/executions/${executionId}`,
     ), 'Failed to fetch apply execution')
+  );
+
+  server.tool(
+    'trackly_list_recoverable_apply_executions',
+    'List bounded, value-free exact-member recovery candidates after local context loss. Show the stable job identities to the user and obtain explicit confirmation before recovery; never infer or substitute candidates.',
+    {},
+    wrapTool(async () => recoverableExecutionsResponseSchema.parse(await applyControlRequest(
+      'GET', '/api/jobscout/apply/executions/recoverable',
+    )), 'Failed to list recoverable apply executions')
+  );
+
+  server.tool(
+    'trackly_recover_exact_apply_members',
+    'Create an exact-member recovery execution from one confirmed source snapshot. The asserted candidate set is immutable and replacements are forbidden.',
+    {
+      sourceExecutionId: z.number().int().min(1),
+      sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+      candidateIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET)
+        .refine((values) => new Set(values).size === values.length, {
+          message: 'candidateIds must be unique',
+        }),
+      explicitExactSetConfirmation: z.literal(true),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ idempotencyKey, ...input }) => exactRecoveryResponseSchema.parse(
+      await applyControlRequest('POST', '/api/jobscout/apply/executions/recover', {
+        mode: 'recover_exact_members',
+        ...input,
+      }, idempotencyKey),
+    ), 'Failed to recover exact apply members')
+  );
+
+  server.tool(
+    'trackly_list_apply_review_handoffs',
+    'List active, nonexpired review-handoff receipts for one execution after context loss. Returns only stable IDs, lifecycle metadata, and member bindings; never browser values, URLs, or local paths.',
+    { executionId: z.number().int().min(1) },
+    wrapTool(async ({ executionId }) => applyControlRequest(
+      'GET', `/api/jobscout/apply/executions/${executionId}/review-handoffs`,
+    ), 'Failed to list apply review handoffs')
+  );
+
+  server.tool(
+    'trackly_claim_apply_review_handoff',
+    'Claim one exact, unambiguous review-handoff group and classify every member before grouped submission reconciliation. Never use this tool to infer submission or replace success-page evidence or explicit user confirmation.',
+    {
+      handoffId: z.number().int().min(1),
+      members: z.array(z.object({
+        memberId: z.number().int().min(1),
+        classification: z.enum(APPLY_HANDOFF_RECONCILIATION_CLASSIFICATION_CODES),
+      }).strict()).min(1).max(APPLY_EXECUTION_MAX_TARGET)
+        .refine((values) => new Set(values.map(({ memberId }) => memberId)).size === values.length, {
+          message: 'members must contain unique memberId values',
+        }),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ handoffId, idempotencyKey, members }) => handoffClaimResponseSchema.parse(
+      await applyControlRequest(
+        'POST', `/api/jobscout/apply/review-handoffs/${handoffId}/claim`, { members }, idempotencyKey,
+      ),
+    ), 'Failed to claim apply review handoff')
   );
 
   server.tool(
@@ -757,6 +870,7 @@ function registerApplyTools(
     'Record review readiness or a user-confirmed outcome. Before handoff use literal outcome=review_ready and verify awaiting_manual_submit. Mark submitted with literal outcome=submitted only after a success page or explicit user confirmation.',
     {
       runId: z.number().int().min(1),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
       batchId: z.number().int().min(1).optional(),
       memberId: z.number().int().min(1).optional(),
       inspectionEpoch: z.number().int().min(0).optional(),
@@ -764,13 +878,19 @@ function registerApplyTools(
       outcome: z.enum(['review_ready', 'submitted', 'failed', 'blocked']),
       confirmation: z.enum(['user_confirmation', 'success_page']).optional(),
     },
-    wrapTool(async ({ runId, ...body }) => apiRequest('POST', `/api/jobscout/apply/runs/${runId}/outcome`, body, false, false, MCP_USER_AGENT), 'Failed to record application outcome')
+    wrapTool(async ({ runId, idempotencyKey, ...body }) => applyControlRequest(
+      'POST',
+      `/api/jobscout/apply/runs/${runId}/outcome`,
+      body,
+      idempotencyKey
+    ), 'Failed to record application outcome')
   );
 
   server.tool(
     'trackly_record_application_outcomes',
     'Bulk-record up to 20 leased, batch-bound review or user-confirmed outcomes. Before handoff every item uses literal outcome=review_ready and every recorded run must return awaiting_manual_submit. After manual confirmation use literal outcome=submitted. Each member returns recorded or a stable conflict without hiding sibling results.',
     {
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
       outcomes: z.array(z.object({
         runId: z.number().int().min(1),
         batchId: z.number().int().min(1),
@@ -782,13 +902,11 @@ function registerApplyTools(
       })).min(1).max(APPLY_BATCH_MAX_BULK_MUTATIONS),
     },
     wrapTool(
-      async (params) => apiRequest(
+      async ({ idempotencyKey, ...params }) => applyControlRequest(
         'POST',
         '/api/jobscout/apply/outcomes/bulk',
         params,
-        false,
-        false,
-        MCP_USER_AGENT
+        idempotencyKey
       ),
       'Failed to record bulk application outcomes'
     )
@@ -836,6 +954,44 @@ function registerApplyTools(
   );
 
   server.tool(
+    'trackly_validate_apply_tab_keep_set',
+    'Locally validate a caller-supplied session-finalizer keep set against complete controller and user tab inventories. This pure helper never enumerates, focuses, closes, hands off, or finalizes browser tabs and never sends tab IDs to Trackly.',
+    {
+      expectedTabIds: z.array(opaqueTabIdSchema).min(1).max(100),
+      keepTabIds: z.array(opaqueTabIdSchema).max(100),
+      controllerInventory: z.object({
+        complete: z.boolean(),
+        tabIds: z.array(opaqueTabIdSchema).max(1000),
+      }).strict(),
+      userInventory: z.object({
+        complete: z.boolean(),
+        tabIds: z.array(opaqueTabIdSchema).max(1000),
+      }).strict(),
+    },
+    wrapTool(async (params) => validateApplyTabKeepSet(params), 'Apply tab keep-set validation failed')
+  );
+
+  server.tool(
+    'trackly_validate_apply_resume_upload',
+    'Locally validate the browser adapter capabilities and ordered, value-free proof stages required to claim one resume attachment. This helper does not open a chooser, read a local path, control the browser, or send values to Trackly.',
+    {
+      capabilities: z.object({
+        semanticControlDiscovery: z.boolean(),
+        chooserArming: z.boolean(),
+        fileAttachment: z.boolean(),
+        committedFilenameInspection: z.boolean(),
+        parserFieldRecheck: z.boolean(),
+      }).strict(),
+      events: z.array(z.object({
+        stage: z.enum(APPLY_UPLOAD_STAGES),
+        outcome: z.enum(['passed', 'failed']),
+        failureCode: z.enum(APPLY_UPLOAD_FAILURE_CODES).optional(),
+      }).strict()).max(APPLY_UPLOAD_STAGES.length),
+    },
+    wrapTool(async (params) => validateApplyResumeUpload(params), 'Apply resume upload validation failed')
+  );
+
+  server.tool(
     'trackly_verify_prepared_resume',
     'Immediately before attachment, recompute the prepared resume fingerprint, validate its run and expiration, and lock the confirmed file read-only.',
     {
@@ -859,9 +1015,18 @@ function registerApplyTools(
       content: { type: 'text', text: APPLY_RELIABILITY_PROMPT },
     }, {
       role: 'user',
+      content: { type: 'text', text: 'Only active=true identifies resumable execution work. Active=false and preserved=true is terminal read-only reconciliation evidence.' },
+    }, {
+      role: 'user',
       content: {
         type: 'text',
-        text: 'Protocol 3.5.0 reliability gate: require the fetched compatibleSkillMinimumVersion or newer for new execution work. Read the Apply protocol first. Only protocol 3.5 or newer with the compact-snapshot capability may call trackly_get_apply_execution_snapshot or the parked-member resume and execution-resume approval tools. An already-active protocol 3.4 execution is read-only legacy recovery: use only its published get or stop tools and never mutate its browser forms. Only when the fetched protocol is 3.4 or newer call trackly_get_active_apply_execution before legacy batch recovery, including when accessible execution is disabled. For protocol 3.3, skip the execution endpoint and recover the already-active immutable fixed batch directly; protocol 3.2 remains valid only for an already-active explicit legacy single run. A disabled rollout may preserve an active execution: recover it read-only and use only get or stop tools until the capability is enabled; never start, advance, or record dispositions while disabled. If disabled and no execution is active, use the legacy fixed-batch path. Recover every entry in execution.unresolvedWaves in ascending waveOrder; an older unresolved wave remains part of recovery after a replacement wave exists, and execution.currentWave is only the latest scheduling identity, never the complete recovery set. For “fill/apply to the next N,” recover or start one complete_next_n_accessible execution with target 1–20 and follow only the server nextAction and authoritative funnel. If the requested N differs from the active target, explain the mismatch, obtain explicit confirmation, stop the old execution with reason target_changed, refetch its terminal state, then start the new target. If an immutable fixed batch is active when the user requests complete_next_n_accessible, explain the incompatible mode and summarize any review-ready, submitted, or unresolved work before browser mutation. Resume that exact fixed batch when the user chooses to finish it. If the user instead says to start fresh, leave, replace, discard, or otherwise abandon the old batch, treat that statement as explicit cancellation confirmation: refetch the latest batch revision, call trackly_cancel_apply_batch with reason user_requested_restart and a fresh idempotency key, refetch until no active fixed batch remains, preserve every existing browser tab without mutation, and start the requested accessible execution in the same turn. Never wait for batch expiry and never create a scheduled continuation merely to escape an obsolete batch. If cancellation reports submission_in_progress, preserve everything and stop for the user; do not cancel or start replacement work. If the user asks to stop, call trackly_stop_apply_execution with reason user_requested and refetch its terminal state. Continue immutable child waves from the original recent-first snapshot until durablyReviewReady plus submitted reaches target, the queue is exhausted, or the user stops. Accessible drafts awaiting answers and forms currently being filled occupy target slots; authentication, account creation, OTP, pre-form CAPTCHA, exclusions, manual-only, conflicts, and revocations do not. Record only typed value-free live-probe dispositions. Advance only when no current-wave member remains unclassified queued or inspecting. Never calculate replacements or progress locally. For an explicit “inspect the next N records” request, use the existing fixed immutable batch and never replenish it; if a different accessible execution is active, confirm the intent change with the user, stop that execution with reason target_changed, refetch its terminal state, then recover or create the fixed batch. A cache hint may prioritize a live minimal non-mutating probe but never authorizes private-data entry or replaces that probe. After a redirect or contradictory observation, report only the fresh live disposition with its exact binding and let the backend invalidate its own hint. Preserve every user-edited or unknown non-empty field through the local provenance ledger. Never submit.',
+        text: 'Protocol 3.6 clarification: this requirement supersedes older 3.5 minimum wording below. New work requires Apply protocol 3.6.0, MCP contract 3.7.1, and skill 4.5.0. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
+      },
+    }, {
+      role: 'user',
+      content: {
+        type: 'text',
+        text: 'Protocol 3.5.0 reliability gate: require the fetched compatibleSkillMinimumVersion or newer for new execution work. Read the Apply protocol first. Only protocol 3.5 or newer with the compact-snapshot capability may call trackly_get_apply_execution_snapshot or the parked-member resume and execution-resume approval tools. An already-active protocol 3.4 execution is read-only legacy recovery: use only its published get or stop tools and never mutate its browser forms. Only when the fetched protocol is 3.4 or newer call trackly_get_active_apply_execution before legacy batch recovery, including when accessible execution is disabled. For protocol 3.3, skip the execution endpoint and recover the already-active immutable fixed batch directly; protocol 3.2 remains valid only for an already-active explicit legacy single run. A disabled rollout may preserve an active execution: recover it read-only and use only get or stop tools until the capability is enabled; never start, advance, or record dispositions while disabled. If disabled and no execution is active, use the legacy fixed-batch path. Recover every entry in execution.unresolvedWaves in ascending waveOrder; an older unresolved wave remains part of recovery after a replacement wave exists, and execution.currentWave is only the latest scheduling identity, never the complete recovery set. For “fill/apply to the next N,” recover or start one complete_next_n_accessible execution with target 1–20 and follow only the server nextAction and authoritative funnel. If the requested N differs from the active target, explain the mismatch, obtain explicit confirmation, stop the old execution with reason target_changed, refetch its terminal state, then start the new target. If an immutable fixed batch is active when the user requests complete_next_n_accessible, explain the incompatible mode and summarize any review-ready, submitted, or unresolved work before browser mutation. Resume that exact fixed batch when the user chooses to finish it. If the user instead says to start fresh, leave, replace, discard, or otherwise abandon the old batch, treat that statement as explicit cancellation confirmation: refetch the latest batch revision, call trackly_cancel_apply_batch with reason user_requested_restart and a fresh idempotency key, refetch until no active fixed batch remains, preserve every existing browser tab without mutation, and start the requested accessible execution in the same turn. Never wait for batch expiry and never create a scheduled continuation merely to escape an obsolete batch. If cancellation reports submission_in_progress, preserve everything and stop for the user; do not cancel or start replacement work. If the user asks to stop, call trackly_stop_apply_execution with reason user_requested and refetch its terminal state. Continue immutable child waves from the original recent-first snapshot until the authoritative backend funnel says targetReached, the queue is exhausted, or the user stops. Treat achievementCount and target-capped completed as the cumulative target authority. durablyReviewReady and submitted are current operator projections only; never add them together locally to reconstruct completion. Accessible drafts awaiting answers and forms currently being filled occupy target slots; authentication, account creation, OTP, pre-form CAPTCHA, exclusions, manual-only, conflicts, and revocations do not. Record only typed value-free live-probe dispositions. Advance only when no current-wave member remains unclassified queued or inspecting. Never calculate replacements or progress locally. For an explicit “inspect the next N records” request, use the existing fixed immutable batch and never replenish it; if a different accessible execution is active, confirm the intent change with the user, stop that execution with reason target_changed, refetch its terminal state, then recover or create the fixed batch. A cache hint may prioritize a live minimal non-mutating probe but never authorizes private-data entry or replaces that probe. After a redirect or contradictory observation, report only the fresh live disposition with its exact binding and let the backend invalidate its own hint. Preserve every user-edited or unknown non-empty field through the local provenance ledger. Never submit.',
       },
     }, {
       role: 'user',
