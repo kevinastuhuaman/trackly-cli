@@ -531,6 +531,13 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   assert.match(verifier, /ast\.end,\s*expression\.length/);
   assert.match(verifier, /canonicalSchemaAst\(localApplySchemaAsts\[schemaName\]\)/);
   assert.match(verifier, /canonicalSchemaAst\(hostedApplySchemaAsts\[schemaName\]\)/);
+  assert.match(verifier, /referencedConstantIdentifiers/);
+  assert.match(verifier, /expectedSchemaConstants/);
+  assert.match(verifier, /explicitly lock and compare every new dependency/);
+  assert.match(verifier, /SAFE_IDEMPOTENCY_KEY semantics drifted between local and hosted Apply schemas/);
+  assert.match(verifier, /contractBackedSchemaConstants/);
+  assert.match(verifier, /hosted executable values must equal/);
+  assert.match(verifier, /namedApplyDependencySha256/);
   for (const schemaName of [
     'applyExecutionDispositionSchema',
     'truthCertificationCommon',

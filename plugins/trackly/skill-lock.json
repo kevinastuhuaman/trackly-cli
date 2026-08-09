@@ -8,7 +8,7 @@
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "a32b712bf7c4f89841bdb345c9791c25c2203c35a22cebd4f3f10d8876ad89a7"
+    "treeSha256": "d84b70c8ecfc7c96a582e6174453dd2460deb090c2c4ecbc4ecc7f4b82a0f5c0"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -137,6 +137,22 @@
         "startApplyRunSchema": "0a2901e07b1ec44359ad64a5c8441fe5e21b6b17f9d111a45413acdac82bf554",
         "truthCertificationCommon": "c6ba15aea01acfd64aa50bdde1e5763a0ee80ac93d1fb9ab384f0489dc8413d3",
         "truthCertificationSchema": "cdb3b224c87812346734f786ec8363efe59c0a1058a8b0c7c4db982913ffc729"
+      }
+    },
+    "namedApplyDependencySha256": {
+      "localMcpApplyTools": {
+        "APPLY_BROWSER_SURFACES": "ee822d23f2adc2b3e16787d743bf387eed8860bc33dfee71a8af8032711c9343",
+        "APPLY_EXECUTION_ACCESS_CLASSIFICATIONS": "0d1e49428ca632066a048b9ebec6edc3a87ee0c93e0a470a8e20e312591560c2",
+        "APPLY_EXECUTION_DISPOSITION_SOURCES": "f0677b8149362b74025113bb2fb3af9b263840b713f444ac5e3e8953dfccb8ab",
+        "SAFE_IDEMPOTENCY_KEY": "dcf7942f5254ef7205e30075f052770df76db0edcbae62ad689425753166736a"
+      },
+      "hostedMcpServer": {
+        "SAFE_IDEMPOTENCY_KEY": "dcf7942f5254ef7205e30075f052770df76db0edcbae62ad689425753166736a"
+      },
+      "hostedApplyExecutionContract": {
+        "APPLY_BROWSER_SURFACES": "c808611531fdc08382bb1ae854ea6a23469276cc222b5d79f08d300807115334",
+        "APPLY_EXECUTION_ACCESS_CLASSIFICATIONS": "eca57d8767f50871390adb915dd3da0d55df4a23fb187e8416088310cfa80ce8",
+        "APPLY_EXECUTION_DISPOSITION_SOURCES": "b7931b3d4954c8d983569ee6f36c010b052579a5ce816c4eb8c67f3ca07999ba"
       }
     }
   },

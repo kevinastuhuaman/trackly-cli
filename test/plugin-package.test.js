@@ -13,6 +13,7 @@ const {
   canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
+  referencedConstantIdentifiers,
   sha256ExactBytes,
 } = require('../scripts/verify-hosted-contract.js');
 
@@ -151,6 +152,14 @@ test('schema AST canonicalization ignores parser positions but preserves literal
   assert.notDeepEqual(canonicalSchemaAst(formatted), canonicalSchemaAst(changedPattern));
   assert.notDeepEqual(canonicalSchemaAst(formatted), canonicalSchemaAst(changedFlags));
   assert.notDeepEqual(canonicalSchemaAst(approvedLiteral), canonicalSchemaAst(notApplicableLiteral));
+  assert.deepEqual(
+    referencedConstantIdentifiers(parseSchemaExpression(
+      'const example = z.enum(EXISTING_CONSTANT).refine((value) => value === OTHER_CONSTANT);',
+      'example',
+      'constant-reference fixture',
+    )),
+    ['EXISTING_CONSTANT', 'OTHER_CONSTANT'],
+  );
   assert.throws(
     () => parseSchemaExpression(
       'const example = z.string() unexpected;',
@@ -197,6 +206,32 @@ test('named local and hosted Apply schemas have collision-free exact-byte locks'
       `${schemaName} lock must change when verifier-visible definition bytes change`,
     );
   }
+});
+
+test('every transitive Apply schema constant is audited, locked, and semantically resolved', () => {
+  const lock = json('plugins/trackly/skill-lock.json');
+  const dependencyLocks = lock.publicExecutableContract.namedApplyDependencySha256;
+  assert.deepEqual(Object.keys(dependencyLocks).sort(), [
+    'hostedApplyExecutionContract',
+    'hostedMcpServer',
+    'localMcpApplyTools',
+  ]);
+  assert.deepEqual(Object.keys(dependencyLocks.localMcpApplyTools).sort(), [
+    'APPLY_BROWSER_SURFACES',
+    'APPLY_EXECUTION_ACCESS_CLASSIFICATIONS',
+    'APPLY_EXECUTION_DISPOSITION_SOURCES',
+    'SAFE_IDEMPOTENCY_KEY',
+  ]);
+  assert.deepEqual(Object.keys(dependencyLocks.hostedMcpServer), ['SAFE_IDEMPOTENCY_KEY']);
+  assert.deepEqual(Object.keys(dependencyLocks.hostedApplyExecutionContract).sort(), [
+    'APPLY_BROWSER_SURFACES',
+    'APPLY_EXECUTION_ACCESS_CLASSIFICATIONS',
+    'APPLY_EXECUTION_DISPOSITION_SOURCES',
+  ]);
+  assert.ok(
+    Object.values(dependencyLocks).flatMap(Object.values)
+      .every((digest) => /^[a-f0-9]{64}$/.test(digest)),
+  );
 });
 
 function validateAppBinding(manifest, appConfig) {
@@ -376,6 +411,10 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   const lock = json('plugins/trackly/skill-lock.json');
   assert.equal(lock.source.treeSha256, treeSha256(path.join(ROOT, lock.source.path)));
   assert.equal(lock.adapted.treeSha256, treeSha256(path.join(ROOT, lock.adapted.path)));
+  assert.match(
+    read('plugins/trackly/skills/trackly-apply/SKILL.md'),
+    /`reasonCode: execution_restarted`/,
+  );
 
   const skill = read('plugins/trackly/skills/trackly-apply/SKILL.md');
   assert.match(skill, /^---\nname: trackly-apply\n/);

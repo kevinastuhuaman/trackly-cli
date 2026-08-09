@@ -76,6 +76,48 @@ function parseSchemaExpression(source, name, sourcePath) {
   return ast;
 }
 
+function referencedConstantIdentifiers(ast) {
+  const identifiers = new Set();
+  function visit(node, parent = null, parentKey = '') {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, parent, parentKey);
+      return;
+    }
+    if (node.type === 'Identifier' && /^[A-Z][A-Z0-9_]+$/.test(node.name)) {
+      const isStaticMemberProperty = parent?.type === 'MemberExpression'
+        && parentKey === 'property'
+        && !parent.computed;
+      const isStaticObjectKey = parent?.type === 'Property'
+        && parentKey === 'key'
+        && !parent.computed;
+      if (!isStaticMemberProperty && !isStaticObjectKey) identifiers.add(node.name);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      visit(child, node, key);
+    }
+  }
+  visit(ast);
+  return [...identifiers].sort();
+}
+
+function typescriptConstArrayValues(source, name, sourcePath) {
+  const expression = schemaDefinition(source, name, sourcePath);
+  const ast = acorn.parseExpressionAt(expression, 0, { ecmaVersion: 'latest' });
+  assert.equal(
+    expression.slice(ast.end).trim(),
+    'as const',
+    `${name} in ${sourcePath} must be a literal array followed only by "as const"`,
+  );
+  assert.equal(ast.type, 'ArrayExpression', `${name} in ${sourcePath} must be a literal array`);
+  assert.ok(
+    ast.elements.every((element) => element?.type === 'Literal' && typeof element.value === 'string'),
+    `${name} in ${sourcePath} must contain only string literals`,
+  );
+  return ast.elements.map((element) => element.value);
+}
+
 function memberName(node) {
   if (node?.type !== 'MemberExpression' || node.computed) return null;
   return node.property?.type === 'Identifier' ? node.property.name : null;
@@ -491,6 +533,30 @@ assert.deepEqual(
   'Named local and hosted Apply schemas drifted from the packaged exact-byte digest lock',
 );
 
+const namedApplyDependencySources = {
+  localMcpApplyTools: [localApplySource, localApplySourcePath],
+  hostedMcpServer: [hostedApplySource, hostedApplySourcePath],
+  hostedApplyExecutionContract: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
+};
+const executableNamedApplyDependencyDigests = Object.fromEntries(
+  Object.entries(pluginLock.publicExecutableContract.namedApplyDependencySha256).map(([side, lockedDigests]) => {
+    const sourceEntry = namedApplyDependencySources[side];
+    assert.ok(sourceEntry, `Unknown named Apply dependency source ${side}`);
+    return [
+      side,
+      Object.fromEntries(Object.keys(lockedDigests).map((constantName) => [
+        constantName,
+        sha256ExactBytes(exactSchemaDefinition(sourceEntry[0], constantName, sourceEntry[1])),
+      ])),
+    ];
+  }),
+);
+assert.deepEqual(
+  executableNamedApplyDependencyDigests,
+  pluginLock.publicExecutableContract.namedApplyDependencySha256,
+  'Named local and hosted Apply schema dependencies drifted from the packaged exact-byte digest lock',
+);
+
 const sharedParseSchemaNames = [
   'applyExecutionDispositionSchema',
   'truthCertificationCommon',
@@ -518,6 +584,58 @@ for (const schemaName of sharedParseSchemaNames) {
     canonicalSchemaAst(localApplySchemaAsts[schemaName]),
     canonicalSchemaAst(hostedApplySchemaAsts[schemaName]),
     `${schemaName} executable AST drifted between local and hosted MCP`,
+  );
+}
+
+const expectedSchemaConstants = [
+  'APPLY_BROWSER_SURFACES',
+  'APPLY_EXECUTION_ACCESS_CLASSIFICATIONS',
+  'APPLY_EXECUTION_DISPOSITION_SOURCES',
+  'SAFE_IDEMPOTENCY_KEY',
+];
+for (const [side, schemaAsts] of [
+  ['local', localApplySchemaAsts],
+  ['hosted', hostedApplySchemaAsts],
+]) {
+  const referencedConstants = [...new Set(
+    sharedParseSchemaNames.flatMap((schemaName) => referencedConstantIdentifiers(schemaAsts[schemaName])),
+  )].sort();
+  assert.deepEqual(
+    referencedConstants,
+    expectedSchemaConstants,
+    `${side} Apply schema transitive constant audit changed; explicitly lock and compare every new dependency`,
+  );
+}
+
+assert.deepEqual(
+  canonicalSchemaAst(parseSchemaExpression(localApplySource, 'SAFE_IDEMPOTENCY_KEY', localApplySourcePath)),
+  canonicalSchemaAst(parseSchemaExpression(hostedApplySource, 'SAFE_IDEMPOTENCY_KEY', hostedApplySourcePath)),
+  'SAFE_IDEMPOTENCY_KEY semantics drifted between local and hosted Apply schemas',
+);
+const contractBackedSchemaConstants = {
+  APPLY_BROWSER_SURFACES: 'applyBrowserSurfaces',
+  APPLY_EXECUTION_ACCESS_CLASSIFICATIONS: 'applyAccessClassifications',
+  APPLY_EXECUTION_DISPOSITION_SOURCES: 'applyExecutionDispositionSources',
+};
+for (const [constantName, contractProperty] of Object.entries(contractBackedSchemaConstants)) {
+  const expectedLocalAlias = parseSchemaExpression(
+    `const expected = APPLY_CONTRACT.constants.${contractProperty};`,
+    'expected',
+    `${constantName} expected local contract alias`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(parseSchemaExpression(localApplySource, constantName, localApplySourcePath)),
+    canonicalSchemaAst(expectedLocalAlias),
+    `${constantName} local schema dependency must resolve through ${contractProperty}`,
+  );
+  assert.deepEqual(
+    typescriptConstArrayValues(
+      hostedApplyExecutionContractSource,
+      constantName,
+      hostedApplyExecutionContractPath,
+    ),
+    hosted.constants[contractProperty],
+    `${constantName} hosted executable values must equal ${contractProperty}`,
   );
 }
 
@@ -654,8 +772,10 @@ module.exports = {
   canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
+  referencedConstantIdentifiers,
   schemaDefinition,
   sha256ExactBytes,
+  typescriptConstArrayValues,
   verifyHostedContract,
 };
 
