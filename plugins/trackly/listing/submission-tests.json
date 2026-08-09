@@ -19,9 +19,10 @@
       "turns": [
         {"role": "user", "content": "Show the newest remote roles from companies trackly monitors and save only the ones I choose."},
         {"role": "assistant", "expected": ["trackly_search_jobs"], "content": "Present the matching jobs without saving any of them."},
-        {"role": "user", "content": "Save fixture job IDs 4101 and 4103 with status Saved; leave every other result unchanged."}
+        {"role": "user", "content": "Save fixture job IDs 4101 and 4103 with status Saved; leave every other result unchanged."},
+        {"role": "assistant", "expected": ["trackly_update_status", "trackly_update_status"], "content": "Update fixture job 4101 once and fixture job 4103 once, each with status Saved; do not update any other job."}
       ],
-      "expected": ["trackly_search_jobs", "trackly_update_status"],
+      "expected": ["trackly_search_jobs", "trackly_update_status", "trackly_update_status"],
       "expectedResultShape": ["jobs", "userChoice.jobIds", "userChosenStatus"],
       "mustNot": ["save a job before the user chooses it"]
     },

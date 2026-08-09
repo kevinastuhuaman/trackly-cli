@@ -481,9 +481,17 @@ test('submission fixtures cover six positive and three negative cases', () => {
     assert.ok(item.expected.every((tool) => allowedTools.has(tool)), `${item.id} references an unlisted tool`);
   }
   const monitored = fixtures.positive.find((item) => item.id === 'search-monitored-remote');
-  assert.deepEqual(monitored.turns.map((turn) => turn.role), ['user', 'assistant', 'user']);
-  assert.deepEqual(monitored.turns[1].expected, ['trackly_search_jobs']);
+  assert.deepEqual(monitored.turns.map((turn) => turn.role), ['user', 'assistant', 'user', 'assistant']);
+  assert.deepEqual(
+    monitored.turns.map((turn) => turn.expected || []),
+    [[], ['trackly_search_jobs'], [], ['trackly_update_status', 'trackly_update_status']],
+  );
   assert.match(monitored.turns[2].content, /4101 and 4103/);
+  assert.match(monitored.turns[3].content, /job 4101 once and fixture job 4103 once/);
+  assert.deepEqual(
+    monitored.expected,
+    ['trackly_search_jobs', 'trackly_update_status', 'trackly_update_status'],
+  );
   assert.ok(monitored.expectedResultShape.includes('userChoice.jobIds'));
   assert.ok(fixtures.negative.every((item) => item.fixture));
   assert.ok(fixtures.positive.some((item) => item.id === 'apply-to-review'));
