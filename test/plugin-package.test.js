@@ -659,12 +659,15 @@ test('public skills reference only the locked 18-tool facade', () => {
     leaseRenewal: 'facade_owned_on_every_work_and_mutation_path',
     waveLeaseRecovery: 'claim_unleased_or_renew_same_facade_lease',
     surfaceBinding: 'value_free_via_report_progress_with_facade_owned_lease_and_concurrency_receipt',
+    parkedMemberResume: 'explicit_user_assertion_via_report_progress_with_idempotent_value_free_receipt',
     observationBulk: 'atomic_grant_bound_idempotent_replay',
     profileEducation: 'bounded_explicitly_confirmed_user_approved_replace_all',
     advanceReceipt: 'returns_prepared_batch_and_member_ids',
     applyWorkOutput: 'discriminated_allowlisted_structured_content',
     applyWorkProfileProjection: 'requested_fields_and_resume_availability_boolean_only',
+    applyWorkNavigation: 'bounded_frozen_requisition_identity_with_server_verified_origin_and_tenant_policy',
     conditionalSensitiveScopes: 'required_only_for_requested_sensitive_fields',
+    appliedStatusScope: 'tracking_write_plus_apply_write_for_run_reconciliation',
     jobBriefRecentPosts: 'validated_posted_at_only',
     resumeHandling: 'manual_unbound_not_attested',
     certifyReviewReady: 'atomic_checkpoint_truth_outcome_manual_resume_unbound',
@@ -687,10 +690,13 @@ test('public skills reference only the locked 18-tool facade', () => {
   );
   assert.ok(Object.values(lock.publicExecutableContract.handlerSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.match(lock.publicExecutableContract.pluginServerSha256, /^[a-f0-9]{64}$/);
+  assert.match(lock.publicExecutableContract.pluginScopesSha256, /^[a-f0-9]{64}$/);
+  assert.match(lock.publicExecutableContract.jobBriefServiceSha256, /^[a-f0-9]{64}$/);
   assert.ok(Object.values(lock.publicExecutableContract.schemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.transitiveSchemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.namedApplySchemaSha256).flatMap(Object.values).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.hasOwn(lock.publicExecutableContract.transitiveSchemaSha256, 'APPLY_BROWSER_SURFACES'));
+  assert.ok(Object.hasOwn(lock.publicExecutableContract.transitiveSchemaSha256, 'APPLY_EXECUTION_MEMBER_OPERATIONS'));
 });
 
 test('adapted trackly Apply skill is traceable to its source and safety invariants', () => {
@@ -707,7 +713,7 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /Never activate the final Submit control/);
   assert.match(skill, /jobs the user approved/);
   assert.match(skill, /Never invent identity, legal, immigration/);
-  assert.match(skill, /authoritative employer, exact title, job URL, provider, and authorized origin/);
+  assert.match(skill, /exact frozen company, title, requisition URL, verified ATS provider and tenant/);
   assert.match(skill, /CAPTCHA, OTP, login credentials, account creation/);
   assert.match(skill, /visible success state or the user's explicit confirmation/);
   assert.match(skill, /requiresLocalAgentOrManualUpload/);
@@ -722,6 +728,12 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /`operation: bind_surface`/);
   assert.match(skill, /receipt matches that member, run, version, and inspection epoch/);
   assert.match(skill, /prepared next-wave receipt/);
+  assert.match(skill, /frozen `navigation\.requisitionUrl`/);
+  assert.match(skill, /verified ATS provider and tenant/);
+  assert.match(skill, /Revalidate both origin and tenant after every redirect/);
+  assert.match(skill, /`operation: resume_parked`/);
+  assert.match(skill, /`explicitUserResume: true`/);
+  assert.match(skill, /Never infer or auto-resume parked work/);
   assert.match(skill, /never send a snapshot/);
   assert.match(skill, /Before any form mutation, require a verified end-to-end preservation path/);
   assert.match(skill, /complete current controller-owned and user-owned tab inventories/);
@@ -750,12 +762,22 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(lifecycleGuidance, /strictly projects the result to those requested keys/);
   assert.match(lifecycleGuidance, /`operation: bind_surface`/);
   assert.match(lifecycleGuidance, /authoritative next-wave receipt/);
+  assert.match(lifecycleGuidance, /server-verified origin and ATS-tenant policy/);
+  assert.match(lifecycleGuidance, /Resume a parked member only after an explicit user request/);
+
+  const discoverySkill = read('plugins/trackly/skills/trackly/SKILL.md');
+  assert.match(discoverySkill, /validated posting-date signals only/);
+  assert.match(discoverySkill, /never substitute first-seen time for a posting date/);
+  assert.match(discoverySkill, /Marking a job `applied` additionally requires Apply write permission/);
+  assert.match(discoverySkill, /never use it to infer or claim submission/);
 
   const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
   assert.match(browserSafety, /tab and unsaved-draft preservation path exists before any mutation/);
   assert.match(browserSafety, /Before ending every browser turn/);
   assert.match(browserSafety, /reconcile the complete current inventory/);
   assert.match(browserSafety, /verify each exact persistence receipt/);
+  assert.match(browserSafety, /server-verified authorized origins, host suffixes, verified provider\/tenant, and tenant rule/);
+  assert.match(browserSafety, /both origin and ATS tenant were revalidated/);
   assert.match(skill, /`nextAction: use_active_target`/);
   assert.match(skill, /`nextAction: advance_or_refresh`/);
   assert.match(skill, /only that minimal intersection as `profileKeys`/);

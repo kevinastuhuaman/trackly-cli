@@ -637,6 +637,8 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /hostedMcpServer: \[hostedApplySource, hostedApplySourcePath\]/);
   assert.match(verifier, /Named local and hosted Apply schemas drifted from the packaged exact-byte digest lock/);
   assert.match(verifier, /pluginServerSha256/);
+  assert.match(verifier, /pluginScopesSha256/);
+  assert.match(verifier, /jobBriefServiceSha256/);
   assert.match(verifier, /APPLY_BROWSER_SURFACES/);
   assert.match(verifier, /All executable hosted plugin scope mappings must match the packaged public scope lock/);
   assert.match(verifier, /staticStringArrayMap/);

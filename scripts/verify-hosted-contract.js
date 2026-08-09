@@ -789,6 +789,7 @@ const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-pl
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
 const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
 const hostedPluginScopesPath = path.join(backendRoot, 'src', 'mcp', 'plugin-scopes.ts');
+const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
 const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
 const hostedApplicationProfileServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'service.ts');
 const hostedJobscoutFilterUtilsPath = path.join(backendRoot, 'src', 'routes', 'jobscout-filter-utils.ts');
@@ -823,6 +824,7 @@ if (
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
+const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
 const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
 const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
@@ -903,6 +905,11 @@ assert.deepEqual(
   executableScopeContract,
   pluginLock.publicScopeContract,
   'All executable hosted plugin scope mappings must match the packaged public scope lock',
+);
+assert.equal(
+  sha256ExactBytes(hostedPluginScopesSource),
+  pluginLock.publicExecutableContract.pluginScopesSha256,
+  'Hosted plugin conditional scope enforcement drifted from the packaged whole-source digest lock',
 );
 assert.deepEqual(
   hostedPluginTools,
@@ -997,6 +1004,11 @@ assert.equal(
   pluginLock.publicExecutableContract.pluginServerSha256,
   'Hosted plugin server implementation drifted from the packaged whole-source digest lock',
 );
+assert.equal(
+  sha256ExactBytes(hostedJobBriefServiceSource),
+  pluginLock.publicExecutableContract.jobBriefServiceSha256,
+  'Hosted public job-brief date validation drifted from the packaged whole-source digest lock',
+);
 
 const executableSchemaDigests = Object.fromEntries(
   Object.keys(pluginLock.publicExecutableContract.schemaSha256).map((schemaName) => [
@@ -1014,6 +1026,7 @@ const transitiveSources = {
   APPLY_EXECUTION_MAX_TARGET: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
   APPLY_EXECUTION_ACCESS_CLASSIFICATIONS: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
   APPLY_EXECUTION_STOP_REASON_CODES: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
+  APPLY_EXECUTION_MEMBER_OPERATIONS: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
   APPLY_BROWSER_SURFACES: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
   APPLY_SCENARIO_CODES: [hostedApplicationProfileServiceSource, hostedApplicationProfileServicePath],
   ALL_JOB_FUNCTIONS: [hostedJobscoutFilterUtilsSource, hostedJobscoutFilterUtilsPath],
@@ -1356,7 +1369,7 @@ const progressOutputProperties = schemaObjectPropertyAsts(
 );
 const progressOutputContract = {
   success: 'z.boolean()',
-  operation: "z.enum(['bind_surface', 'record_dispositions', 'record_observations', 'advance'])",
+  operation: "z.enum(['bind_surface', 'resume_parked', 'record_dispositions', 'record_observations', 'advance'])",
   recordedCount: 'z.number().int().nonnegative()',
   batchId: 'nullableCountSchema.optional()',
   memberIds: 'z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET).optional()',
@@ -1365,6 +1378,17 @@ const progressOutputContract = {
     runId: z.number().int().min(1),
     memberVersion: z.number().int().min(1),
     inspectionEpoch: z.number().int().nonnegative(),
+    replay: z.boolean(),
+  }).strict().optional()`,
+  resumed: `z.object({
+    executionId: z.number().int().min(1),
+    memberId: z.number().int().min(1),
+    revision: z.number().int().min(1),
+    memberVersion: z.number().int().min(1),
+    inspectionEpoch: z.number().int().nonnegative(),
+    requiresFreshProbe: z.boolean(),
+    mutable: z.boolean(),
+    allowedOperations: z.array(z.enum(APPLY_EXECUTION_MEMBER_OPERATIONS)),
     replay: z.boolean(),
   }).strict().optional()`,
   nextAction: "z.enum(['work_ready', 'advance_or_refresh']).optional()",

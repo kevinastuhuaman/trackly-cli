@@ -7,7 +7,8 @@ Before entering private data, require all of the following:
 - The work packet is current and authorizes form mutation.
 - The URL is HTTPS.
 - The visible employer and role match the approved job.
-- The current origin and ATS tenant match the packet's allowed origin policy.
+- The browser opened only the frozen `navigation.requisitionUrl`; the current origin and ATS tenant match its server-verified authorized origins, host suffixes, verified provider/tenant, and tenant rule.
+- After every redirect and for every application iframe, both origin and ATS tenant were revalidated against that same frozen policy.
 - Browser and accessibility state agree on the committed controls.
 - A verified end-to-end tab and unsaved-draft preservation path exists before any mutation: either the documented session finalizer plus complete current controller-owned and user-owned inventories for an explicit keep list, or a documented per-tab durable-handoff primitive with an exact verifiable persistence receipt for every target tab.
 
