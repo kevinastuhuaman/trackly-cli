@@ -9,7 +9,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 
-const { sha256ExactBytes } = require('../scripts/verify-hosted-contract.js');
+const { exactSchemaDefinition, sha256ExactBytes } = require('../scripts/verify-hosted-contract.js');
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
@@ -108,6 +108,36 @@ test('importing executable digest helpers never runs hosted verification as a si
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, '');
+});
+
+test('named local and hosted Apply schemas have collision-free exact-byte locks', () => {
+  const lock = json('plugins/trackly/skill-lock.json');
+  const namedLocks = lock.publicExecutableContract.namedApplySchemaSha256;
+  const schemaNames = [
+    'applyExecutionDispositionSchema',
+    'startApplyRunSchema',
+    'truthCertificationCommon',
+    'truthCertificationSchema',
+  ];
+
+  assert.deepEqual(Object.keys(namedLocks).sort(), ['hostedMcpServer', 'localMcpApplyTools']);
+  assert.deepEqual(Object.keys(namedLocks.localMcpApplyTools).sort(), schemaNames);
+  assert.deepEqual(Object.keys(namedLocks.hostedMcpServer).sort(), schemaNames);
+  assert.ok(
+    Object.values(namedLocks).flatMap(Object.values).every((digest) => /^[a-f0-9]{64}$/.test(digest)),
+  );
+
+  const localApplySource = read('mcp/apply-tools.js');
+  for (const schemaName of schemaNames) {
+    const definition = exactSchemaDefinition(localApplySource, schemaName, 'mcp/apply-tools.js');
+    assert.equal(sha256ExactBytes(definition), namedLocks.localMcpApplyTools[schemaName]);
+    const changedSource = localApplySource.replace(definition, definition.replace(/;$/, '\n;'));
+    assert.notEqual(
+      sha256ExactBytes(exactSchemaDefinition(changedSource, schemaName, 'changed mcp/apply-tools.js')),
+      namedLocks.localMcpApplyTools[schemaName],
+      `${schemaName} lock must change when verifier-visible definition bytes change`,
+    );
+  }
 });
 
 function validateAppBinding(manifest, appConfig) {
@@ -279,6 +309,7 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.match(lock.publicExecutableContract.pluginServerSha256, /^[a-f0-9]{64}$/);
   assert.ok(Object.values(lock.publicExecutableContract.schemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.transitiveSchemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
+  assert.ok(Object.values(lock.publicExecutableContract.namedApplySchemaSha256).flatMap(Object.values).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.hasOwn(lock.publicExecutableContract.transitiveSchemaSha256, 'APPLY_BROWSER_SURFACES'));
 });
 

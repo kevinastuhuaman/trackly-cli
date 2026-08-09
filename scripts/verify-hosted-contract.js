@@ -8,6 +8,47 @@ const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 
+function schemaDefinitionBounds(source, name, sourcePath) {
+  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*`).exec(source);
+  assert.ok(declaration, `${name} is missing from ${sourcePath}`);
+  const start = declaration.index + declaration[0].length;
+  let parens = 0;
+  let braces = 0;
+  let brackets = 0;
+  let quote = '';
+  let escaped = false;
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
+    if (char === '(') parens++;
+    else if (char === ')') parens--;
+    else if (char === '{') braces++;
+    else if (char === '}') braces--;
+    else if (char === '[') brackets++;
+    else if (char === ']') brackets--;
+    else if (char === ';' && parens === 0 && braces === 0 && brackets === 0) {
+      return { declarationStart: declaration.index, expressionStart: start, semicolon: index };
+    }
+  }
+  assert.fail(`${name} is unterminated in ${sourcePath}`);
+}
+
+function schemaDefinition(source, name, sourcePath) {
+  const bounds = schemaDefinitionBounds(source, name, sourcePath);
+  return source.slice(bounds.expressionStart, bounds.semicolon).trim();
+}
+
+function exactSchemaDefinition(source, name, sourcePath) {
+  const bounds = schemaDefinitionBounds(source, name, sourcePath);
+  return source.slice(bounds.declarationStart, bounds.semicolon + 1);
+}
+
 function verifyHostedContract() {
 const cliRoot = path.join(__dirname, '..');
 const backendCandidates = process.env.TRACKLY_BACKEND_DIR
@@ -18,6 +59,7 @@ const backendCandidates = process.env.TRACKLY_BACKEND_DIR
       path.join(require('node:os').homedir(), 'closeai', 'granola-followup-app'),
     ];
 const localContractPath = path.join(cliRoot, 'contracts', 'trackly-apply-tools.json');
+const localApplySourcePath = path.join(cliRoot, 'mcp', 'apply-tools.js');
 const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'contracts', 'trackly-apply-tools.json')))
   || backendCandidates[0];
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
@@ -38,6 +80,7 @@ if (!fs.existsSync(hostedPluginContractPath)) {
 }
 
 const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
+const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
 const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
 const hostedPluginContract = JSON.parse(fs.readFileSync(hostedPluginContractPath, 'utf8'));
@@ -100,37 +143,6 @@ assert.match(
   /applyExecutionDispositionSchema/,
   'Disposition tool must reference the named executable schema',
 );
-
-function schemaDefinition(source, name, sourcePath) {
-  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*`).exec(source);
-  assert.ok(declaration, `${name} is missing from ${sourcePath}`);
-  const start = declaration.index + declaration[0].length;
-  let parens = 0;
-  let braces = 0;
-  let brackets = 0;
-  let quote = '';
-  let escaped = false;
-  for (let index = start; index < source.length; index++) {
-    const char = source[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (char === '\\') escaped = true;
-      else if (char === quote) quote = '';
-      continue;
-    }
-    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
-    if (char === '(') parens++;
-    else if (char === ')') parens--;
-    else if (char === '{') braces++;
-    else if (char === '}') braces--;
-    else if (char === '[') brackets++;
-    else if (char === ']') brackets--;
-    else if (char === ';' && parens === 0 && braces === 0 && brackets === 0) {
-      return source.slice(start, index).trim();
-    }
-  }
-  assert.fail(`${name} is unterminated in ${sourcePath}`);
-}
 
 const hostedPluginTools = Object.keys(hostedPluginContract.tools).sort();
 const executablePluginTools = [...hostedPluginSource.matchAll(/\bregisterPluginTool\(\s*['"]([^'"]+)['"]/g)]
@@ -304,6 +316,29 @@ assert.deepEqual(
   'Executable hosted plugin transitive schema constants drifted from the packaged exact-byte digest lock',
 );
 
+const namedApplySchemaSources = {
+  localMcpApplyTools: [localApplySource, localApplySourcePath],
+  hostedMcpServer: [hostedApplySource, hostedApplySourcePath],
+};
+const executableNamedApplySchemaDigests = Object.fromEntries(
+  Object.entries(pluginLock.publicExecutableContract.namedApplySchemaSha256).map(([side, lockedDigests]) => {
+    const sourceEntry = namedApplySchemaSources[side];
+    assert.ok(sourceEntry, `Unknown named Apply schema source ${side}`);
+    return [
+      side,
+      Object.fromEntries(Object.keys(lockedDigests).map((schemaName) => [
+        schemaName,
+        sha256ExactBytes(exactSchemaDefinition(sourceEntry[0], schemaName, sourceEntry[1])),
+      ])),
+    ];
+  }),
+);
+assert.deepEqual(
+  executableNamedApplySchemaDigests,
+  pluginLock.publicExecutableContract.namedApplySchemaSha256,
+  'Named local and hosted Apply schemas drifted from the packaged exact-byte digest lock',
+);
+
 const readinessSchema = schemaDefinition(
   hostedPluginSource,
   'readinessOutputSchema',
@@ -399,7 +434,7 @@ console.log(
 );
 }
 
-module.exports = { sha256ExactBytes, verifyHostedContract };
+module.exports = { exactSchemaDefinition, schemaDefinition, sha256ExactBytes, verifyHostedContract };
 
 if (require.main === module) {
   verifyHostedContract();

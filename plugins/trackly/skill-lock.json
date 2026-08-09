@@ -122,6 +122,20 @@
       "APPLY_BROWSER_SURFACES": "19361646d6604b2f12accc4881f4bad85c817fcfc284e5eb603b11d2f455d81f",
       "APPLY_SCENARIO_CODES": "e887b2fe48aa3618fa3d4f38d178dbdfdf7c3ec7a1e5a00db9aee3f6dab6582e",
       "ALL_JOB_FUNCTIONS": "ff6030224beee8c2e6789c31b4c8dbb189bbd3aa9f4ab83a21cb4807528e2bfd"
+    },
+    "namedApplySchemaSha256": {
+      "localMcpApplyTools": {
+        "applyExecutionDispositionSchema": "0de532896889a97c80333adc99f6c00ecae2e3b70a498499959c925d74647fbd",
+        "startApplyRunSchema": "77b894709066de136ddbe739a2639ed195dc890035043b8a07c70f1b14b1ce3e",
+        "truthCertificationCommon": "b1443c0806863f2699a900453523db58bc5cc7a21228b927ea1e6a357413d6ee",
+        "truthCertificationSchema": "065e74b1c085e53b6e77d2a4232697e49881c266e273f3400bd4e093fa56524c"
+      },
+      "hostedMcpServer": {
+        "applyExecutionDispositionSchema": "0de532896889a97c80333adc99f6c00ecae2e3b70a498499959c925d74647fbd",
+        "startApplyRunSchema": "0a2901e07b1ec44359ad64a5c8441fe5e21b6b17f9d111a45413acdac82bf554",
+        "truthCertificationCommon": "c6ba15aea01acfd64aa50bdde1e5763a0ee80ac93d1fb9ab384f0489dc8413d3",
+        "truthCertificationSchema": "cdb3b224c87812346734f786ec8363efe59c0a1058a8b0c7c4db982913ffc729"
+      }
     }
   },
   "publicToolAllowlist": [
