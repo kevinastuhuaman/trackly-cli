@@ -526,6 +526,38 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   ]) {
     assert.match(verifier, new RegExp(`'${constantName}'`));
   }
+  assert.match(verifier, /require\('acorn'\)/);
+  assert.match(verifier, /acorn\.parseExpressionAt\(expression, 0, \{ ecmaVersion: 'latest' \}\)/);
+  assert.match(verifier, /ast\.end,\s*expression\.length/);
+  assert.match(verifier, /canonicalSchemaAst\(localApplySchemaAsts\[schemaName\]\)/);
+  assert.match(verifier, /canonicalSchemaAst\(hostedApplySchemaAsts\[schemaName\]\)/);
+  for (const schemaName of [
+    'applyExecutionDispositionSchema',
+    'truthCertificationCommon',
+    'truthCertificationSchema',
+    'startApplyRunSchema',
+  ]) {
+    assert.match(verifier, new RegExp(`'${schemaName}'`));
+  }
+});
+
+test('hosted parity verifier proves published wrapper compatibility from parsed ASTs', () => {
+  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
+
+  assert.match(verifier, /truthCertificationInputSchema/);
+  assert.match(verifier, /hostedPublishedAndParse: 'truthCertificationSchema'/);
+  assert.match(verifier, /startApplyRunInputSchema/);
+  assert.match(verifier, /hostedPublishedAndParse: 'startApplyRunSchema'/);
+  assert.match(verifier, /assertTruthWrapperCompatibility/);
+  assert.match(verifier, /published truth discriminants must exactly cover the hosted parse branches/);
+  assert.match(verifier, /before nullable\/optional widening/);
+  assert.match(verifier, /hosted not_applicable \$\{field\}/);
+  assert.match(verifier, /assertStartRunWrapperCompatibility/);
+  assert.match(verifier, /hostedSchema\.callee\.object/);
+  assert.match(verifier, /before parse-time superRefine/);
+  assert.match(verifier, /\['local', localApplySource, mapping\.localPublished\]/);
+  assert.match(verifier, /\['hosted', hostedApplySource, mapping\.hostedPublishedAndParse\]/);
+  assert.match(verifier, /\$\{toolName\} \$\{side\} tools\/list schema must use \$\{schemaName\}/);
 });
 
 test('hosted parity verifier fails clearly when the plugin contract has no tools object', () => {

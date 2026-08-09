@@ -9,7 +9,12 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 
-const { exactSchemaDefinition, sha256ExactBytes } = require('../scripts/verify-hosted-contract.js');
+const {
+  canonicalSchemaAst,
+  exactSchemaDefinition,
+  parseSchemaExpression,
+  sha256ExactBytes,
+} = require('../scripts/verify-hosted-contract.js');
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
@@ -110,10 +115,64 @@ test('importing executable digest helpers never runs hosted verification as a si
   assert.equal(result.stdout, '');
 });
 
+test('schema AST canonicalization ignores parser positions but preserves literal semantics', () => {
+  const formatted = parseSchemaExpression(
+    'const example = z.string().regex(/a b/i);',
+    'example',
+    'formatted fixture',
+  );
+  const repositioned = parseSchemaExpression(
+    'const example =\n  z.string().regex(/a b/i);',
+    'example',
+    'repositioned fixture',
+  );
+  const changedPattern = parseSchemaExpression(
+    'const example = z.string().regex(/ab/i);',
+    'example',
+    'changed-pattern fixture',
+  );
+  const changedFlags = parseSchemaExpression(
+    'const example = z.string().regex(/a b/g);',
+    'example',
+    'changed-flags fixture',
+  );
+  const approvedLiteral = parseSchemaExpression(
+    "const example = z.literal('approved');",
+    'example',
+    'approved-literal fixture',
+  );
+  const notApplicableLiteral = parseSchemaExpression(
+    "const example = z.literal('not_applicable');",
+    'example',
+    'not-applicable-literal fixture',
+  );
+
+  assert.deepEqual(canonicalSchemaAst(formatted), canonicalSchemaAst(repositioned));
+  assert.notDeepEqual(canonicalSchemaAst(formatted), canonicalSchemaAst(changedPattern));
+  assert.notDeepEqual(canonicalSchemaAst(formatted), canonicalSchemaAst(changedFlags));
+  assert.notDeepEqual(canonicalSchemaAst(approvedLiteral), canonicalSchemaAst(notApplicableLiteral));
+  assert.throws(
+    () => parseSchemaExpression(
+      'const example = z.string() unexpected;',
+      'example',
+      'trailing-bytes fixture',
+    ),
+    /must contain exactly one complete schema expression/,
+  );
+});
+
 test('named local and hosted Apply schemas have collision-free exact-byte locks', () => {
   const lock = json('plugins/trackly/skill-lock.json');
   const namedLocks = lock.publicExecutableContract.namedApplySchemaSha256;
-  const schemaNames = [
+  const localSchemaNames = [
+    'applyExecutionDispositionSchema',
+    'startApplyRunInputSchema',
+    'startApplyRunSchema',
+    'truthCertificationCommon',
+    'truthCertificationInputSchema',
+    'truthCertificationSchema',
+  ];
+  const hostedSchemaNames = [
     'applyExecutionDispositionSchema',
     'startApplyRunSchema',
     'truthCertificationCommon',
@@ -121,14 +180,14 @@ test('named local and hosted Apply schemas have collision-free exact-byte locks'
   ];
 
   assert.deepEqual(Object.keys(namedLocks).sort(), ['hostedMcpServer', 'localMcpApplyTools']);
-  assert.deepEqual(Object.keys(namedLocks.localMcpApplyTools).sort(), schemaNames);
-  assert.deepEqual(Object.keys(namedLocks.hostedMcpServer).sort(), schemaNames);
+  assert.deepEqual(Object.keys(namedLocks.localMcpApplyTools).sort(), localSchemaNames);
+  assert.deepEqual(Object.keys(namedLocks.hostedMcpServer).sort(), hostedSchemaNames);
   assert.ok(
     Object.values(namedLocks).flatMap(Object.values).every((digest) => /^[a-f0-9]{64}$/.test(digest)),
   );
 
   const localApplySource = read('mcp/apply-tools.js');
-  for (const schemaName of schemaNames) {
+  for (const schemaName of localSchemaNames) {
     const definition = exactSchemaDefinition(localApplySource, schemaName, 'mcp/apply-tools.js');
     assert.equal(sha256ExactBytes(definition), namedLocks.localMcpApplyTools[schemaName]);
     const changedSource = localApplySource.replace(definition, definition.replace(/;$/, '\n;'));

@@ -126,8 +126,10 @@
     "namedApplySchemaSha256": {
       "localMcpApplyTools": {
         "applyExecutionDispositionSchema": "0de532896889a97c80333adc99f6c00ecae2e3b70a498499959c925d74647fbd",
+        "startApplyRunInputSchema": "6881377a22e0022ed720362b6e76ede33401624c9009a213d6bb3ba2d25e4c4a",
         "startApplyRunSchema": "77b894709066de136ddbe739a2639ed195dc890035043b8a07c70f1b14b1ce3e",
         "truthCertificationCommon": "b1443c0806863f2699a900453523db58bc5cc7a21228b927ea1e6a357413d6ee",
+        "truthCertificationInputSchema": "97888af936ad1367df6fd628fa2ac30adf309842296977695f57b6628f7c3aef",
         "truthCertificationSchema": "065e74b1c085e53b6e77d2a4232697e49881c266e273f3400bd4e093fa56524c"
       },
       "hostedMcpServer": {

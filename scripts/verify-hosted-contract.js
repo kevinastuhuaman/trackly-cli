@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const acorn = require('acorn');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -47,6 +48,157 @@ function schemaDefinition(source, name, sourcePath) {
 function exactSchemaDefinition(source, name, sourcePath) {
   const bounds = schemaDefinitionBounds(source, name, sourcePath);
   return source.slice(bounds.declarationStart, bounds.semicolon + 1);
+}
+
+const AST_METADATA_FIELDS = new Set(['start', 'end', 'loc', 'range', 'raw']);
+
+function canonicalSchemaAst(value) {
+  if (value instanceof RegExp) {
+    return { pattern: value.source, flags: value.flags };
+  }
+  if (Array.isArray(value)) return value.map(canonicalSchemaAst);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !AST_METADATA_FIELDS.has(key))
+      .map(([key, child]) => [key, canonicalSchemaAst(child)]),
+  );
+}
+
+function parseSchemaExpression(source, name, sourcePath) {
+  const expression = schemaDefinition(source, name, sourcePath);
+  const ast = acorn.parseExpressionAt(expression, 0, { ecmaVersion: 'latest' });
+  assert.equal(
+    ast.end,
+    expression.length,
+    `${name} in ${sourcePath} must contain exactly one complete schema expression`,
+  );
+  return ast;
+}
+
+function memberName(node) {
+  if (node?.type !== 'MemberExpression' || node.computed) return null;
+  return node.property?.type === 'Identifier' ? node.property.name : null;
+}
+
+function calleeName(node) {
+  if (node?.type === 'Identifier') return node.name;
+  const property = memberName(node);
+  if (!property) return null;
+  const object = calleeName(node.object);
+  return object ? `${object}.${property}` : null;
+}
+
+function assertCall(node, expectedCallee, label) {
+  assert.equal(node?.type, 'CallExpression', `${label} must be a call expression`);
+  assert.equal(calleeName(node.callee), expectedCallee, `${label} must call ${expectedCallee}`);
+  return node;
+}
+
+function objectSchemaProperties(node, label) {
+  const call = assertCall(node, 'z.object', label);
+  assert.equal(call.arguments.length, 1, `${label} must pass one object shape`);
+  assert.equal(call.arguments[0]?.type, 'ObjectExpression', `${label} must contain an object shape`);
+  return call.arguments[0].properties;
+}
+
+function propertyName(property) {
+  if (property?.type !== 'Property' || property.computed) return null;
+  if (property.key.type === 'Identifier') return property.key.name;
+  return property.key.type === 'Literal' ? property.key.value : null;
+}
+
+function namedProperties(properties, label) {
+  const entries = properties
+    .filter((property) => property.type === 'Property')
+    .map((property) => [propertyName(property), property.value]);
+  assert.ok(entries.every(([name]) => typeof name === 'string'), `${label} must use static property names`);
+  const result = Object.fromEntries(entries);
+  assert.equal(Object.keys(result).length, entries.length, `${label} must not repeat properties`);
+  return result;
+}
+
+function soleSpread(properties, label) {
+  const spreads = properties.filter((property) => property.type === 'SpreadElement');
+  assert.equal(spreads.length, 1, `${label} must contain one common-schema spread`);
+  return spreads[0].argument;
+}
+
+function unwrapMethodCall(node, method, label) {
+  assert.equal(node?.type, 'CallExpression', `${label} must call .${method}()`);
+  assert.equal(memberName(node.callee), method, `${label} must call .${method}()`);
+  assert.equal(node.arguments.length, 0, `${label} .${method}() must not take arguments`);
+  return node.callee.object;
+}
+
+function assertTruthWrapperCompatibility(localWrapper, hostedSchema) {
+  const localProperties = objectSchemaProperties(localWrapper, 'truthCertificationInputSchema');
+  const union = assertCall(hostedSchema, 'z.discriminatedUnion', 'hosted truthCertificationSchema');
+  assert.equal(union.arguments[0]?.type, 'Literal');
+  assert.equal(union.arguments[0].value, 'resumeDependency');
+  assert.equal(union.arguments[1]?.type, 'ArrayExpression');
+  assert.equal(union.arguments[1].elements.length, 2);
+
+  const branches = new Map(union.arguments[1].elements.map((branch, index) => {
+    const properties = objectSchemaProperties(branch, `hosted truth branch ${index + 1}`);
+    assert.deepEqual(
+      canonicalSchemaAst(soleSpread(properties, `hosted truth branch ${index + 1}`)),
+      canonicalSchemaAst(soleSpread(localProperties, 'truthCertificationInputSchema')),
+      `hosted truth branch ${index + 1} must spread the same common schema as the local wrapper`,
+    );
+    const named = namedProperties(properties, `hosted truth branch ${index + 1}`);
+    assert.deepEqual(Object.keys(named), ['resumeDependency', 'resumeId', 'resumeSha256']);
+    const literal = assertCall(named.resumeDependency, 'z.literal', `hosted truth branch ${index + 1} discriminant`);
+    assert.equal(literal.arguments.length, 1);
+    assert.equal(literal.arguments[0]?.type, 'Literal');
+    return [literal.arguments[0].value, named];
+  }));
+  assert.deepEqual([...branches.keys()], ['approved', 'not_applicable']);
+
+  const localNamed = namedProperties(localProperties, 'truthCertificationInputSchema');
+  assert.deepEqual(Object.keys(localNamed), ['resumeDependency', 'resumeId', 'resumeSha256']);
+  const publishedDiscriminant = assertCall(
+    localNamed.resumeDependency,
+    'z.enum',
+    'truthCertificationInputSchema.resumeDependency',
+  );
+  assert.equal(publishedDiscriminant.arguments[0]?.type, 'ArrayExpression');
+  assert.deepEqual(
+    publishedDiscriminant.arguments[0].elements.map((element) => element.value),
+    [...branches.keys()],
+    'published truth discriminants must exactly cover the hosted parse branches',
+  );
+
+  for (const field of ['resumeId', 'resumeSha256']) {
+    const publishedBase = unwrapMethodCall(
+      unwrapMethodCall(localNamed[field], 'optional', `truthCertificationInputSchema.${field}`),
+      'nullable',
+      `truthCertificationInputSchema.${field}`,
+    );
+    assert.deepEqual(
+      canonicalSchemaAst(publishedBase),
+      canonicalSchemaAst(branches.get('approved')[field]),
+      `published ${field} must preserve the approved hosted schema before nullable/optional widening`,
+    );
+    const notApplicableBase = unwrapMethodCall(
+      branches.get('not_applicable')[field],
+      'optional',
+      `hosted not_applicable ${field}`,
+    );
+    const nullSchema = assertCall(notApplicableBase, 'z.null', `hosted not_applicable ${field}`);
+    assert.equal(nullSchema.arguments.length, 0, `hosted not_applicable ${field} z.null() must not take arguments`);
+  }
+}
+
+function assertStartRunWrapperCompatibility(localWrapper, hostedSchema) {
+  assert.equal(hostedSchema?.type, 'CallExpression');
+  assert.equal(memberName(hostedSchema.callee), 'superRefine');
+  assert.equal(hostedSchema.arguments.length, 1, 'hosted startApplyRunSchema must have one refinement callback');
+  assert.deepEqual(
+    canonicalSchemaAst(localWrapper),
+    canonicalSchemaAst(hostedSchema.callee.object),
+    'startApplyRunInputSchema must equal the hosted published object before parse-time superRefine',
+  );
 }
 
 function verifyHostedContract() {
@@ -339,6 +491,70 @@ assert.deepEqual(
   'Named local and hosted Apply schemas drifted from the packaged exact-byte digest lock',
 );
 
+const sharedParseSchemaNames = [
+  'applyExecutionDispositionSchema',
+  'truthCertificationCommon',
+  'truthCertificationSchema',
+  'startApplyRunSchema',
+];
+const localApplySchemaAsts = Object.fromEntries(
+  [
+    ...sharedParseSchemaNames,
+    'truthCertificationInputSchema',
+    'startApplyRunInputSchema',
+  ].map((schemaName) => [
+    schemaName,
+    parseSchemaExpression(localApplySource, schemaName, localApplySourcePath),
+  ]),
+);
+const hostedApplySchemaAsts = Object.fromEntries(
+  sharedParseSchemaNames.map((schemaName) => [
+    schemaName,
+    parseSchemaExpression(hostedApplySource, schemaName, hostedApplySourcePath),
+  ]),
+);
+for (const schemaName of sharedParseSchemaNames) {
+  assert.deepEqual(
+    canonicalSchemaAst(localApplySchemaAsts[schemaName]),
+    canonicalSchemaAst(hostedApplySchemaAsts[schemaName]),
+    `${schemaName} executable AST drifted between local and hosted MCP`,
+  );
+}
+
+const publishedSchemaCompatibility = {
+  trackly_certify_apply_batch_truth: {
+    localPublished: 'truthCertificationInputSchema',
+    hostedPublishedAndParse: 'truthCertificationSchema',
+  },
+  trackly_start_apply_run: {
+    localPublished: 'startApplyRunInputSchema',
+    hostedPublishedAndParse: 'startApplyRunSchema',
+  },
+};
+for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) {
+  for (const [side, sourceText, schemaName] of [
+    ['local', localApplySource, mapping.localPublished],
+    ['hosted', hostedApplySource, mapping.hostedPublishedAndParse],
+  ]) {
+    const registration = new RegExp(
+      `server\\.registerTool\\(\\s*['"]${toolName}['"]\\s*,\\s*\\{[\\s\\S]{0,1000}?inputSchema:\\s*${schemaName}\\b`,
+    );
+    assert.match(
+      sourceText,
+      registration,
+      `${toolName} ${side} tools/list schema must use ${schemaName}`,
+    );
+  }
+}
+assertTruthWrapperCompatibility(
+  localApplySchemaAsts.truthCertificationInputSchema,
+  hostedApplySchemaAsts.truthCertificationSchema,
+);
+assertStartRunWrapperCompatibility(
+  localApplySchemaAsts.startApplyRunInputSchema,
+  hostedApplySchemaAsts.startApplyRunSchema,
+);
+
 const readinessSchema = schemaDefinition(
   hostedPluginSource,
   'readinessOutputSchema',
@@ -434,7 +650,14 @@ console.log(
 );
 }
 
-module.exports = { exactSchemaDefinition, schemaDefinition, sha256ExactBytes, verifyHostedContract };
+module.exports = {
+  canonicalSchemaAst,
+  exactSchemaDefinition,
+  parseSchemaExpression,
+  schemaDefinition,
+  sha256ExactBytes,
+  verifyHostedContract,
+};
 
 if (require.main === module) {
   verifyHostedContract();
