@@ -7,6 +7,7 @@ const { z } = require('zod');
 const { apiRequest, createTracklyAccessError, hasAuth, maintenanceOutput } = require('../lib/client');
 const { version: PACKAGE_VERSION } = require('../package.json');
 const { registerApplyTools } = require('./apply-tools');
+const { configureMcpAnalytics, shutdownMcpAnalytics } = require('./analytics');
 
 const MCP_USER_AGENT = `trackly-mcp/${PACKAGE_VERSION}`;
 const MCP_MAINTENANCE_ERROR_CODE = -32002;
@@ -200,7 +201,7 @@ function projectPreferenceResponse(result, experienceFilterV2Available = null) {
   };
 }
 
-function createServer() {
+function createServer(options = {}) {
   const server = new McpServer({
     name: 'trackly',
     version: PACKAGE_VERSION,
@@ -485,13 +486,53 @@ function createServer() {
     mcpUserAgent: MCP_USER_AGENT,
     throwMcpResourceError,
   });
+
+  // Keep server construction deterministic for embedders and schema tests.
+  // The executable startup path enables production analytics after every tool
+  // is registered; callers may inject instrumentation here when they need to
+  // inspect that boundary directly.
+  if (typeof options.configureAnalytics === 'function') {
+    options.configureAnalytics(server, options.analytics);
+  } else if (options.analytics !== undefined) {
+    configureMcpAnalytics(server, options.analytics);
+  }
   return server;
 }
 
-async function startMcpServer() {
-  const server = createServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+async function startMcpServer(options = {}) {
+  const server = createServer(options);
+  if (typeof options.configureAnalytics !== 'function' && options.analytics === undefined) {
+    configureMcpAnalytics(server, options.analytics);
+  }
+  const transport = options.transport || new StdioServerTransport();
+  const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
+  const previousOnClose = server.server.onclose;
+  const beginAnalyticsShutdown = () => {
+    try {
+      Promise.resolve(shutdownAnalytics(server)).catch(() => {});
+    } catch {
+      // Analytics teardown must not affect transport teardown.
+    }
+  };
+  server.server.onclose = () => {
+    try {
+      previousOnClose?.();
+    } catch {
+      // Preserve fail-open behavior if an instrumentation callback misbehaves.
+    }
+    beginAnalyticsShutdown();
+  };
+
+  try {
+    await server.connect(transport);
+  } catch (error) {
+    try {
+      await shutdownAnalytics(server);
+    } catch {
+      // Preserve the original transport failure.
+    }
+    throw error;
+  }
   return server;
 }
 
