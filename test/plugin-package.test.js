@@ -10,12 +10,15 @@ const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 
 const {
+  activeNamedDefinitionAst,
   activeToolRegistrations,
   canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
+  referencedFreeIdentifiers,
   registeredInputSchemaName,
+  registrationDescriptorPropertyAst,
   registrationArgumentSources,
   schemaObjectPropertyAsts,
   sha256ExactBytes,
@@ -196,6 +199,33 @@ test('registration extraction ignores commented tools and binds the active publi
   assert.equal(registeredInputSchemaName(registration, 'Apply registration fixture'), 'activeSchema');
 });
 
+test('descriptor extraction binds active annotation and input-schema expressions instead of comments', () => {
+  const source = `
+    registerPluginTool('trackly_mutation', {
+      // annotations: readOnlyAnnotations,
+      annotations: mutationAnnotations(false, true),
+      /* inputSchema: z.object({ stale: z.literal(true) }), */
+      inputSchema: z.object({ confirmed: z.literal(true) }).strict(),
+    }, handler);
+  `;
+  const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'descriptor fixture');
+  assert.deepEqual(
+    canonicalSchemaAst(registrationDescriptorPropertyAst(
+      source, registration, 'annotations', 'descriptor fixture',
+    )),
+    canonicalSchemaAst(parseSchemaExpression(
+      'const annotation = mutationAnnotations(false, true);',
+      'annotation',
+      'expected annotation fixture',
+    )),
+  );
+  const inputSchema = registrationDescriptorPropertyAst(
+    source, registration, 'inputSchema', 'descriptor fixture',
+  );
+  assert.equal(inputSchema.type, 'CallExpression');
+  assert.equal(inputSchema.callee.property.name, 'strict');
+});
+
 test('schema property extraction ignores stale property text in comments', () => {
   const properties = schemaObjectPropertyAsts(`
     const readinessOutputSchema = z.object({
@@ -278,6 +308,29 @@ test('schema AST canonicalization ignores parser positions but preserves literal
       'trailing-bytes fixture',
     ),
     /Could not parse trailing-bytes fixture as executable JavaScript\/TypeScript/,
+  );
+});
+
+test('free dependency audit includes lower-camel helpers and ignores callback bindings', () => {
+  const schema = parseSchemaExpression(`
+    const example = z.object({
+      country: iso3166Alpha2Schema,
+      idempotencyKey: z.string().regex(SAFE_IDEMPOTENCY_KEY),
+    }).superRefine((value, context) => {
+      if (value.country === 'US') context.addIssue({ code: z.ZodIssueCode.custom });
+    });
+  `, 'example', 'lower-camel dependency fixture');
+  assert.deepEqual(
+    referencedFreeIdentifiers(schema),
+    ['SAFE_IDEMPOTENCY_KEY', 'iso3166Alpha2Schema', 'z'],
+  );
+
+  const local = 'const iso3166Alpha2Schema = z.string().length(2);';
+  const hosted = 'const iso3166Alpha2Schema = z.string().length(3);';
+  assert.notDeepEqual(
+    canonicalSchemaAst(activeNamedDefinitionAst(local, 'iso3166Alpha2Schema', 'local helper fixture')),
+    canonicalSchemaAst(activeNamedDefinitionAst(hosted, 'iso3166Alpha2Schema', 'hosted helper fixture')),
+    'divergent lower-camel helper definitions must remain visible to parity checks',
   );
 });
 

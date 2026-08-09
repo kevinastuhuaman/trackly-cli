@@ -99,6 +99,39 @@ function registeredInputSchemaName(registration, sourcePath) {
   return inputSchemaProperties[0].value.name;
 }
 
+function registrationDescriptorPropertySource(source, registration, propertyName, sourcePath) {
+  let descriptor = registration.call.arguments[1];
+  while (descriptor?.type === 'TSSatisfiesExpression' || descriptor?.type === 'TSAsExpression') {
+    descriptor = descriptor.expression;
+  }
+  assert.equal(
+    descriptor?.type,
+    'ObjectExpression',
+    `${registration.name} in ${sourcePath} must publish an object descriptor`,
+  );
+  const matches = descriptor.properties.filter((property) => (
+    property.type === 'ObjectProperty'
+    && !property.computed
+    && (
+      (property.key.type === 'Identifier' && property.key.name === propertyName)
+      || (property.key.type === 'StringLiteral' && property.key.value === propertyName)
+    )
+  ));
+  assert.equal(
+    matches.length,
+    1,
+    `${registration.name} in ${sourcePath} must publish exactly one active ${propertyName} property`,
+  );
+  return source.slice(matches[0].value.start, matches[0].value.end);
+}
+
+function registrationDescriptorPropertyAst(source, registration, propertyName, sourcePath) {
+  return parseExpectedExpression(
+    registrationDescriptorPropertySource(source, registration, propertyName, sourcePath),
+    `${registration.name}.${propertyName} in ${sourcePath}`,
+  );
+}
+
 function activeVariableDeclarator(source, name, sourcePath) {
   const matches = [];
   function visit(node, parent = null) {
@@ -210,7 +243,7 @@ function exactSchemaDefinition(source, name, sourcePath) {
   return source.slice(bounds.declarationStart, bounds.declarationEnd);
 }
 
-const AST_METADATA_FIELDS = new Set(['start', 'end', 'loc', 'range', 'raw']);
+const AST_METADATA_FIELDS = new Set(['start', 'end', 'loc', 'range', 'raw', 'extra']);
 
 function canonicalSchemaAst(value) {
   if (value instanceof RegExp) {
@@ -260,6 +293,121 @@ function referencedConstantIdentifiers(ast) {
   }
   visit(ast);
   return [...identifiers].sort();
+}
+
+function referencedFreeIdentifiers(ast) {
+  const identifiers = new Set();
+  const scopes = [new Set()];
+
+  function addPatternBindings(pattern, scope) {
+    if (!pattern) return;
+    if (pattern.type === 'Identifier') {
+      scope.add(pattern.name);
+      return;
+    }
+    if (pattern.type === 'RestElement') {
+      addPatternBindings(pattern.argument, scope);
+      return;
+    }
+    if (pattern.type === 'AssignmentPattern') {
+      addPatternBindings(pattern.left, scope);
+      return;
+    }
+    if (pattern.type === 'ArrayPattern') {
+      for (const element of pattern.elements) addPatternBindings(element, scope);
+      return;
+    }
+    if (pattern.type === 'ObjectPattern') {
+      for (const property of pattern.properties) {
+        addPatternBindings(property.type === 'RestElement' ? property.argument : property.value, scope);
+      }
+    }
+  }
+
+  function isBound(name) {
+    return scopes.some((scope) => scope.has(name));
+  }
+
+  function visit(node, parent = null, parentKey = '') {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, parent, parentKey);
+      return;
+    }
+
+    const isFunction = ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type);
+    if (isFunction) {
+      const functionScope = new Set();
+      if (node.id?.type === 'Identifier') functionScope.add(node.id.name);
+      for (const parameter of node.params || []) addPatternBindings(parameter, functionScope);
+      scopes.unshift(functionScope);
+      visit(node.body, node, 'body');
+      scopes.shift();
+      return;
+    }
+
+    if (node.type === 'Identifier') {
+      const isStaticMemberProperty = parent?.type === 'MemberExpression'
+        && parentKey === 'property'
+        && !parent.computed;
+      const isStaticPropertyKey = parent?.type === 'Property'
+        && parentKey === 'key'
+        && !parent.computed
+        && !parent.shorthand;
+      const isBinding = (
+        (parent?.type === 'VariableDeclarator' && parentKey === 'id')
+        || (parent?.type === 'CatchClause' && parentKey === 'param')
+      );
+      if (!isStaticMemberProperty && !isStaticPropertyKey && !isBinding && !isBound(node.name)) {
+        identifiers.add(node.name);
+      }
+      return;
+    }
+
+    if (node.type === 'VariableDeclarator') addPatternBindings(node.id, scopes[0]);
+    if (node.type === 'CatchClause') {
+      const catchScope = new Set();
+      addPatternBindings(node.param, catchScope);
+      scopes.unshift(catchScope);
+      visit(node.body, node, 'body');
+      scopes.shift();
+      return;
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      visit(child, node, key);
+    }
+  }
+  visit(ast);
+  return [...identifiers].sort();
+}
+
+function activeNamedDefinitionAst(source, name, sourcePath) {
+  const matches = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.id.name === name) {
+      assert.ok(node.init, `${name} in ${sourcePath} must have an initializer`);
+      matches.push(node.init);
+    } else if (node.type === 'FunctionDeclaration' && node.id?.name === name) {
+      matches.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(parseFullSource(source, sourcePath));
+  assert.equal(
+    matches.length,
+    1,
+    `${name} must have exactly one active variable or function definition in ${sourcePath}`,
+  );
+  return matches[0];
 }
 
 function typescriptConstArrayValues(source, name, sourcePath) {
@@ -582,6 +730,29 @@ const executableRegistrationArguments = Object.fromEntries(executablePluginTools
   const registration = pluginToolRegistration(name);
   return [name, registrationArgumentSources(hostedPluginSource, registration, hostedPluginSourcePath)];
 }));
+for (const toolName of executablePluginTools) {
+  const annotations = registrationDescriptorPropertyAst(
+    hostedPluginSource,
+    pluginToolRegistration(toolName),
+    'annotations',
+    hostedPluginSourcePath,
+  );
+  const scopes = pluginLock.publicScopeContract[toolName];
+  const isMutation = scopes.some((scope) => scope.endsWith(':write'));
+  if (isMutation) {
+    assert.equal(
+      calleeName(annotations.callee),
+      'mutationAnnotations',
+      `${toolName} has a write scope and must publish mutationAnnotations(...)`,
+    );
+  } else {
+    assert.deepEqual(
+      canonicalSchemaAst(annotations),
+      canonicalSchemaAst(parseExpectedExpression('readOnlyAnnotations', `${toolName}.annotations`)),
+      `${toolName} has read-only scopes and must publish readOnlyAnnotations`,
+    );
+  }
+}
 const executableDescriptorDigests = Object.fromEntries(
   executablePluginTools.map((name) => [name, sha256ExactBytes(executableRegistrationArguments[name][1])]),
 );
@@ -734,6 +905,40 @@ for (const [side, schemaAsts] of [
   );
 }
 
+const sharedLowerCamelDependencies = {};
+const schemaGlobalIdentifiers = new Set(['undefined', 'z']);
+for (const [side, sourceText, sourcePath, schemaAsts] of [
+  ['local', localApplySource, localApplySourcePath, localApplySchemaAsts],
+  ['hosted', hostedApplySource, hostedApplySourcePath, hostedApplySchemaAsts],
+]) {
+  const dependencies = [...new Set(
+    sharedParseSchemaNames.flatMap((schemaName) => referencedFreeIdentifiers(schemaAsts[schemaName])),
+  )]
+    .filter((name) => /^[a-z]/.test(name) && !schemaGlobalIdentifiers.has(name))
+    .sort();
+  sharedLowerCamelDependencies[side] = { sourceText, sourcePath, dependencies };
+}
+assert.deepEqual(
+  sharedLowerCamelDependencies.local.dependencies,
+  sharedLowerCamelDependencies.hosted.dependencies,
+  'Local and hosted Apply schemas must reference the same lower-camel shared helpers',
+);
+for (const dependencyName of sharedLowerCamelDependencies.local.dependencies) {
+  assert.deepEqual(
+    canonicalSchemaAst(activeNamedDefinitionAst(
+      sharedLowerCamelDependencies.local.sourceText,
+      dependencyName,
+      sharedLowerCamelDependencies.local.sourcePath,
+    )),
+    canonicalSchemaAst(activeNamedDefinitionAst(
+      sharedLowerCamelDependencies.hosted.sourceText,
+      dependencyName,
+      sharedLowerCamelDependencies.hosted.sourcePath,
+    )),
+    `${dependencyName} executable definition drifted between local and hosted Apply schemas`,
+  );
+}
+
 assert.deepEqual(
   canonicalSchemaAst(parseSchemaExpression(localApplySource, 'SAFE_IDEMPOTENCY_KEY', localApplySourcePath)),
   canonicalSchemaAst(parseSchemaExpression(hostedApplySource, 'SAFE_IDEMPOTENCY_KEY', hostedApplySourcePath)),
@@ -864,11 +1069,9 @@ assert.match(startOrResume, /browserSurface: z\.enum\(APPLY_BROWSER_SURFACES\)/)
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
 const getWork = pluginToolDefinition('trackly_get_apply_work');
-assert.match(getWork, /annotations: mutationAnnotations\(\)/);
 assert.match(getWork, /plugin-work/);
 assert.match(getWork, /memberIds: z\.array\(z\.number\(\)\.int\(\)\.min\(1\)\)\.min\(1\)/);
 assert.match(getWork, /profileKeys: z\.array\(z\.string\(\)\.min\(1\)\.max\(200\)\)\.max\(100\)\.optional\(\)/);
-assert.doesNotMatch(getWork, /readOnlyAnnotations/);
 
 const progress = pluginToolDefinition('trackly_report_apply_progress');
 assert.match(progress, /plugin-observations\/bulk/);
@@ -888,21 +1091,42 @@ assert.doesNotMatch(progressSchema, /\brunId\b|\bmemberId\b|\bbatchId\b|\bexecut
 assert.match(progress, /plugin-work/);
 
 const certify = pluginToolDefinition('trackly_certify_review_ready');
-for (const field of [
-  'batchId', 'memberId', 'expectedMemberVersion', 'inspectionEpoch',
-  'answerSnapshotHash', 'wordingFingerprint', 'resumeDependency',
-  'explicitUserTruthConfirmed', 'knownFieldsCommitted', 'idempotencyKey',
-]) {
-  assert.match(certify, new RegExp(`\\b${field}\\b`), `Review certification is missing ${field}`);
+const certifyInputProperties = namedProperties(objectSchemaProperties(
+  registrationDescriptorPropertyAst(
+    hostedPluginSource,
+    pluginToolRegistration('trackly_certify_review_ready'),
+    'inputSchema',
+    hostedPluginSourcePath,
+  ),
+  'trackly_certify_review_ready.inputSchema',
+), 'trackly_certify_review_ready.inputSchema');
+const certifyInputContract = {
+  runId: 'z.number().int().min(1)',
+  batchId: 'z.number().int().min(1)',
+  memberId: 'z.number().int().min(1)',
+  expectedMemberVersion: 'z.number().int().min(1)',
+  inspectionEpoch: 'z.number().int().min(0)',
+  answerSnapshotHash: 'z.string().regex(SHA256)',
+  wordingFingerprint: 'z.string().regex(SHA256)',
+  resumeDependency: "z.literal('not_applicable')",
+  explicitUserTruthConfirmed: 'z.literal(true)',
+  knownFieldsCommitted: 'z.literal(true)',
+  idempotencyKey: 'z.string().min(16).max(170).regex(SAFE_IDEMPOTENCY_KEY)',
+};
+assert.deepEqual(
+  Object.keys(certifyInputProperties),
+  Object.keys(certifyInputContract),
+  'trackly_certify_review_ready must publish only the locked truth-certification fields',
+);
+for (const [field, expression] of Object.entries(certifyInputContract)) {
+  assertSchemaPropertyExpression(
+    certifyInputProperties,
+    field,
+    expression,
+    'trackly_certify_review_ready.inputSchema',
+  );
 }
 assert.match(certify, /plugin-review-ready/);
-assert.match(certify, /explicitUserTruthConfirmed: z\.literal\(true\)/);
-assert.match(certify, /knownFieldsCommitted: z\.literal\(true\)/);
-assert.match(certify, /resumeDependency: z\.literal\('not_applicable'\)/);
-assert.doesNotMatch(
-  certify,
-  /\bresumeId\b|\bresumeSha256\b|\bleaseToken\b|\bmembershipHash\b|\bprofileRevision\b|\bmemberRuns\b|\bexpiresAt\b|\bexplicitUserResumeApproved\b/,
-);
 
 const reconcile = pluginToolDefinition('trackly_reconcile_manual_submission');
 for (const field of [
@@ -923,13 +1147,16 @@ console.log(
 }
 
 module.exports = {
+  activeNamedDefinitionAst,
   activeToolRegistrations,
   assertSchemaPropertyExpression,
   canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
+  referencedFreeIdentifiers,
   registeredInputSchemaName,
+  registrationDescriptorPropertyAst,
   registrationArgumentSources,
   schemaObjectPropertyAsts,
   schemaDefinition,

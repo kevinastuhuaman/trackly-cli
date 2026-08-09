@@ -656,8 +656,12 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /plugin-review-ready/);
   assert.match(verifier, /trackly_reconcile_manual_submission/);
   assert.match(verifier, /plugin-manual-submission/);
-  assert.match(verifier, /resumeDependency: z\\\.literal/);
-  assert.match(verifier, /assert\.doesNotMatch\(\s*certify/);
+  assert.match(verifier, /registrationDescriptorPropertyAst/);
+  assert.match(verifier, /certifyInputContract/);
+  assert.match(verifier, /must publish only the locked truth-certification fields/);
+  assert.match(verifier, /has a write scope and must publish mutationAnnotations/);
+  assert.match(verifier, /referencedFreeIdentifiers/);
+  assert.match(verifier, /executable definition drifted between local and hosted Apply schemas/);
 });
 
 test('Apply MCP prompt gates resume preparation on the same browser binding', () => {
