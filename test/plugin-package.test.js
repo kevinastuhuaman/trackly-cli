@@ -12,13 +12,16 @@ const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 const {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertActiveFunctionDirectStatementAst,
   assertActiveFunctionDefinitionAst,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
+  assertWrappedHandlerAst,
   assertWrappedHandlerDirectStatementAst,
+  assertWrappedHandlerGuardedReturnAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
@@ -223,13 +226,23 @@ test('registration extraction ignores commented tools and binds the active publi
 });
 
 test('plugin registration proof accepts only unconditional calls in the exported server factory', () => {
+  const factoryFixture = (body, returnedServer = 'server') => `
+    export function createTracklyPluginMcpServer() {
+      const server = new McpServer({ name: 'trackly', version: '1.0.0' });
+      const registerPluginTool = (name, config, handler) => {
+        const securitySchemes = [];
+        return server.registerTool(name, config, handler);
+      };
+      ${body}
+      return ${returnedServer};
+    }
+  `;
   const source = `
     registerPluginTool('trackly_decoy', { inputSchema: z.object({}) }, decoyHandler);
-    export function createTracklyPluginMcpServer() {
+    ${factoryFixture(`
       registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
       registerPluginTool('trackly_two', { inputSchema: z.object({}) }, twoHandler);
-      return server;
-    }
+    `)}
   `;
   assert.deepEqual(
     directToolRegistrationsInExportedFunction(
@@ -241,24 +254,32 @@ test('plugin registration proof accepts only unconditional calls in the exported
     ['trackly_one', 'trackly_two'],
   );
   assert.throws(
-    () => directToolRegistrationsInExportedFunction(`
-      export function createTracklyPluginMcpServer() {
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
         registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
         if (false) registerPluginTool('trackly_decoy', { inputSchema: z.object({}) }, handler);
-        return server;
-      }
-    `, 'createTracklyPluginMcpServer', 'registerPluginTool', 'conditional registration fixture'),
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'conditional registration fixture'),
     /must register every registerPluginTool tool unconditionally as a direct function-body statement/,
   );
   assert.throws(
-    () => directToolRegistrationsInExportedFunction(`
-      export function createTracklyPluginMcpServer() {
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
         if (disabled) return server;
         registerPluginTool('trackly_unreachable', { inputSchema: z.object({}) }, handler);
-        return server;
-      }
-    `, 'createTracklyPluginMcpServer', 'registerPluginTool', 'early return fixture'),
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'early return fixture'),
     /must not branch, return, or throw before registering tools/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+    `, 'new McpServer({ name: \'decoy\', version: \'1.0.0\' })'),
+    'createTracklyPluginMcpServer', 'registerPluginTool', 'wrong return fixture'),
+    /must return the exact server that received the verified registrations/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+    `).replace('return server.registerTool', 'return decoyServer.registerTool'),
+    'createTracklyPluginMcpServer', 'registerPluginTool', 'wrong registration server fixture'),
+    /must register every tool on the exact server returned by the factory/,
   );
 });
 
@@ -377,6 +398,17 @@ test('plugin registration proof binds the exported factory to the live POST rout
     'createTracklyPluginMcpServer',
     'router fixture',
   ));
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace(
+        'const server = createTracklyPluginMcpServer(authToken);',
+        'if (disabled) return;\n        const server = createTracklyPluginMcpServer(authToken);',
+      ),
+      'createTracklyPluginMcpServer',
+      'early route exit fixture',
+    ),
+    /must reach factory creation and its live transport without an earlier exit, throw, branch, or side effect/,
+  );
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(
       routerFixture(`
@@ -545,14 +577,13 @@ test('local wrapper handlers must actively parse params with their strict schema
   );
 });
 
-test('wrapped request endpoint validation ignores comments and unrelated strings', () => {
-  const source = `
-    registerPluginTool('trackly_certify', { inputSchema }, wrapTool(async ({ runId }) => {
-      // /plugin-review-ready
-      const stale = '/plugin-review-ready';
-      return requestApi('POST', \`/api/jobscout/apply/runs/\${runId}/wrong-endpoint\`, body);
-    }));
-  `;
+test('wrapped request endpoint validation requires the reachable returned request for every input', () => {
+  const source = `registerPluginTool(
+    'trackly_reconcile', { inputSchema },
+    wrapTool(({ runId }) => requestApi(
+      'POST', \`/api/jobscout/apply/runs/\${runId}/wrong-endpoint\`, body,
+    )),
+  );`;
   const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'endpoint fixture');
   assert.throws(
     () => assertWrappedHandlerRequestEndpoint(
@@ -563,6 +594,81 @@ test('wrapped request endpoint validation ignores comments and unrelated strings
     ),
     /must target `\/api\/jobscout\/apply\/runs\/\$\{runId\}\/plugin-review-ready`/,
   );
+  const conditionalSource = `
+    registerPluginTool('trackly_reconcile', { inputSchema }, wrapTool(async ({ runId }) => {
+      if (disabled) {
+        return requestApi(
+          'POST', \`/api/jobscout/apply/runs/\${runId}/plugin-review-ready\`, body,
+        );
+      }
+      return { success: true };
+    }));
+  `;
+  const [conditional] = activeToolRegistrations(
+    conditionalSource,
+    'registerPluginTool',
+    'conditional endpoint fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerRequestEndpoint(
+      conditional,
+      'POST',
+      '`/api/jobscout/apply/runs/${runId}/plugin-review-ready`',
+      'conditional endpoint fixture',
+    ),
+    /must directly return its sole requestApi call/,
+  );
+  const certificationSource = `
+    registerPluginTool('trackly_certify', { inputSchema }, wrapTool(async ({ runId }) => {
+      if (disabled) {
+        const response = await requestApi(
+          'POST', \`/api/jobscout/apply/runs/\${runId}/plugin-review-ready\`, body,
+        );
+        return response;
+      }
+      return { success: true };
+    }));
+  `;
+  const [certification] = activeToolRegistrations(
+    certificationSource,
+    'registerPluginTool',
+    'conditional certification fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerAssignedRequestEndpoint(
+      certification,
+      'response',
+      'POST',
+      '`/api/jobscout/apply/runs/${runId}/plugin-review-ready`',
+      'conditional certification fixture',
+    ),
+    /must bind its live response request exactly once/,
+  );
+  const earlyReturnCertificationSource = `
+    registerPluginTool('trackly_certify', { inputSchema }, wrapTool(async ({ runId }) => {
+      if (skipCertification) return { success: true };
+      const response = await requestApi(
+        'POST', \`/api/jobscout/apply/runs/\${runId}/plugin-review-ready\`, body,
+      );
+      return response;
+    }));
+  `;
+  const [earlyReturnCertification] = activeToolRegistrations(
+    earlyReturnCertificationSource,
+    'registerPluginTool',
+    'early return certification fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerAssignedRequestEndpoint(
+      earlyReturnCertification,
+      'response',
+      'POST',
+      '`/api/jobscout/apply/runs/${runId}/plugin-review-ready`',
+      'early return certification fixture',
+      { requireReachableForAllInputs: true },
+    ),
+    /must be reachable for every accepted input without an earlier branch, return, or throw/,
+  );
 });
 
 test('live work endpoint validation binds the consumed request result', () => {
@@ -572,7 +678,9 @@ test('live work endpoint validation binds the consumed request result', () => {
         const work = await requestApi(
           'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/plugin-work\`, authToken, {},
         );
-        return work;
+        return work?.lineageMismatch === true
+          ? projectApplyWorkResponse(work, 'authorization_changed')
+          : projectApplyWorkResponse(work, 'progress');
       }
       const workSnapshot = await requestApi(
         'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/snapshot\`, authToken, snapshot,
@@ -591,6 +699,14 @@ test('live work endpoint validation binds the consumed request result', () => {
     '`/api/jobscout/apply/executions/${resolvedExecutionId}/plugin-work`',
     'live work fixture',
     { guardExpression: '!snapshot' },
+  ));
+  assert.doesNotThrow(() => assertWrappedHandlerGuardedReturnAst(
+    valid,
+    '!snapshot',
+    `return work?.lineageMismatch === true
+      ? projectApplyWorkResponse(work, 'authorization_changed')
+      : projectApplyWorkResponse(work, 'progress');`,
+    'live work fixture',
   ));
   assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
     valid,
@@ -631,6 +747,24 @@ test('live work endpoint validation binds the consumed request result', () => {
       { guardExpression: '!snapshot' },
     ),
     /live work request.*must target/s,
+  );
+  const rawWorkSource = validSource.replace(
+    `return work?.lineageMismatch === true
+          ? projectApplyWorkResponse(work, 'authorization_changed')
+          : projectApplyWorkResponse(work, 'progress');`,
+    'return work;',
+  );
+  const [rawWork] = activeToolRegistrations(rawWorkSource, 'registerPluginTool', 'raw work fixture');
+  assert.throws(
+    () => assertWrappedHandlerGuardedReturnAst(
+      rawWork,
+      '!snapshot',
+      `return work?.lineageMismatch === true
+        ? projectApplyWorkResponse(work, 'authorization_changed')
+        : projectApplyWorkResponse(work, 'progress');`,
+      'raw work fixture',
+    ),
+    /must return its locked bounded projection/,
   );
   const snapshotDecoySource = `
     registerPluginTool('trackly_get_apply_work', { inputSchema }, wrapTool(async () => {
@@ -701,6 +835,149 @@ test('snapshot input verification binds the complete active bounded schema', () 
       'snapshot schema fixture',
     ),
     /inputSchema must equal/,
+  );
+});
+
+test('active facade descriptors bind complete input and named output contracts', () => {
+  const expectedStartInput = `z.object({
+    target: z.number().int().min(1).max(APPLY_EXECUTION_MAX_TARGET),
+    idempotencyKey: z.string().min(16).max(180).regex(SAFE_IDEMPOTENCY_KEY),
+    browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+  }).strict()`;
+  const source = `
+    registerPluginTool('trackly_start_or_resume_apply', {
+      /* inputSchema: ${expectedStartInput}, outputSchema: applyOutputSchema, */
+      inputSchema: z.object({ target: z.number(), browserSurface: z.string().optional() }),
+      outputSchema: z.any(),
+    }, handler);
+  `;
+  const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'active descriptor fixture');
+  const properties = Object.fromEntries(
+    registration.call.arguments[1].properties.map((property) => [property.key.name, property.value]),
+  );
+  assert.throws(
+    () => assertBabelPropertyExpression(
+      properties,
+      'inputSchema',
+      expectedStartInput,
+      'active descriptor fixture',
+    ),
+    /inputSchema must equal/,
+  );
+  assert.throws(
+    () => assertBabelPropertyExpression(
+      properties,
+      'outputSchema',
+      'applyOutputSchema',
+      'active descriptor fixture',
+    ),
+    /outputSchema must equal applyOutputSchema/,
+  );
+});
+
+test('readiness profile references must originate from canonical keys and public schema labels', () => {
+  const source = `
+    function projectApplyReadiness() {
+      // const availableFields = profile.fields.map((key) => ({ key, label: fieldLabels.get(key)! }));
+      const availableFields = privateAnswers.map((answer) => ({
+        key: answer.value,
+        label: answer.contact,
+      }));
+      return availableFields;
+    }
+  `;
+  assert.throws(
+    () => assertActiveFunctionDirectStatementAst(
+      source,
+      'projectApplyReadiness',
+      `const availableFields = profile?.fields
+        && typeof profile.fields === 'object'
+        && !Array.isArray(profile.fields)
+        ? Object.keys(profile.fields)
+          .filter((key) => fieldLabels.has(key))
+          .map((key) => ({ key, label: fieldLabels.get(key)! }))
+        : [];`,
+      'readiness projection fixture',
+    ),
+    /must execute its locked direct statement exactly once/,
+  );
+  const handlerSource = `
+    registerPluginTool('trackly_get_apply_readiness', { outputSchema: readinessOutputSchema }, wrapTool(async () => {
+      return privateProjection;
+    }));
+  `;
+  const [registration] = activeToolRegistrations(
+    handlerSource,
+    'registerPluginTool',
+    'readiness handler fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerDirectStatementAst(
+      registration,
+      `return projectApplyReadiness({
+        schema: value(schemaResult),
+        profileResponse: value(profileResult),
+      });`,
+      'readiness handler fixture',
+    ),
+    /must execute its locked direct statement exactly once/,
+  );
+});
+
+test('progress and stop contracts reject widened branches and success-only lifecycle decoys', () => {
+  const expectedProgressInput = `z.discriminatedUnion('operation', [
+    z.object({
+      operation: z.literal('resume_parked'),
+      explicitUserResume: z.literal(true),
+    }).strict(),
+    z.object({
+      operation: z.literal('record_observations'),
+      observations: z.array(observationSchema).min(1).max(20),
+    }).strict(),
+  ])`;
+  const progressSource = `
+    registerPluginTool('trackly_report_apply_progress', {
+      /* inputSchema: ${expectedProgressInput}, */
+      inputSchema: z.discriminatedUnion('operation', [
+        z.object({ operation: z.literal('resume_parked'), explicitUserResume: z.boolean() }),
+        z.object({ operation: z.literal('record_observations'), answers: z.array(z.unknown()) }),
+      ]),
+    }, handler);
+  `;
+  const [progress] = activeToolRegistrations(
+    progressSource,
+    'registerPluginTool',
+    'progress schema fixture',
+  );
+  const progressProperties = Object.fromEntries(
+    progress.call.arguments[1].properties.map((property) => [property.key.name, property.value]),
+  );
+  assert.throws(
+    () => assertBabelPropertyExpression(
+      progressProperties,
+      'inputSchema',
+      expectedProgressInput,
+      'progress schema fixture',
+    ),
+    /inputSchema must equal/,
+  );
+
+  const stopSource = `
+    registerPluginTool('trackly_stop_apply', { inputSchema }, wrapTool(
+      ({ executionId }) => Promise.resolve({ success: true, executionId }),
+    ));
+  `;
+  const [stop] = activeToolRegistrations(stopSource, 'registerPluginTool', 'stop handler fixture');
+  assert.throws(
+    () => assertWrappedHandlerAst(
+      stop,
+      `({ executionId, idempotencyKey, ...body }) => requestApi(
+        'POST', \`/api/jobscout/apply/executions/\${executionId}/stop\`, authToken,
+        body, { 'Idempotency-Key': idempotencyKey },
+      )`,
+      'stop handler fixture',
+    ),
+    /must preserve its complete locked executable semantics/,
   );
 });
 

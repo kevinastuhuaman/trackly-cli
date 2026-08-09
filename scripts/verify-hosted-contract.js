@@ -104,6 +104,98 @@ function directToolRegistrationsInExportedFunction(
     `${expectedFunction} in ${sourcePath} must register tools in one unconditional contiguous block`,
   );
 
+  const directDeclarators = factory.body.body.flatMap((statement) => (
+    statement.type === 'VariableDeclaration' ? statement.declarations : []
+  ));
+  const serverBindings = directDeclarators.filter((declarator) => (
+    declarator.id?.type === 'Identifier'
+    && declarator.id.name === 'server'
+    && declarator.init?.type === 'NewExpression'
+    && babelCalleeName(declarator.init.callee) === 'McpServer'
+  ));
+  assert.equal(
+    serverBindings.length,
+    1,
+    `${expectedFunction} in ${sourcePath} must directly create exactly one registered server`,
+  );
+  const registrationHelpers = directDeclarators.filter((declarator) => (
+    declarator.id?.type === 'Identifier' && declarator.id.name === expectedCallee
+  ));
+  assert.equal(
+    registrationHelpers.length,
+    1,
+    `${expectedFunction} in ${sourcePath} must directly define exactly one ${expectedCallee} helper`,
+  );
+  const registrationHelper = registrationHelpers[0].init;
+  assert.ok(
+    registrationHelper?.type === 'ArrowFunctionExpression'
+      || registrationHelper?.type === 'FunctionExpression',
+    `${expectedCallee} in ${sourcePath} must be a function`,
+  );
+  assert.equal(
+    registrationHelper.body?.type,
+    'BlockStatement',
+    `${expectedCallee} in ${sourcePath} must use a block body`,
+  );
+  const helperReturnStatements = registrationHelper.body.body.filter((statement) => (
+    statement.type === 'ReturnStatement'
+  ));
+  assert.equal(
+    helperReturnStatements.length,
+    1,
+    `${expectedCallee} in ${sourcePath} must return exactly one registration result`,
+  );
+  assert.equal(
+    registrationHelper.body.body.at(-1),
+    helperReturnStatements[0],
+    `${expectedCallee} in ${sourcePath} must end by returning its registration result`,
+  );
+  assert.equal(
+    babelCalleeName(helperReturnStatements[0].argument?.callee),
+    'server.registerTool',
+    `${expectedCallee} in ${sourcePath} must register every tool on the exact server returned by the factory`,
+  );
+  assert.ok(
+    registrationHelper.body.body.slice(0, -1)
+      .every((statement) => statement.type === 'VariableDeclaration'),
+    `${expectedCallee} in ${sourcePath} must reach server.registerTool without an earlier branch, return, or throw`,
+  );
+
+  const factoryReturns = [];
+  function visitFactoryReturns(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitFactoryReturns(child);
+      return;
+    }
+    if (
+      node !== factory
+      && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
+    ) return;
+    if (node.type === 'ReturnStatement') factoryReturns.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitFactoryReturns(child);
+    }
+  }
+  visitFactoryReturns(factory);
+  const finalFactoryStatement = factory.body.body.at(-1);
+  assert.equal(
+    factoryReturns.length,
+    1,
+    `${expectedFunction} in ${sourcePath} must have exactly one reachable factory return`,
+  );
+  assert.equal(
+    finalFactoryStatement,
+    factoryReturns[0],
+    `${expectedFunction} in ${sourcePath} must end with its sole reachable return`,
+  );
+  assert.ok(
+    factoryReturns[0].argument?.type === 'Identifier'
+      && factoryReturns[0].argument.name === 'server',
+    `${expectedFunction} in ${sourcePath} must return the exact server that received the verified registrations`,
+  );
+
   const nestedRegistrations = [];
   function visit(node) {
     if (node === null || typeof node !== 'object') return;
@@ -372,6 +464,21 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     1,
     `POST / handler in ${sourcePath} must directly create exactly one StreamableHTTPServerTransport`,
   );
+  const tryStatements = handler.body.body.filter((statement) => statement.type === 'TryStatement');
+  assert.equal(tryStatements.length, 1, `POST / handler in ${sourcePath} must execute exactly one live transport try block`);
+  const liveTry = tryStatements[0];
+  const liveTryIndex = handler.body.body.indexOf(liveTry);
+  assert.deepEqual(
+    handler.body.body.slice(0, liveTryIndex).map((statement) => (
+      statement.type === 'VariableDeclaration'
+        && statement.declarations.length === 1
+        && statement.declarations[0].id?.type === 'Identifier'
+        ? statement.declarations[0].id.name
+        : null
+    )),
+    ['authInfo', 'authToken', 'server', 'transport'],
+    `POST / handler in ${sourcePath} must reach factory creation and its live transport without an earlier exit, throw, branch, or side effect`,
+  );
   const directConnects = handler.body.body.flatMap((statement) => {
     if (statement.type !== 'TryStatement') return [];
     return statement.block.body.filter((candidate) => (
@@ -417,6 +524,11 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
   assert.ok(
     directConnects[0].start < requestDispatches[0].start,
     `POST / handler in ${sourcePath} must connect the server before dispatching the live request`,
+  );
+  assert.deepEqual(
+    liveTry.block.body.slice(0, 2),
+    [directConnects[0], requestDispatches[0]],
+    `POST / handler in ${sourcePath} must reach connect and request dispatch without an intervening exit or throw`,
   );
 }
 
@@ -529,6 +641,27 @@ function assertActiveFunctionDefinitionAst(source, name, expectedSource, sourceP
   );
 }
 
+function assertActiveFunctionDirectStatementAst(source, name, expectedStatement, sourcePath) {
+  const definition = activeNamedDefinitionAst(source, name, sourcePath);
+  const body = definition.body;
+  assert.equal(body?.type, 'BlockStatement', `${name} in ${sourcePath} must use a block body`);
+  const fixture = parseFullSource(
+    `function expectedActiveStatement() { ${expectedStatement} }`,
+    `${name} expected statement`,
+  ).program.body[0];
+  assert.equal(fixture.type, 'FunctionDeclaration');
+  assert.equal(fixture.body.body.length, 1);
+  const expectedAst = canonicalSchemaAst(fixture.body.body[0]);
+  const matches = body.body.filter((statement) => (
+    JSON.stringify(canonicalSchemaAst(statement)) === JSON.stringify(expectedAst)
+  ));
+  assert.equal(
+    matches.length,
+    1,
+    `${name} in ${sourcePath} must execute its locked direct statement exactly once`,
+  );
+}
+
 function assertActiveVariableInitializerAst(source, name, expectedExpression, sourcePath) {
   assert.deepEqual(
     canonicalSchemaAst(activeVariableDeclarator(source, name, sourcePath).declarator.init),
@@ -554,6 +687,44 @@ function assertImportBinding(source, importedName, localName, moduleName, source
     matches.length,
     1,
     `${sourcePath} must import ${importedName} as ${localName} exactly once from ${moduleName}`,
+  );
+}
+
+function assertDescriptorUsesTopLevelBinding(
+  source,
+  registration,
+  propertyName,
+  expectedBinding,
+  sourcePath,
+) {
+  const descriptorProperties = staticBabelObjectProperties(
+    registration.call.arguments[1],
+    `${registration.name} descriptor`,
+  );
+  assertBabelPropertyExpression(
+    descriptorProperties,
+    propertyName,
+    expectedBinding,
+    `${registration.name} descriptor`,
+  );
+  activeNamedDefinitionAst(source, expectedBinding, sourcePath);
+  const factories = parseFullSource(source, sourcePath).program.body.filter((statement) => (
+    statement.type === 'ExportNamedDeclaration'
+    && statement.declaration?.type === 'FunctionDeclaration'
+    && statement.declaration.id?.name === 'createTracklyPluginMcpServer'
+  ));
+  assert.equal(factories.length, 1, `${sourcePath} must export exactly one createTracklyPluginMcpServer factory`);
+  const shadowBindings = factories[0].declaration.body.body.flatMap((statement) => (
+    statement.type === 'VariableDeclaration'
+      ? statement.declarations.filter((declarator) => (
+        declarator.id?.type === 'Identifier' && declarator.id.name === expectedBinding
+      ))
+      : []
+  ));
+  assert.equal(
+    shadowBindings.length,
+    0,
+    `${registration.name}.${propertyName} in ${sourcePath} must resolve to the active top-level ${expectedBinding} definition without a factory-local shadow`,
   );
 }
 
@@ -604,6 +775,50 @@ function assertWrappedHandlerDirectStatementAst(registration, expectedStatement,
   );
 }
 
+function assertWrappedHandlerGuardedReturnAst(
+  registration,
+  guardExpression,
+  expectedReturn,
+  sourcePath,
+) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  assert.equal(handler.body?.type, 'BlockStatement', `${registration.name} handler in ${sourcePath} must use a block body`);
+  const expectedGuard = canonicalSchemaAst(
+    babelParser.parseExpression(guardExpression, { plugins: ['typescript'] }),
+  );
+  const guardedBlocks = handler.body.body.filter((statement) => (
+    statement.type === 'IfStatement'
+    && JSON.stringify(canonicalSchemaAst(statement.test)) === JSON.stringify(expectedGuard)
+    && statement.consequent?.type === 'BlockStatement'
+    && statement.alternate === null
+  ));
+  assert.equal(
+    guardedBlocks.length,
+    1,
+    `${registration.name} handler in ${sourcePath} must execute exactly one direct ${guardExpression} branch`,
+  );
+  const fixture = parseFullSource(
+    `function expectedGuardedReturn() { ${expectedReturn} }`,
+    `${registration.name} expected guarded return`,
+  ).program.body[0];
+  assert.equal(fixture.type, 'FunctionDeclaration');
+  assert.equal(fixture.body.body.length, 1);
+  const actualReturn = guardedBlocks[0].consequent.body.at(-1);
+  assert.deepEqual(
+    canonicalSchemaAst(actualReturn),
+    canonicalSchemaAst(fixture.body.body[0]),
+    `${registration.name} handler in ${sourcePath} must return its locked bounded projection from ${guardExpression}`,
+  );
+}
+
+function assertWrappedHandlerAst(registration, expectedHandler, sourcePath) {
+  assert.deepEqual(
+    canonicalSchemaAst(wrappedHandlerFunction(registration, sourcePath)),
+    canonicalSchemaAst(babelParser.parseExpression(expectedHandler, { plugins: ['typescript'] })),
+    `${registration.name} handler in ${sourcePath} must preserve its complete locked executable semantics`,
+  );
+}
+
 function directCallsInWrappedHandler(registration, expectedCallee, sourcePath) {
   const handler = wrappedHandlerFunction(registration, sourcePath);
   const calls = [];
@@ -644,13 +859,32 @@ function assertWrappedHandlerParsesWithSchema(registration, schemaName, sourcePa
 }
 
 function assertWrappedHandlerRequestEndpoint(registration, method, pathExpression, sourcePath) {
-  const requestCalls = directCallsInWrappedHandler(registration, 'requestApi', sourcePath);
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  const returnedExpression = handler.body?.type === 'BlockStatement'
+    ? (() => {
+      assert.equal(
+        handler.body.body.length,
+        1,
+        `${registration.name} handler in ${sourcePath} must directly return its sole requestApi call`,
+      );
+      assert.equal(handler.body.body[0]?.type, 'ReturnStatement');
+      return handler.body.body[0].argument;
+    })()
+    : handler.body;
+  const requestCall = returnedExpression?.type === 'AwaitExpression'
+    ? returnedExpression.argument
+    : returnedExpression;
   assert.equal(
-    requestCalls.length,
-    1,
-    `${registration.name} handler in ${sourcePath} must execute exactly one active requestApi call`,
+    requestCall?.type,
+    'CallExpression',
+    `${registration.name} handler in ${sourcePath} must directly return its requestApi call`,
   );
-  const [methodArgument, pathArgument] = requestCalls[0].arguments;
+  assert.equal(
+    babelCalleeName(requestCall.callee),
+    'requestApi',
+    `${registration.name} handler in ${sourcePath} must directly return its requestApi call`,
+  );
+  const [methodArgument, pathArgument] = requestCall.arguments;
   assert.equal(methodArgument?.type, 'StringLiteral');
   assert.equal(methodArgument.value, method);
   assert.deepEqual(
@@ -672,6 +906,7 @@ function assertWrappedHandlerAssignedRequestEndpoint(
     afterBindingName = null,
     calleeName = 'requestApi',
     guardExpression = null,
+    requireReachableForAllInputs = false,
   } = options;
   const handler = wrappedHandlerFunction(registration, sourcePath);
   const matches = [];
@@ -691,7 +926,7 @@ function assertWrappedHandlerAssignedRequestEndpoint(
     }
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'extra') continue;
-      const childGuard = node.type === 'IfStatement' && key === 'consequent'
+      const childGuard = node.type === 'IfStatement' && (key === 'consequent' || key === 'alternate')
         ? node.test
         : activeGuard;
       visit(child, block, childGuard);
@@ -703,7 +938,8 @@ function assertWrappedHandlerAssignedRequestEndpoint(
     : canonicalSchemaAst(babelParser.parseExpression(guardExpression, { plugins: ['typescript'] }));
   const guardedMatches = matches.filter(({ guard }) => (
     guardExpression === null
-    || JSON.stringify(canonicalSchemaAst(guard)) === JSON.stringify(expectedGuard)
+      ? guard === null
+      : JSON.stringify(canonicalSchemaAst(guard)) === JSON.stringify(expectedGuard)
   ));
   assert.equal(
     guardedMatches.length,
@@ -735,6 +971,13 @@ function assertWrappedHandlerAssignedRequestEndpoint(
     statement.type === 'VariableDeclaration' && statement.declarations.includes(declarator)
   ));
   assert.ok(declarationStatementIndex >= 0);
+  if (requireReachableForAllInputs) {
+    assert.equal(
+      declarationStatementIndex,
+      0,
+      `${registration.name} live ${bindingName} request in ${sourcePath} must be reachable for every accepted input without an earlier branch, return, or throw`,
+    );
+  }
   if (afterBindingName !== null) {
     const prerequisiteIndex = block.body.findIndex((statement) => (
       statement.type === 'VariableDeclaration'
@@ -1820,6 +2063,32 @@ assert.deepEqual(
   'trackly_get_job_brief companySignal must remain a bounded aggregate-only projection',
 );
 
+const readinessRegistration = pluginToolRegistration('trackly_get_apply_readiness');
+assertDescriptorUsesTopLevelBinding(
+  hostedPluginSource,
+  readinessRegistration,
+  'outputSchema',
+  'readinessOutputSchema',
+  hostedPluginSourcePath,
+);
+assertWrappedHandlerDirectStatementAst(
+  readinessRegistration,
+  `return projectApplyReadiness({
+    schema: value(schemaResult),
+    profileResponse: value(profileResult),
+    queue: value(queueResult),
+    protocolResponse: value(protocolResult),
+    executionResponse: value(executionResult),
+    availability: {
+      schema: schemaResult.status === 'fulfilled',
+      profile: profileResult.status === 'fulfilled',
+      queue: queueResult.status === 'fulfilled',
+      protocol: protocolResult.status === 'fulfilled',
+      execution: executionResult.status === 'fulfilled',
+    },
+  });`,
+  hostedPluginSourcePath,
+);
 const readinessRootProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
   'readinessOutputSchema',
@@ -1858,6 +2127,56 @@ assertExactSchemaProperties(
   profileFieldReferenceContract,
   'profileFieldReferenceSchema',
 );
+for (const statement of [
+  `const fieldLabels = new Map(
+    (Array.isArray(schema?.fields) ? schema.fields : []).flatMap((field: unknown) => {
+      if (!field || typeof field !== 'object' || Array.isArray(field)) return [];
+      const value = field as Record<string, unknown>;
+      return typeof value.key === 'string' && typeof value.label === 'string'
+        ? [[value.key, value.label] as const]
+        : [];
+    }),
+  );`,
+  `for (const field of Array.isArray(schema?.educationFields) ? schema.educationFields : []) {
+    if (!field || typeof field !== 'object' || Array.isArray(field)) continue;
+    const value = field as Record<string, unknown>;
+    if (typeof value.key === 'string' && typeof value.label === 'string') {
+      fieldLabels.set(\`education.\${value.key}\`, value.label);
+    }
+  }`,
+  `fieldLabels.set('documents.default_resume', 'Default resume');`,
+  `const missingRequired = Array.isArray(profile?.completeness?.missingKeys)
+    ? profile.completeness.missingKeys.flatMap((key: unknown) => (
+      typeof key === 'string' && key.length <= 200 && CANONICAL_PROFILE_KEY.test(key)
+        ? [{ key, label: fieldLabels.get(key) ?? 'Required profile field' }]
+        : []
+    )).slice(0, 100)
+    : [];`,
+  `const availableFields = profile?.fields
+    && typeof profile.fields === 'object'
+    && !Array.isArray(profile.fields)
+    ? Object.keys(profile.fields)
+      .filter((key) => (
+        key.length <= 200
+        && CANONICAL_PROFILE_KEY.test(key)
+        && fieldLabels.has(key)
+        && profile.fields[key]
+        && typeof profile.fields[key] === 'object'
+        && !Array.isArray(profile.fields[key])
+        && RESOLVED_PROFILE_STATES.has(profile.fields[key].state)
+      ))
+      .sort()
+      .slice(0, 100)
+      .map((key) => ({ key, label: fieldLabels.get(key)! }))
+    : [];`,
+]) {
+  assertActiveFunctionDirectStatementAst(
+    hostedPluginSource,
+    'projectApplyReadiness',
+    statement,
+    hostedPluginSourcePath,
+  );
+}
 
 const applyOutputProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
@@ -1892,6 +2211,27 @@ for (const [field, expression] of Object.entries(applyOutputContract)) {
 }
 const startOrResumeRegistration = pluginToolRegistration('trackly_start_or_resume_apply');
 const startOrResume = pluginToolDefinition('trackly_start_or_resume_apply');
+const startOrResumeDescriptorProperties = staticBabelObjectProperties(
+  startOrResumeRegistration.call.arguments[1],
+  'trackly_start_or_resume_apply descriptor',
+);
+assertBabelPropertyExpression(
+  startOrResumeDescriptorProperties,
+  'inputSchema',
+  `z.object({
+    target: z.number().int().min(1).max(APPLY_EXECUTION_MAX_TARGET),
+    idempotencyKey: z.string().min(16).max(180).regex(SAFE_IDEMPOTENCY_KEY),
+    browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+  }).strict()`,
+  'trackly_start_or_resume_apply descriptor',
+);
+assertDescriptorUsesTopLevelBinding(
+  hostedPluginSource,
+  startOrResumeRegistration,
+  'outputSchema',
+  'applyOutputSchema',
+  hostedPluginSourcePath,
+);
 assertWrappedHandlerAssignedRequestEndpoint(
   startOrResumeRegistration,
   'prepared',
@@ -1900,7 +2240,6 @@ assertWrappedHandlerAssignedRequestEndpoint(
   hostedPluginSourcePath,
   { afterBindingName: 'page', calleeName: 'orchestrationRequest' },
 );
-assert.match(startOrResume, /browserSurface: z\.enum\(APPLY_BROWSER_SURFACES\)/);
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
 const getWorkRegistration = pluginToolRegistration('trackly_get_apply_work');
@@ -1933,6 +2272,14 @@ assertWrappedHandlerAssignedRequestEndpoint(
   hostedPluginSourcePath,
   { guardExpression: '!snapshot' },
 );
+assertWrappedHandlerGuardedReturnAst(
+  getWorkRegistration,
+  '!snapshot',
+  `return work?.lineageMismatch === true
+    ? projectApplyWorkResponse(work, 'authorization_changed')
+    : projectApplyWorkResponse(work, 'progress');`,
+  hostedPluginSourcePath,
+);
 assertWrappedHandlerAssignedRequestEndpoint(
   getWorkRegistration,
   'workSnapshot',
@@ -1951,6 +2298,107 @@ assertWrappedHandlerDirectStatementAst(
 
 const progressRegistration = pluginToolRegistration('trackly_report_apply_progress');
 const progress = pluginToolDefinition('trackly_report_apply_progress');
+const progressDescriptorProperties = staticBabelObjectProperties(
+  progressRegistration.call.arguments[1],
+  'trackly_report_apply_progress descriptor',
+);
+assertBabelPropertyExpression(
+  progressDescriptorProperties,
+  'inputSchema',
+  `z.discriminatedUnion('operation', [
+    z.object({
+      operation: z.literal('bind_surface'),
+      batchId: z.number().int().min(1),
+      memberId: z.number().int().min(1),
+      runId: z.number().int().min(1),
+      expectedMemberVersion: z.number().int().min(1),
+      expectedInspectionEpoch: z.number().int().min(0),
+      browserBindingHash: z.string().regex(SHA256),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+      adapterCode: z.string().regex(SAFE_CODE),
+      bindingReason: z.enum(['initial_binding', 'recovery_binding']),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    }).strict(),
+    z.object({
+      operation: z.literal('record_dispositions'),
+      executionId: z.number().int().min(1),
+      expectedRevision: z.number().int().min(1),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+      dispositions: z.array(dispositionSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+    }).strict(),
+    z.object({
+      operation: z.literal('resume_parked'),
+      executionId: z.number().int().min(1),
+      memberId: z.number().int().min(1),
+      expectedRevision: z.number().int().min(1),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+      explicitUserResume: z.literal(true),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    }).strict(),
+    z.object({
+      operation: z.literal('record_observations'),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+      observations: z.array(observationSchema).min(1).max(20),
+    }).strict(),
+    z.object({
+      operation: z.literal('advance'),
+      executionId: z.number().int().min(1),
+      expectedRevision: z.number().int().min(1),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    }).strict(),
+  ])`,
+  'trackly_report_apply_progress descriptor',
+);
+assertActiveVariableInitializerAst(
+  hostedPluginSource,
+  'dispositionSchema',
+  `z.object({
+    jobId: z.number().int().min(1),
+    classification: z.enum(APPLY_EXECUTION_ACCESS_CLASSIFICATIONS),
+    source: z.literal('live_probe'),
+    batchId: z.number().int().min(1),
+    memberId: z.number().int().min(1),
+    runId: z.number().int().min(1),
+    expectedMemberVersion: z.number().int().min(1),
+    expectedInspectionEpoch: z.number().int().min(0),
+    probeOnlyNoDraft: z.boolean().optional(),
+    browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+  }).strict()`,
+  hostedPluginSourcePath,
+);
+assertActiveVariableInitializerAst(
+  hostedPluginSource,
+  'observationSchema',
+  `z.object({
+    runId: z.number().int().min(1),
+    batchId: z.number().int().min(1),
+    memberId: z.number().int().min(1),
+    inspectionEpoch: z.number().int().min(0),
+    provider: z.string().regex(SAFE_CODE),
+    fieldLabel: z.string().min(1).max(1000),
+    observationType: z.string().regex(SAFE_CODE),
+    resolutionCode: z.string().regex(SAFE_CODE).optional(),
+    metadata: z.object({
+      controlType: z.string().regex(SAFE_CODE).optional(),
+      required: z.boolean().optional(),
+      errorCode: z.string().regex(SAFE_CODE).optional(),
+      committed: z.boolean(),
+      scenarioCode: z.enum(APPLY_SCENARIO_CODES),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+      browserBindingHash: z.string().regex(SHA256).optional(),
+      resumedAfterHandoff: z.boolean().optional(),
+    }).strict(),
+  }).strict()`,
+  hostedPluginSourcePath,
+);
+assertDescriptorUsesTopLevelBinding(
+  hostedPluginSource,
+  progressRegistration,
+  'outputSchema',
+  'progressOutputSchema',
+  hostedPluginSourcePath,
+);
 assertWrappedHandlerAssignedRequestEndpoint(
   progressRegistration,
   'response',
@@ -2009,15 +2457,12 @@ for (const [field, expression] of Object.entries(progressOutputContract)) {
   assertSchemaPropertyExpression(progressOutputProperties, field, expression, 'progressOutputSchema');
 }
 const resumeRegistration = pluginToolRegistration('trackly_prepare_resume_artifact');
-const resumeDescriptorProperties = staticBabelObjectProperties(
-  resumeRegistration.call.arguments[1],
-  'trackly_prepare_resume_artifact descriptor',
-);
-assertBabelPropertyExpression(
-  resumeDescriptorProperties,
+assertDescriptorUsesTopLevelBinding(
+  hostedPluginSource,
+  resumeRegistration,
   'outputSchema',
   'resumeOutputSchema',
-  'trackly_prepare_resume_artifact descriptor',
+  hostedPluginSourcePath,
 );
 const resumeOutputProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
@@ -2097,11 +2542,13 @@ for (const [field, expression] of Object.entries(certifyInputContract)) {
     'trackly_certify_review_ready.inputSchema',
   );
 }
-assertWrappedHandlerRequestEndpoint(
+assertWrappedHandlerAssignedRequestEndpoint(
   certifyRegistration,
+  'response',
   'POST',
   '`/api/jobscout/apply/runs/${runId}/plugin-review-ready`',
   hostedPluginSourcePath,
+  { requireReachableForAllInputs: true },
 );
 
 const reconcileRegistration = pluginToolRegistration('trackly_reconcile_manual_submission');
@@ -2181,6 +2628,31 @@ assertWrappedHandlerRequestEndpoint(
   hostedPluginSourcePath,
 );
 
+const stopRegistration = pluginToolRegistration('trackly_stop_apply');
+const stopDescriptorProperties = staticBabelObjectProperties(
+  stopRegistration.call.arguments[1],
+  'trackly_stop_apply descriptor',
+);
+assertBabelPropertyExpression(
+  stopDescriptorProperties,
+  'inputSchema',
+  `z.object({
+    executionId: z.number().int().min(1),
+    expectedRevision: z.number().int().min(1),
+    reasonCode: z.enum(APPLY_EXECUTION_STOP_REASON_CODES).optional(),
+    idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+  }).strict()`,
+  'trackly_stop_apply descriptor',
+);
+assertWrappedHandlerAst(
+  stopRegistration,
+  `({ executionId, idempotencyKey, ...body }) => requestApi(
+    'POST', \`/api/jobscout/apply/executions/\${executionId}/stop\`, authToken,
+    body, { 'Idempotency-Key': idempotencyKey },
+  )`,
+  hostedPluginSourcePath,
+);
+
 console.log(
   `Trackly Apply MCP contracts match at ${local.contractVersion}; the ${hostedPluginTools.length}-tool public plugin facade matches at ${hostedPluginContract.contractVersion}.`,
 );
@@ -2189,6 +2661,7 @@ console.log(
 module.exports = {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertActiveFunctionDirectStatementAst,
   assertActiveFunctionDefinitionAst,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
@@ -2196,7 +2669,9 @@ module.exports = {
   assertSchemaPropertyExpression,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
+  assertWrappedHandlerAst,
   assertWrappedHandlerDirectStatementAst,
+  assertWrappedHandlerGuardedReturnAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
