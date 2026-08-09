@@ -60,6 +60,45 @@ function activeToolRegistrations(source, expectedCallee, sourcePath) {
   return registrations;
 }
 
+function directToolRegistrationsInNamedFactory(source, expectedFunction, expectedCallee, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const factories = ast.program.body.filter((statement) => (
+    statement.type === 'ExportNamedDeclaration'
+    && statement.declaration?.type === 'FunctionDeclaration'
+    && statement.declaration.id?.name === expectedFunction
+  ));
+  assert.equal(
+    factories.length,
+    1,
+    `${sourcePath} must export exactly one ${expectedFunction} function declaration`,
+  );
+  const factoryStatements = factories[0].declaration.body.body;
+  const registrationIndexes = [];
+  const registrations = factoryStatements.flatMap((statement, index) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== expectedCallee) return [];
+    assert.equal(
+      call.arguments[0]?.type,
+      'StringLiteral',
+      `${expectedCallee} in ${sourcePath} must register a static string-literal tool name`,
+    );
+    registrationIndexes.push(index);
+    return [{ name: call.arguments[0].value, call }];
+  });
+  assert.ok(
+    registrations.length > 0,
+    `${expectedFunction} in ${sourcePath} must directly register its ${expectedCallee} tools during factory initialization`,
+  );
+  const lastRegistrationIndex = registrationIndexes.at(-1);
+  assert.ok(
+    factoryStatements.slice(0, lastRegistrationIndex + 1).every((statement) => (
+      statement.type === 'VariableDeclaration' || statement.type === 'ExpressionStatement'
+    )),
+    `${expectedFunction} in ${sourcePath} must reach every ${expectedCallee} registration without an earlier branch, return, throw, or disabled path`,
+  );
+  return registrations;
+}
+
 function directToolRegistrationsInExportedFunction(
   source,
   expectedFunction,
@@ -564,6 +603,56 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     [directConnects[0], requestDispatches[0]],
     `POST / handler in ${sourcePath} must reach connect and request dispatch without an intervening exit or throw`,
   );
+  assert.equal(
+    liveTry.finalizer?.type,
+    'BlockStatement',
+    `POST / handler in ${sourcePath} must unconditionally close its routed server in finally`,
+  );
+  assert.equal(
+    liveTry.finalizer.body.length,
+    1,
+    `POST / handler in ${sourcePath} must close its routed server as the sole finally operation`,
+  );
+  const closeStatement = liveTry.finalizer.body[0];
+  assert.equal(
+    closeStatement?.type,
+    'ExpressionStatement',
+    `POST / handler in ${sourcePath} must await closing the exact routed server after dispatch or error`,
+  );
+  assert.equal(
+    closeStatement.expression?.type,
+    'AwaitExpression',
+    `POST / handler in ${sourcePath} must await closing the exact routed server after dispatch or error`,
+  );
+  const awaitedClose = closeStatement.expression.argument;
+  assert.equal(
+    awaitedClose?.type,
+    'CallExpression',
+    `POST / handler in ${sourcePath} must await closing the exact routed server after dispatch or error`,
+  );
+  let closeCall = awaitedClose;
+  if (awaitedClose.callee?.type === 'MemberExpression'
+    && !awaitedClose.callee.computed
+    && awaitedClose.callee.property?.type === 'Identifier'
+    && awaitedClose.callee.property.name === 'catch') {
+    assert.deepEqual(
+      canonicalSchemaAst(awaitedClose.arguments),
+      canonicalSchemaAst(babelParser.parseExpression('[() => {}]', { plugins: ['typescript'] }).elements),
+      `POST / handler in ${sourcePath} may only suppress close failure with the locked empty catch`,
+    );
+    closeCall = awaitedClose.callee.object;
+  }
+  assert.equal(
+    closeCall?.type,
+    'CallExpression',
+    `POST / handler in ${sourcePath} must await closing the exact routed server after dispatch or error`,
+  );
+  assert.equal(
+    babelCalleeName(closeCall.callee),
+    'server.close',
+    `POST / handler in ${sourcePath} must await closing the exact routed server after dispatch or error`,
+  );
+  assert.equal(closeCall.arguments.length, 0);
 }
 
 function registrationArgumentSources(source, registration, sourcePath) {
@@ -864,6 +953,79 @@ function assertWrappedHandlerGuardedReturnAst(
     canonicalSchemaAst(actualReturn),
     canonicalSchemaAst(fixture.body.body[0]),
     `${registration.name} handler in ${sourcePath} must return its locked bounded projection from ${guardExpression}`,
+  );
+}
+
+function assertWrappedHandlerGuardedBlockAst(
+  registration,
+  guardExpression,
+  expectedBlock,
+  sourcePath,
+) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  assert.equal(handler.body?.type, 'BlockStatement', `${registration.name} handler in ${sourcePath} must use a block body`);
+  const expectedGuard = canonicalSchemaAst(
+    babelParser.parseExpression(guardExpression, { plugins: ['typescript'] }),
+  );
+  const guardedBlocks = handler.body.body.filter((statement) => (
+    statement.type === 'IfStatement'
+    && JSON.stringify(canonicalSchemaAst(statement.test)) === JSON.stringify(expectedGuard)
+    && statement.consequent?.type === 'BlockStatement'
+    && statement.alternate === null
+  ));
+  assert.equal(
+    guardedBlocks.length,
+    1,
+    `${registration.name} handler in ${sourcePath} must execute exactly one direct ${guardExpression} branch`,
+  );
+  const expected = babelParser.parseExpression(`async () => ${expectedBlock}`, { plugins: ['typescript'] });
+  assert.equal(expected.body?.type, 'BlockStatement');
+  assert.deepEqual(
+    canonicalSchemaAst(guardedBlocks[0].consequent),
+    canonicalSchemaAst(expected.body),
+    `${registration.name} handler in ${sourcePath} must preserve the complete locked ${guardExpression} branch`,
+  );
+}
+
+function assertWrappedHandlerStatementSequenceAst(
+  registration,
+  expectedStatements,
+  sourcePath,
+) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  const fixture = parseFullSource(
+    `async function expectedSequence() { ${expectedStatements} }`,
+    `${registration.name} expected statement sequence`,
+  ).program.body[0].body.body;
+  const matches = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (
+      node !== handler
+      && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
+    ) return;
+    if (node.type === 'BlockStatement') {
+      for (let index = 0; index <= node.body.length - fixture.length; index += 1) {
+        const candidate = node.body.slice(index, index + fixture.length);
+        if (JSON.stringify(canonicalSchemaAst(candidate)) === JSON.stringify(canonicalSchemaAst(fixture))) {
+          matches.push(candidate);
+        }
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(handler);
+  assert.equal(
+    matches.length,
+    1,
+    `${registration.name} handler in ${sourcePath} must execute its locked data-flow statement sequence exactly once`,
   );
 }
 
@@ -2064,7 +2226,14 @@ for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) 
     ['local', localApplySource, localApplySourcePath, mapping.localPublished],
     ['hosted', hostedApplySource, hostedApplySourcePath, mapping.hostedPublishedAndParse],
   ]) {
-    const registrations = activeToolRegistrations(sourceText, 'server.registerTool', sourcePath)
+    const registrations = (side === 'local'
+      ? activeToolRegistrations(sourceText, 'server.registerTool', sourcePath)
+      : directToolRegistrationsInNamedFactory(
+        sourceText,
+        'createTracklyMcpServer',
+        'server.registerTool',
+        sourcePath,
+      ))
       .filter((registration) => registration.name === toolName);
     assert.equal(
       registrations.length,
@@ -2321,6 +2490,38 @@ assertWrappedHandlerAssignedRequestEndpoint(
   hostedPluginSourcePath,
   { afterBindingName: 'page', calleeName: 'orchestrationRequest' },
 );
+assertWrappedHandlerStatementSequenceAst(
+  startOrResumeRegistration,
+  `const started = await orchestrationRequest(
+    'POST', '/api/jobscout/apply/executions',
+    { mode: 'complete_next_n_accessible', target },
+    { 'Idempotency-Key': idempotencyKey },
+  );
+  startResult = projectApplyStartResult(started, target, {
+    resumed: false, started: true, targetMismatch: false,
+  });`,
+  hostedPluginSourcePath,
+);
+assertWrappedHandlerStatementSequenceAst(
+  startOrResumeRegistration,
+  `let execution = await orchestrationRequest(
+    'GET', \`/api/jobscout/apply/executions/\${startResult.executionId}\`,
+  );
+  let batchId = readinessCount(execution?.execution?.unresolvedWaves?.[0]?.batchId);`,
+  hostedPluginSourcePath,
+);
+assertWrappedHandlerStatementSequenceAst(
+  startOrResumeRegistration,
+  `const page = await orchestrationRequest(
+    'GET', \`/api/jobscout/apply/batches/\${batchId}?limit=\${APPLY_EXECUTION_MAX_TARGET}\`,
+  );
+  const prepared = await orchestrationRequest(
+    'POST', \`/api/jobscout/apply/batches/\${batchId}/plugin-prepare\`,
+    { expectedRevision: page?.batch?.revision },
+    { 'Idempotency-Key': \`\${idempotencyKey}:prepare\` },
+  );`,
+  hostedPluginSourcePath,
+);
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
 const getWorkRegistration = pluginToolRegistration('trackly_get_apply_work');
@@ -2359,6 +2560,19 @@ assertWrappedHandlerGuardedReturnAst(
   `return work?.lineageMismatch === true
     ? projectApplyWorkResponse(work, 'authorization_changed')
     : projectApplyWorkResponse(work, 'progress');`,
+  hostedPluginSourcePath,
+);
+assertWrappedHandlerGuardedBlockAst(
+  getWorkRegistration,
+  '!snapshot',
+  `{
+    const work = await requestApi(
+      'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/plugin-work\`, authToken, {},
+    );
+    return work?.lineageMismatch === true
+      ? projectApplyWorkResponse(work, 'authorization_changed')
+      : projectApplyWorkResponse(work, 'progress');
+  }`,
   hostedPluginSourcePath,
 );
 assertWrappedHandlerAssignedRequestEndpoint(
@@ -2538,6 +2752,16 @@ for (const [field, expression] of Object.entries(progressOutputContract)) {
   assertSchemaPropertyExpression(progressOutputProperties, field, expression, 'progressOutputSchema');
 }
 const resumeRegistration = pluginToolRegistration('trackly_prepare_resume_artifact');
+const resumeDescriptorProperties = staticBabelObjectProperties(
+  resumeRegistration.call.arguments[1],
+  'trackly_prepare_resume_artifact descriptor',
+);
+assertBabelPropertyExpression(
+  resumeDescriptorProperties,
+  'inputSchema',
+  'z.object({}).strict()',
+  'trackly_prepare_resume_artifact descriptor',
+);
 assertDescriptorUsesTopLevelBinding(
   hostedPluginSource,
   resumeRegistration,
@@ -2767,13 +2991,16 @@ module.exports = {
   assertSchemaPropertyExpression,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
+  assertWrappedHandlerGuardedBlockAst,
   assertWrappedHandlerAst,
   assertWrappedHandlerDirectStatementAst,
   assertWrappedHandlerGuardedReturnAst,
+  assertWrappedHandlerStatementSequenceAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
+  directToolRegistrationsInNamedFactory,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,

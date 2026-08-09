@@ -19,13 +19,16 @@ const {
   assertExportedFactoryUsedByPluginRouter,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
+  assertWrappedHandlerGuardedBlockAst,
   assertWrappedHandlerAst,
   assertWrappedHandlerDirectStatementAst,
   assertWrappedHandlerGuardedReturnAst,
+  assertWrappedHandlerStatementSequenceAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
+  directToolRegistrationsInNamedFactory,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
@@ -308,6 +311,55 @@ test('plugin registration proof accepts only unconditional calls in the exported
   );
 });
 
+test('hosted schema registration proof uses only direct reachable factory initialization', () => {
+  const source = `
+    function neverCalled() {
+      server.registerTool('trackly_decoy', { inputSchema: decoySchema }, decoyHandler);
+    }
+    export function createTracklyMcpServer() {
+      const server = new McpServer({ name: 'trackly', version: MCP_VERSION });
+      server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);
+      if (disabled) {
+        server.registerTool('trackly_disabled', { inputSchema: disabledSchema }, disabledHandler);
+      }
+      return server;
+    }
+  `;
+  assert.deepEqual(
+    directToolRegistrationsInNamedFactory(
+      source,
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'hosted factory registration fixture',
+    ).map(({ name }) => name),
+    ['trackly_active'],
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+        "neverCalled();",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'decoy-only hosted factory fixture',
+    ),
+    /must directly register its server\.registerTool tools during factory initialization/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+        "if (disabled) return server;\n      server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'disabled hosted factory fixture',
+    ),
+    /must reach every server\.registerTool registration without an earlier branch, return, throw, or disabled path/,
+  );
+});
+
 test('plugin registration proof binds the exported factory to the live POST route', () => {
   const routerFixture = (
     handlerBody,
@@ -483,6 +535,27 @@ test('plugin registration proof binds the exported factory to the live POST rout
       }
     `), 'createTracklyPluginMcpServer', 'wrong dispatch fixture'),
     /must directly dispatch req, res, and req\.body through its connected transport/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(routerSource.replace(
+      'await server.close();',
+      'await decoyServer.close();',
+    ), 'createTracklyPluginMcpServer', 'wrong close fixture'),
+    /must await closing the exact routed server after dispatch or error/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(routerSource.replace(
+      'await server.close();',
+      'if (shouldClose) await server.close();',
+    ), 'createTracklyPluginMcpServer', 'conditional close fixture'),
+    /must await closing the exact routed server after dispatch or error/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(routerSource.replace(
+      '} finally {\n      await server.close();\n    }',
+      '} catch (error) { throw error; }',
+    ), 'createTracklyPluginMcpServer', 'missing finally fixture'),
+    /must unconditionally close its routed server in finally/,
   );
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
@@ -806,6 +879,19 @@ test('live work endpoint validation binds the consumed request result', () => {
       : projectApplyWorkResponse(work, 'progress');`,
     'live work fixture',
   ));
+  assert.doesNotThrow(() => assertWrappedHandlerGuardedBlockAst(
+    valid,
+    '!snapshot',
+    `{
+      const work = await requestApi(
+        'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/plugin-work\`, authToken, {},
+      );
+      return work?.lineageMismatch === true
+        ? projectApplyWorkResponse(work, 'authorization_changed')
+        : projectApplyWorkResponse(work, 'progress');
+    }`,
+    'live work fixture',
+  ));
   assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
     valid,
     'workSnapshot',
@@ -863,6 +949,31 @@ test('live work endpoint validation binds the consumed request result', () => {
       'raw work fixture',
     ),
     /must return its locked bounded projection/,
+  );
+  const alternateReturnSource = validSource.replace(
+    'if (!snapshot) {',
+    "if (!snapshot) {\n        if (cached) return projectApplyWorkResponse(cached, 'progress');",
+  );
+  const [alternateReturn] = activeToolRegistrations(
+    alternateReturnSource,
+    'registerPluginTool',
+    'alternate work return fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerGuardedBlockAst(
+      alternateReturn,
+      '!snapshot',
+      `{
+        const work = await requestApi(
+          'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/plugin-work\`, authToken, {},
+        );
+        return work?.lineageMismatch === true
+          ? projectApplyWorkResponse(work, 'authorization_changed')
+          : projectApplyWorkResponse(work, 'progress');
+      }`,
+      'alternate work return fixture',
+    ),
+    /must preserve the complete locked !snapshot branch/,
   );
   const snapshotDecoySource = `
     registerPluginTool('trackly_get_apply_work', { inputSchema }, wrapTool(async () => {
@@ -1114,6 +1225,62 @@ test('start, progress, and reconciliation checks bind active endpoint control fl
     ),
     /live prepared request.*must target/s,
   );
+  const startFlowSource = `
+    registerPluginTool('trackly_start_or_resume_apply', { inputSchema }, wrapTool(async ({ target, idempotencyKey }) => {
+      const started = await orchestrationRequest(
+        'POST', '/api/jobscout/apply/executions',
+        { mode: 'complete_next_n_accessible', target },
+        { 'Idempotency-Key': idempotencyKey },
+      );
+      startResult = projectApplyStartResult(started, target, {
+        resumed: false, started: true, targetMismatch: false,
+      });
+      let execution = await orchestrationRequest(
+        'GET', \`/api/jobscout/apply/executions/\${startResult.executionId}\`,
+      );
+      let batchId = readinessCount(execution?.execution?.unresolvedWaves?.[0]?.batchId);
+      const page = await orchestrationRequest(
+        'GET', \`/api/jobscout/apply/batches/\${batchId}?limit=\${APPLY_EXECUTION_MAX_TARGET}\`,
+      );
+      const prepared = await orchestrationRequest(
+        'POST', \`/api/jobscout/apply/batches/\${batchId}/plugin-prepare\`,
+        { expectedRevision: page?.batch?.revision },
+        { 'Idempotency-Key': \`\${idempotencyKey}:prepare\` },
+      );
+      return prepared;
+    }));
+  `;
+  const [startFlow] = activeToolRegistrations(
+    startFlowSource,
+    'registerPluginTool',
+    'start data-flow fixture',
+  );
+  const prepareSequence = `const page = await orchestrationRequest(
+    'GET', \`/api/jobscout/apply/batches/\${batchId}?limit=\${APPLY_EXECUTION_MAX_TARGET}\`,
+  );
+  const prepared = await orchestrationRequest(
+    'POST', \`/api/jobscout/apply/batches/\${batchId}/plugin-prepare\`,
+    { expectedRevision: page?.batch?.revision },
+    { 'Idempotency-Key': \`\${idempotencyKey}:prepare\` },
+  );`;
+  assert.doesNotThrow(() => assertWrappedHandlerStatementSequenceAst(
+    startFlow,
+    prepareSequence,
+    'start data-flow fixture',
+  ));
+  const [wrongStartFlow] = activeToolRegistrations(
+    startFlowSource.replace('page?.batch?.revision', 'staleRevision'),
+    'registerPluginTool',
+    'wrong start data-flow fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerStatementSequenceAst(
+      wrongStartFlow,
+      prepareSequence,
+      'wrong start data-flow fixture',
+    ),
+    /must execute its locked data-flow statement sequence exactly once/,
+  );
 
   const progressSource = `
     registerPluginTool('trackly_report_apply_progress', { inputSchema }, wrapTool(async (params) => {
@@ -1256,7 +1423,10 @@ test('conditional scope verification compares active function branch semantics',
 
 test('resume handoff projection supports expression handlers and excludes artifact identity', () => {
   const source = `
-    registerPluginTool('trackly_prepare_resume_artifact', { outputSchema: resumeOutputSchema }, wrapTool(async () => ({
+    registerPluginTool('trackly_prepare_resume_artifact', {
+      inputSchema: z.object({}).strict(),
+      outputSchema: resumeOutputSchema,
+    }, wrapTool(async () => ({
       view: 'resume' as const,
       success: true,
       requiresLocalAgentOrManualUpload: true,
@@ -1265,6 +1435,19 @@ test('resume handoff projection supports expression handlers and excludes artifa
     })));
   `;
   const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'resume fixture');
+  assert.deepEqual(
+    canonicalSchemaAst(registrationDescriptorPropertyAst(
+      source,
+      registration,
+      'inputSchema',
+      'resume fixture',
+    )),
+    canonicalSchemaAst(parseSchemaExpression(
+      'const expected = z.object({}).strict();',
+      'expected',
+      'expected resume input fixture',
+    )),
+  );
   const properties = wrappedHandlerReturnedObjectProperties(registration, 'resume fixture');
   assert.deepEqual(Object.keys(properties), [
     'view',

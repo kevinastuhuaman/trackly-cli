@@ -88,7 +88,7 @@
       "trackly_start_or_resume_apply": "714f4714f8cf6d794bf268e896c2a1e83b502c9ff93673c22fa59f382cc60097",
       "trackly_get_apply_work": "30dcd16da28e133ebf55f9ce77ba84c42d6fd25f45e89dd13e781f65f7ee080a",
       "trackly_report_apply_progress": "11e8c6ac5d7dadeda7e1111c675b2a74dfc9fdf4bdeafcc72a99fb003121ead6",
-      "trackly_prepare_resume_artifact": "489e0f7da3a73e99121837359855c24de4a11573828452fbac1b907379de7d07",
+      "trackly_prepare_resume_artifact": "f05e1d7bb5b6348af45c07d76a10649c7bc623532a37f829b1798269dc903e9d",
       "trackly_certify_review_ready": "1535a71a12cd7fed0bc7435b3a0c7427809a39247bedee029775bd4295dd2b69",
       "trackly_reconcile_manual_submission": "c300b386c95c3119b80de120fcbecfb663c2afcbf9978715f83ba63b545db7ef",
       "trackly_stop_apply": "2d28c84e84846edaeec93a0b59439690e37f4e960695c78a68ff41fd56b35c84"
@@ -96,7 +96,7 @@
     "handlerSha256": {
       "trackly_search_jobs": "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481",
       "trackly_get_job": "44cb4d59112b1752e5ee450427981084b299b909d0901406dafe12de24625eab",
-      "trackly_search_companies": "812ea0129798aabd2c3de29cc5ed70ce92cb47fe4bf117a99616860397b0bc8d",
+      "trackly_search_companies": "79b0e1b919cf9baa22fb6e091c8ae37064a2edf9c2a7f8198f22c76ba67d87f6",
       "trackly_get_job_brief": "462d7c379bfea90f3cff8030b68b22830ba4db2f5952531fa7230db7b625639f",
       "trackly_get_preferences": "359dae5b5485dee12788f054413d1690f2527dfc6472202f9e75682c1dbdf8ac",
       "trackly_get_apply_readiness": "c11c7a316c231c0918acd693e546a61de8c66b742d246d3c2ead7f374e694528",
@@ -113,7 +113,7 @@
       "trackly_reconcile_manual_submission": "32be19dadef3c8e3a1d9f320d3c1a9a0cde3845f930dac85641409f25a722b0a",
       "trackly_stop_apply": "8363bfe5eb7fb8ed4093b1f01bdaa9ebcb599ac35004fd13bab0ae6a2ab4f1ce"
     },
-    "pluginServerSha256": "fe5b50c09b1d7b24fb22c384589c50d2be1be8928472103663d5862a3561eb58",
+    "pluginServerSha256": "2eee3d20cc9e9e355cb01ea2d9de076ff272a2c82b3325ad994d1671eb14aa27",
     "pluginScopesSha256": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
     "jobBriefServiceSha256": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
     "schemaSha256": {
