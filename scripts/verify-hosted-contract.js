@@ -151,6 +151,29 @@ function directToolRegistrationsInNamedParameterFunction(
     assert.equal(call.arguments[0]?.type, 'StringLiteral', `${sourcePath} registrations must use static names`);
     return [{ name: call.arguments[0].value, call }];
   });
+  if (expectedFunction === 'registerApplyTools') {
+    const catalogRegistrationIndexes = factory.body.body.flatMap((statement, index) => {
+      const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+      const callee = call?.type === 'CallExpression' ? call.callee : null;
+      const receiver = callee?.type === 'MemberExpression' ? unwrapTransparentExpression(callee.object) : null;
+      const member = callee?.type === 'MemberExpression' && !callee.computed
+        && callee.property?.type === 'Identifier'
+        ? callee.property.name
+        : null;
+      return receiver?.type === 'Identifier'
+        && receiver.name === receiverParameter
+        && ['tool', 'registerTool', 'registerPrompt', 'registerResource'].includes(member)
+        ? [index]
+        : [];
+    });
+    assert.ok(catalogRegistrationIndexes.length > 0, `${sourcePath} must directly register Apply tools`);
+    assert.ok(
+      factory.body.body.slice(0, catalogRegistrationIndexes.at(-1) + 1).every((statement) => (
+        statement.type === 'VariableDeclaration' || statement.type === 'ExpressionStatement'
+      )),
+      `${expectedFunction} in ${sourcePath} must reach every local registration without an earlier branch, return, or throw`,
+    );
+  }
   const permittedReceiverReferences = new Set();
   if (receiverOrigin === 'parameter') {
     permittedReceiverReferences.add(factory.params[0]);
@@ -516,6 +539,37 @@ function directToolRegistrationsInNamedFactory(
       key !== 'loc' && key !== 'extra' && referencesFactoryServer(child)
     ));
   }
+  function schemaCalleeRoot(node) {
+    const candidate = unwrapTransparentExpression(node);
+    if (candidate?.type === 'Identifier') return candidate.name;
+    if (candidate?.type === 'MemberExpression') return schemaCalleeRoot(candidate.object);
+    if (candidate?.type === 'CallExpression') return schemaCalleeRoot(candidate.callee);
+    return null;
+  }
+  function isVerifiedPureSchemaInitializer(node) {
+    if (node === null || typeof node !== 'object') return true;
+    if (Array.isArray(node)) return node.every(isVerifiedPureSchemaInitializer);
+    if (['ArrowFunctionExpression', 'FunctionExpression'].includes(node.type)) return true;
+    if ([
+      'AssignmentExpression',
+      'AwaitExpression',
+      'ConditionalExpression',
+      'NewExpression',
+      'SequenceExpression',
+      'TaggedTemplateExpression',
+      'UpdateExpression',
+      'YieldExpression',
+    ].includes(node.type)) return false;
+    if (node.type === 'CallExpression' && schemaCalleeRoot(node.callee) !== 'z') return false;
+    return Object.entries(node).every(([key, child]) => (
+      (key === 'loc' || key === 'extra') || isVerifiedPureSchemaInitializer(child)
+    ));
+  }
+  const verifiedFactorySchemaDeclarations = new Set([
+    'startApplyRunSchema',
+    'truthCertificationCommon',
+    'truthCertificationSchema',
+  ]);
   if (expectedToolCatalog !== null) {
     const actualToolCatalog = directFactoryRegistrations
       .filter(({ method }) => method === 'tool' || method === 'registerTool')
@@ -546,7 +600,14 @@ function directToolRegistrationsInNamedFactory(
     factoryStatements.slice(0, -1).every((statement) => {
       if (statement === serverDeclaration) return true;
       if (statement.type === 'VariableDeclaration') {
-        return !statement.declarations.some((declarator) => referencesFactoryServer(declarator.init));
+        return statement.kind === 'const'
+          && statement.declarations.every((declarator) => (
+            declarator.id?.type === 'Identifier'
+            && verifiedFactorySchemaDeclarations.has(declarator.id.name)
+            && declarator.init
+            && !referencesFactoryServer(declarator.init)
+            && isVerifiedPureSchemaInitializer(declarator.init)
+          ));
       }
       const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
       const callee = call?.type === 'CallExpression' ? call.callee : null;
@@ -562,7 +623,7 @@ function directToolRegistrationsInNamedFactory(
         && allowedTailRegistrationMethods.has(method)
         && call.arguments[0]?.type === 'StringLiteral';
     }),
-    `${expectedFunction} in ${sourcePath} may not alias the factory server or perform registrations outside its direct cataloged registration statements`,
+    `${expectedFunction} in ${sourcePath} may contain only verified pure schema declarations and direct cataloged server registrations before its return`,
   );
   const factoryReturns = [];
   const serverRebindings = [];
@@ -1067,6 +1128,12 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
   );
   assertActiveVariableInitializerAst(
     source,
+    'PLUGIN_SHARED_EGRESS_RATE_LIMIT_MAX',
+    '6_000',
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(
+    source,
     'ipLimiter',
     `rateLimit({
       windowMs: 60_000,
@@ -1342,6 +1409,20 @@ function registrationDescriptorPropertyAst(source, registration, propertyName, s
     registrationDescriptorPropertySource(source, registration, propertyName, sourcePath),
     `${registration.name}.${propertyName} in ${sourcePath}`,
   );
+}
+
+function registrationInputSchemaAst(source, registration, sourcePath) {
+  const callee = registration.call.callee;
+  const method = callee?.type === 'MemberExpression' && !callee.computed
+    && callee.property?.type === 'Identifier'
+    ? callee.property.name
+    : null;
+  if (method === 'tool') {
+    assert.ok(registration.call.arguments[2], `${registration.name} in ${sourcePath} must publish an input schema`);
+    return registration.call.arguments[2];
+  }
+  assert.equal(method, 'registerTool', `${registration.name} in ${sourcePath} has an unsupported registration method`);
+  return registrationDescriptorPropertyAst(source, registration, 'inputSchema', sourcePath);
 }
 
 function staticBabelObjectProperties(node, label) {
@@ -3934,6 +4015,22 @@ const executableLocalBaseRegistrations = directToolRegistrationsInNamedParameter
   localServerSourcePath,
   'direct-construction',
 );
+const executableHostedRegistrations = [
+  ...directToolRegistrationsInNamedFactory(
+    hostedApplySource,
+    'createTracklyMcpServer',
+    'server.tool',
+    hostedApplySourcePath,
+    pluginLock.hostedMcpToolAllowlist,
+  ),
+  ...directToolRegistrationsInNamedFactory(
+    hostedApplySource,
+    'createTracklyMcpServer',
+    'server.registerTool',
+    hostedApplySourcePath,
+    pluginLock.hostedMcpToolAllowlist,
+  ),
+];
 const executableLocalApplyToolNames = executableLocalApplyRegistrations.map(({ name }) => name);
 const executableLocalToolNames = [
   ...executableLocalBaseRegistrations.map(({ name }) => name),
@@ -3952,35 +4049,83 @@ assert.deepEqual(
   ].sort(),
   'Executable local MCP registrations must exactly match the locked hosted catalog minus hosted-only chat plus local-only tools',
 );
-for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) {
-  for (const [side, sourceText, sourcePath, schemaName] of [
-    ['local', localApplySource, localApplySourcePath, mapping.localPublished],
-    ['hosted', hostedApplySource, hostedApplySourcePath, mapping.hostedPublishedAndParse],
-  ]) {
-    const registrations = (side === 'local'
-      ? executableLocalApplyRegistrations
-      : directToolRegistrationsInNamedFactory(
-        sourceText,
-        'createTracklyMcpServer',
-        'server.registerTool',
-        sourcePath,
-        pluginLock.hostedMcpToolAllowlist,
-      ))
-      .filter((registration) => registration.name === toolName);
-    assert.equal(
-      registrations.length,
-      1,
-      `${toolName} ${side} must have exactly one active server.registerTool registration`,
-    );
-    assert.equal(
-      registeredInputSchemaName(registrations[0], sourcePath),
-      schemaName,
-      `${toolName} ${side} tools/list schema must use ${schemaName}`,
-    );
-    if (side === 'local') {
-      assertWrappedHandlerParsesWithSchema(registrations[0], mapping.localParse, sourcePath);
+const hostedRegistrationNames = new Set(executableHostedRegistrations.map(({ name }) => name));
+const sharedApplyToolNames = executableLocalApplyToolNames.filter((name) => hostedRegistrationNames.has(name));
+assert.equal(
+  new Set(sharedApplyToolNames).size,
+  sharedApplyToolNames.length,
+  'Shared local/hosted Apply schema catalog must not contain duplicate names',
+);
+for (const toolName of sharedApplyToolNames) {
+  const localRegistrations = executableLocalApplyRegistrations.filter(
+    (registration) => registration.name === toolName,
+  );
+  const hostedRegistrations = executableHostedRegistrations.filter(
+    (registration) => registration.name === toolName,
+  );
+  assert.equal(localRegistrations.length, 1, `${toolName} local must have exactly one active registration`);
+  assert.equal(hostedRegistrations.length, 1, `${toolName} hosted must have exactly one active registration`);
+  const mapping = publishedSchemaCompatibility[toolName];
+  if (mapping) {
+    for (const [side, registrations, sourcePath, schemaName] of [
+      ['local', localRegistrations, localApplySourcePath, mapping.localPublished],
+      ['hosted', hostedRegistrations, hostedApplySourcePath, mapping.hostedPublishedAndParse],
+    ]) {
+      assert.equal(
+        registrations.length,
+        1,
+        `${toolName} ${side} must have exactly one active server.registerTool registration`,
+      );
+      assert.equal(
+        registeredInputSchemaName(registrations[0], sourcePath),
+        schemaName,
+        `${toolName} ${side} tools/list schema must use ${schemaName}`,
+      );
+      if (side === 'local') {
+        assertWrappedHandlerParsesWithSchema(registrations[0], mapping.localParse, sourcePath);
+      }
     }
+    continue;
   }
+  const localSchema = registrationInputSchemaAst(
+    localApplySource,
+    localRegistrations[0],
+    localApplySourcePath,
+  );
+  const hostedSchema = registrationInputSchemaAst(
+    hostedApplySource,
+    hostedRegistrations[0],
+    hostedApplySourcePath,
+  );
+  if (toolName === 'trackly_verify_prepared_resume') {
+    assert.deepEqual(
+      canonicalSchemaAst(localSchema),
+      canonicalSchemaAst(babelParser.parseExpression(`({
+        runId: z.number().int().min(1),
+        resumeId: z.number().int().min(1),
+        confirmationId: z.string().min(1).max(200),
+        exactLocalPath: z.string().min(1).max(4096),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+        sizeBytes: z.number().int().min(1),
+        expiresAt: z.string().datetime(),
+      })`, { plugins: ['typescript'] })),
+      `${toolName} local schema must preserve the complete local proof contract`,
+    );
+    assert.deepEqual(
+      canonicalSchemaAst(hostedSchema),
+      canonicalSchemaAst(babelParser.parseExpression(`({
+        runId: z.number().int().min(1),
+        confirmationId: z.string().min(1).max(200),
+      })`, { plugins: ['typescript'] })),
+      `${toolName} hosted schema must remain an explicitly bounded manual-handoff contract`,
+    );
+    continue;
+  }
+  assert.deepEqual(
+    canonicalSchemaAst(hostedSchema),
+    canonicalSchemaAst(localSchema),
+    `${toolName} hosted/local input schemas drifted from their complete shared Apply contract`,
+  );
 }
 
 const grantSensitiveStorageRegistration = pluginToolRegistration(
@@ -4784,6 +4929,7 @@ module.exports = {
   registeredInputSchemaName,
   registrationDescriptorPropertyAst,
   registrationArgumentSources,
+  registrationInputSchemaAst,
   schemaObjectPropertyAsts,
   schemaDefinition,
   sha256ExactBytes,

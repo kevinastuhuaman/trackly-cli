@@ -39,6 +39,7 @@ const {
   referencedFreeIdentifiers,
   registeredInputSchemaName,
   registrationDescriptorPropertyAst,
+  registrationInputSchemaAst,
   registrationArgumentSources,
   schemaObjectPropertyAsts,
   sha256ExactBytes,
@@ -366,6 +367,22 @@ test('local Apply registrations are bound to the helper reached by createServer'
     ),
     /must not alias, escape, or otherwise reference server outside direct catalog registrations/,
   );
+  for (const [label, prefix] of [
+    ['return', 'if (disabled) return;'],
+    ['throw', "throw new Error('disabled');"],
+    ['branch', "if (disabled) { server.tool('trackly_branch', 'branch', {}, branchHandler); }"],
+  ]) {
+    assert.throws(
+      () => directToolRegistrationsInNamedParameterFunction(
+        applySource.replace("server.tool('trackly_zero'", `${prefix}\n      server.tool('trackly_zero'`),
+        'registerApplyTools',
+        'server',
+        'tool',
+        `${label} before local registration fixture`,
+      ),
+      /must reach every local registration without an earlier branch, return, or throw/,
+    );
+  }
   assert.throws(
     () => directToolRegistrationsInNamedParameterFunction(
       applySource.replace("server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler);", "server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler);\n      return server;"),
@@ -774,7 +791,31 @@ test('hosted schema registration proof uses only direct reachable factory initia
       'server.registerTool',
       'aliased registration fixture',
     ),
-    /may not alias the factory server or perform registrations outside its direct cataloged registration statements/,
+    /may contain only verified pure schema declarations and direct cataloged server registrations/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+        "const z = decoyZ;\n      server.registerTool('trackly_active', { inputSchema: z.object({}) }, activeHandler);",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'shadowed schema namespace fixture',
+    ),
+    /may contain only verified pure schema declarations and direct cataloged server registrations/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+        "const startup = abortStartup();\n      server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'impure hosted declaration fixture',
+    ),
+    /may contain only verified pure schema declarations and direct cataloged server registrations/,
   );
   assert.throws(
     () => directToolRegistrationsInNamedFactory(
@@ -936,6 +977,14 @@ test('plugin registration proof binds the exported factory to the live POST rout
     'createTracklyPluginMcpServer',
     'router fixture',
   ));
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace('PLUGIN_SHARED_EGRESS_RATE_LIMIT_MAX = 6_000', 'PLUGIN_SHARED_EGRESS_RATE_LIMIT_MAX = 60_000'),
+      'createTracklyPluginMcpServer',
+      'widened shared egress limiter fixture',
+    ),
+    /PLUGIN_SHARED_EGRESS_RATE_LIMIT_MAX.*must preserve its locked executable definition/,
+  );
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(
       routerSource.replace("import { Router } from 'express';", "import { Router } from './decoy-express.js';"),
@@ -1152,6 +1201,28 @@ test('descriptor extraction binds active annotation and input-schema expressions
     )),
     'mutation annotation argument tuples must remain semantically distinct',
   );
+});
+
+test('shared Apply schema extraction covers tool and registerTool registrations', () => {
+  const source = `
+    server.tool('trackly_tool_schema', 'fixture', { id: z.number().int() }, handler);
+    server.registerTool('trackly_registered_schema', {
+      inputSchema: z.object({ id: z.number().int() }).strict(),
+    }, handler);
+  `;
+  const registrations = activeToolRegistrations(source, 'server.tool', 'tool schema fixture').concat(
+    activeToolRegistrations(source, 'server.registerTool', 'registered schema fixture'),
+  );
+  const toolSchema = registrationInputSchemaAst(source, registrations[0], 'tool schema fixture');
+  assert.equal(toolSchema.type, 'ObjectExpression');
+  assert.equal(toolSchema.properties[0].key.name, 'id');
+  const registeredSchema = registrationInputSchemaAst(
+    source,
+    registrations[1],
+    'registered schema fixture',
+  );
+  assert.equal(registeredSchema.type, 'CallExpression');
+  assert.equal(registeredSchema.callee.property.name, 'strict');
 });
 
 test('job-brief projection validation binds every active value expression', () => {
