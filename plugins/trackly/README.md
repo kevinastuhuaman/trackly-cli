@@ -1,6 +1,6 @@
 # trackly
 
-The official trackly plugin for ChatGPT and Codex.
+The trackly plugin package for ChatGPT and Codex.
 
 **Hero feature:** trackly Apply
 

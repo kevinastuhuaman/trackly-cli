@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '56a6751f3973e96088af1b7e14a30e31c8d266b00460d3b4adcc01681ab4da32';
 
 const parsedSourceCache = new Map();
 
@@ -33,6 +34,44 @@ function babelCalleeName(node) {
   const objectName = babelCalleeName(node.object);
   const propertyName = node.property?.type === 'Identifier' ? node.property.name : null;
   return objectName && propertyName ? `${objectName}.${propertyName}` : null;
+}
+
+function unwrapTransparentExpression(node) {
+  let current = node;
+  while (current && [
+    'TSAsExpression',
+    'TSSatisfiesExpression',
+    'TSTypeAssertion',
+    'TSNonNullExpression',
+    'ParenthesizedExpression',
+  ].includes(current.type)) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function isStaticallyDisjointFromRootPath(node) {
+  if (node?.type !== 'StringLiteral') return false;
+  return node.value.startsWith('/')
+    && node.value !== '/'
+    && !/[?*+{}()[\]:]/.test(node.value);
+}
+
+function rootRouteChain(call) {
+  const methods = [];
+  let current = call;
+  while (current?.type === 'CallExpression' && current.callee?.type === 'MemberExpression') {
+    const method = current.callee.computed
+      ? (current.callee.property?.type === 'StringLiteral' ? current.callee.property.value : null)
+      : (current.callee.property?.type === 'Identifier' ? current.callee.property.name : null);
+    methods.push(method);
+    const receiver = unwrapTransparentExpression(current.callee.object);
+    if (receiver?.type === 'CallExpression' && babelCalleeName(receiver.callee) === 'router.route') {
+      return { methods, path: receiver.arguments[0] };
+    }
+    current = receiver;
+  }
+  return null;
 }
 
 function activeToolRegistrations(source, expectedCallee, sourcePath) {
@@ -60,7 +99,13 @@ function activeToolRegistrations(source, expectedCallee, sourcePath) {
   return registrations;
 }
 
-function directToolRegistrationsInNamedFactory(source, expectedFunction, expectedCallee, sourcePath) {
+function directToolRegistrationsInNamedFactory(
+  source,
+  expectedFunction,
+  expectedCallee,
+  sourcePath,
+  expectedToolCatalog = null,
+) {
   const ast = parseFullSource(source, sourcePath);
   const factories = ast.program.body.filter((statement) => (
     statement.type === 'ExportNamedDeclaration'
@@ -140,14 +185,47 @@ function directToolRegistrationsInNamedFactory(source, expectedFunction, expecte
     'registerPrompt',
     'registerResource',
   ]);
+  const directFactoryRegistrations = factoryStatements.flatMap((statement) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    const callee = call?.type === 'CallExpression' ? call.callee : null;
+    const receiver = callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(callee.object)
+      : null;
+    const method = callee?.type === 'MemberExpression' && !callee.computed
+      && callee.property?.type === 'Identifier'
+      ? callee.property.name
+      : null;
+    if (receiver?.type !== 'Identifier'
+      || receiver.name !== expectedServerBinding
+      || !allowedTailRegistrationMethods.has(method)) return [];
+    assert.equal(
+      call.arguments[0]?.type,
+      'StringLiteral',
+      `${expectedFunction} in ${sourcePath} must use a static name for every direct server registration`,
+    );
+    return [{ method, name: call.arguments[0].value, call }];
+  });
+  if (expectedToolCatalog !== null) {
+    const actualToolCatalog = directFactoryRegistrations
+      .filter(({ method }) => method === 'tool' || method === 'registerTool')
+      .map(({ name }) => name);
+    assert.deepEqual(
+      actualToolCatalog,
+      expectedToolCatalog,
+      `${expectedFunction} in ${sourcePath} executable tool catalog drifted from the locked hosted MCP allowlist`,
+    );
+  }
   assert.ok(
     factoryStatements.slice(lastRegistrationIndex + 1, -1).every((statement) => {
       const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
       const callee = call?.type === 'CallExpression' ? call.callee : null;
+      const receiver = callee?.type === 'MemberExpression'
+        ? unwrapTransparentExpression(callee.object)
+        : null;
       return callee?.type === 'MemberExpression'
         && !callee.computed
-        && callee.object?.type === 'Identifier'
-        && callee.object.name === expectedServerBinding
+        && receiver?.type === 'Identifier'
+        && receiver.name === expectedServerBinding
         && callee.property?.type === 'Identifier'
         && allowedTailRegistrationMethods.has(callee.property.name);
     }),
@@ -232,6 +310,15 @@ function directToolRegistrationsInExportedFunction(
     `${sourcePath} must export exactly one ${expectedFunction} function declaration`,
   );
   const factory = factories[0].declaration;
+  const factoryParameterFixture = parseFullSource(
+    'function expected(authToken: string, requestApi: PluginApiRequest = apiRequest) {}',
+    `${expectedFunction} expected parameters`,
+  ).program.body[0];
+  assert.deepEqual(
+    canonicalSchemaAst(factory.params),
+    canonicalSchemaAst(factoryParameterFixture.params),
+    `${expectedFunction} in ${sourcePath} must receive authToken and the canonical apiRequest-backed requestApi helper exactly`,
+  );
   const registrations = [];
   const registrationStatementIndexes = [];
   for (const [index, statement] of factory.body.body.entries()) {
@@ -396,9 +483,12 @@ function directToolRegistrationsInExportedFunction(
     if (node.type === 'CallExpression' && babelCalleeName(node.callee) === expectedCallee) {
       nestedRegistrations.push(node);
     }
+    const memberReceiver = node.type === 'MemberExpression'
+      ? unwrapTransparentExpression(node.object)
+      : null;
     if (node.type === 'MemberExpression'
-      && node.object?.type === 'Identifier'
-      && node.object.name === 'server') {
+      && memberReceiver?.type === 'Identifier'
+      && memberReceiver.name === 'server') {
       const propertyName = node.computed
         ? (node.property?.type === 'StringLiteral' ? node.property.value : null)
         : (node.property?.type === 'Identifier' ? node.property.name : null);
@@ -434,6 +524,13 @@ function directToolRegistrationsInExportedFunction(
 
 function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, sourcePath) {
   const ast = parseFullSource(source, sourcePath);
+  assertImportBinding(
+    source,
+    'StreamableHTTPServerTransport',
+    'StreamableHTTPServerTransport',
+    '@modelcontextprotocol/sdk/server/streamableHttp.js',
+    sourcePath,
+  );
   const imports = ast.program.body.filter((statement) => (
     statement.type === 'ImportDeclaration'
     && statement.source.value === './plugin-server.js'
@@ -475,6 +572,35 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     postRoutes.length,
     1,
     `${sourcePath} must execute exactly one POST / plugin route registration at module initialization`,
+  );
+  const canonicalPostIndex = ast.program.body.findIndex((statement) => (
+    statement.type === 'ExpressionStatement' && statement.expression === postRoutes[0]
+  ));
+  const competingRoutes = ast.program.body.slice(0, canonicalPostIndex).filter((statement) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    if (call?.type !== 'CallExpression') return false;
+    const callee = babelCalleeName(call.callee);
+    const chainedRoute = rootRouteChain(call);
+    if (chainedRoute) {
+      const mayHandlePost = chainedRoute.methods.some((method) => method === null || ['post', 'all'].includes(method));
+      return mayHandlePost && !isStaticallyDisjointFromRootPath(chainedRoute.path);
+    }
+    const directReceiver = call.callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(call.callee.object)
+      : null;
+    if (directReceiver?.type === 'Identifier' && directReceiver.name === 'router' && call.callee.computed) {
+      const method = call.callee.property?.type === 'StringLiteral' ? call.callee.property.value : null;
+      if (method === null || ['post', 'all', 'use', 'route'].includes(method)) {
+        return !isStaticallyDisjointFromRootPath(call.arguments[0]);
+      }
+    }
+    if (!['router.post', 'router.all', 'router.use', 'router.route'].includes(callee)) return false;
+    return !isStaticallyDisjointFromRootPath(call.arguments[0]);
+  });
+  assert.equal(
+    competingRoutes.length,
+    0,
+    `${sourcePath} must not register an earlier router mount that could cover POST / ahead of the authenticated route`,
   );
   const handler = postRoutes[0].arguments.at(-1);
   assert.ok(
@@ -1443,7 +1569,41 @@ function activeVariableDeclarator(source, name, sourcePath) {
     'VariableDeclaration',
     `${name} in ${sourcePath} must belong to a variable declaration`,
   );
+  assert.equal(
+    declaration.kind,
+    'const',
+    `${name} in ${sourcePath} must use an immutable const declaration`,
+  );
   assert.ok(declarator.init, `${name} in ${sourcePath} must have an initializer`);
+  const writes = [];
+  function targetContainsName(node) {
+    if (node === null || typeof node !== 'object') return false;
+    if (node.type === 'Identifier') return node.name === name;
+    if (node.type === 'RestElement') return targetContainsName(node.argument);
+    if (node.type === 'AssignmentPattern') return targetContainsName(node.left);
+    if (node.type === 'ArrayPattern') return node.elements.some(targetContainsName);
+    if (node.type === 'ObjectPattern') return node.properties.some((property) => (
+      property.type === 'RestElement'
+        ? targetContainsName(property.argument)
+        : targetContainsName(property.value)
+    ));
+    return false;
+  }
+  function visitWrites(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitWrites(child);
+      return;
+    }
+    if (node.type === 'AssignmentExpression' && targetContainsName(node.left)) writes.push(node);
+    if (node.type === 'UpdateExpression' && targetContainsName(node.argument)) writes.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitWrites(child);
+    }
+  }
+  visitWrites(parseFullSource(source, sourcePath));
+  assert.equal(writes.length, 0, `${name} in ${sourcePath} must never be assigned or updated after declaration`);
   return { declarator, declaration };
 }
 
@@ -1873,10 +2033,217 @@ function assertStartRunWrapperCompatibility(localWrapper, hostedSchema) {
   );
 }
 
-function verifyHostedContract() {
-const cliRoot = path.join(__dirname, '..');
-const backendCandidates = process.env.TRACKLY_BACKEND_DIR
-  ? [path.resolve(process.env.TRACKLY_BACKEND_DIR)]
+function verifyCoordinatedBackendCore({
+  localContract,
+  hostedContract,
+  localApplySource,
+  hostedApplySource,
+  hostedPluginContract,
+  pluginLock,
+  hostedPluginSource,
+  sourcePaths = {},
+}) {
+  const localApplyPath = sourcePaths.localApply || 'local Apply source';
+  const hostedApplyPath = sourcePaths.hostedApply || 'hosted Apply source';
+  const hostedPluginPath = sourcePaths.hostedPlugin || 'hosted plugin source';
+  assert.equal(
+    localContract.tools.trackly_record_apply_execution_dispositions,
+    hostedContract.tools.trackly_record_apply_execution_dispositions,
+    'trackly_record_apply_execution_dispositions schema alias drifted',
+  );
+  assert.match(
+    localContract.tools.trackly_record_apply_execution_dispositions,
+    /applyExecutionDispositionSchema/,
+    'Disposition tool must reference the named executable schema',
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(parseSchemaExpression(
+      localApplySource,
+      'applyExecutionDispositionSchema',
+      localApplyPath,
+    )),
+    canonicalSchemaAst(parseSchemaExpression(
+      hostedApplySource,
+      'applyExecutionDispositionSchema',
+      hostedApplyPath,
+    )),
+    'applyExecutionDispositionSchema executable AST drifted between local and hosted MCP',
+  );
+  assertActiveFunctionDefinitionAst(
+    hostedPluginSource,
+    'wrapTool',
+    `function wrapTool(
+      handler: (params: any) => Promise<unknown>,
+      fallback: string,
+      includeStructuredContent = false,
+    ) {
+      return async (params: any) => {
+        try {
+          return resultContent(await handler(params), includeStructuredContent);
+        } catch (error) {
+          return errorContent(error, fallback);
+        }
+      };
+    }`,
+    hostedPluginPath,
+  );
+  assert.deepEqual(
+    hostedPluginContract.lifecycle,
+    pluginLock.publicLifecycleContract,
+    'Executable hosted plugin lifecycle drifted from the packaged public lifecycle contract',
+  );
+  assertStartRunWrapperCompatibility(
+    parseSchemaExpression(localApplySource, 'startApplyRunInputSchema', localApplyPath),
+    parseSchemaExpression(hostedApplySource, 'startApplyRunSchema', hostedApplyPath),
+  );
+}
+
+function verifyCheckedInHostedContractFixture(
+  cliRoot,
+  { expectedFixtureSha256 = CHECKED_IN_HOSTED_FIXTURE_SHA256, now = new Date() } = {},
+) {
+  const fixturePath = path.join(cliRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
+  const fixtureSource = fs.readFileSync(fixturePath, 'utf8');
+  assert.equal(
+    sha256ExactBytes(fixtureSource),
+    expectedFixtureSha256,
+    `${fixturePath} bytes drifted from the independently reviewed hosted snapshot`,
+  );
+  const fixture = JSON.parse(fixtureSource);
+  assert.deepEqual(
+    Object.keys(fixture),
+    [
+      'formatVersion',
+      'capturedAt',
+      'freshUntil',
+      'sourceRuntime',
+      'mergedRuntime',
+      'applyContractVersion',
+      'pluginContractVersion',
+      'publicTools',
+      'hostedMcpToolNames',
+      'sourceSha256',
+    ],
+    `${fixturePath} must use the exact standalone fixture shape`,
+  );
+  assert.equal(fixture.formatVersion, 2);
+  const commitPattern = /^[a-f0-9]{40}$/;
+  assert.match(fixture.sourceRuntime.commit, commitPattern);
+  assert.match(fixture.sourceRuntime.parent, commitPattern);
+  assert.match(fixture.mergedRuntime.commit, commitPattern);
+  assert.deepEqual(
+    fixture.mergedRuntime.parents.filter((commit) => commit === fixture.sourceRuntime.commit),
+    [fixture.sourceRuntime.commit],
+    `${fixturePath} must prove the reviewed runtime commit is a direct parent of its recorded merge`,
+  );
+  for (const commit of fixture.mergedRuntime.parents) assert.match(commit, commitPattern);
+  const timestamps = {
+    sourceCommittedAt: Date.parse(fixture.sourceRuntime.committedAt),
+    mergedCommittedAt: Date.parse(fixture.mergedRuntime.committedAt),
+    capturedAt: Date.parse(fixture.capturedAt),
+    freshUntil: Date.parse(fixture.freshUntil),
+  };
+  for (const [label, timestamp] of Object.entries(timestamps)) {
+    assert.ok(Number.isFinite(timestamp), `${fixturePath} ${label} must be an absolute timestamp`);
+  }
+  assert.ok(
+    timestamps.sourceCommittedAt <= timestamps.mergedCommittedAt,
+    `${fixturePath} merge must not predate its reviewed runtime parent`,
+  );
+  assert.ok(
+    timestamps.mergedCommittedAt <= timestamps.capturedAt,
+    `${fixturePath} snapshot must not predate its recorded runtime merge`,
+  );
+  assert.ok(
+    timestamps.capturedAt - timestamps.mergedCommittedAt <= 24 * 60 * 60 * 1000,
+    `${fixturePath} snapshot must be captured within 24 hours of its recorded runtime merge`,
+  );
+  assert.ok(timestamps.capturedAt < timestamps.freshUntil, `${fixturePath} freshness window must be positive`);
+  assert.ok(
+    timestamps.freshUntil - timestamps.capturedAt <= 31 * 24 * 60 * 60 * 1000,
+    `${fixturePath} freshness window must not exceed 31 days`,
+  );
+  assert.ok(timestamps.capturedAt <= now.getTime(), `${fixturePath} snapshot must not be dated in the future`);
+  assert.ok(
+    now.getTime() <= timestamps.freshUntil,
+    `${fixturePath} expired and must be regenerated from a fresh reviewed runtime`,
+  );
+  const localApplyContract = JSON.parse(fs.readFileSync(
+    path.join(cliRoot, 'contracts', 'trackly-apply-tools.json'),
+    'utf8',
+  ));
+  assert.equal(
+    fixture.applyContractVersion,
+    localApplyContract.contractVersion,
+    `${fixturePath} must identify the checked-in local Apply contract version`,
+  );
+  assert.equal(fixture.pluginContractVersion, '1.0.0');
+  const lock = JSON.parse(fs.readFileSync(path.join(path.dirname(fixturePath), 'skill-lock.json'), 'utf8'));
+  const snapshotNames = fixture.publicTools.map(([name]) => name);
+  assert.deepEqual(snapshotNames, lock.publicToolAllowlist, `${fixturePath} public tool-name snapshot drifted`);
+  assert.equal(new Set(snapshotNames).size, snapshotNames.length, `${fixturePath} public tool names must be unique`);
+  assert.deepEqual(Object.keys(lock.publicScopeContract).sort(), [...lock.publicToolAllowlist].sort());
+  assert.deepEqual(
+    Object.keys(lock.publicExecutableContract.descriptorSha256).sort(),
+    [...lock.publicToolAllowlist].sort(),
+  );
+  assert.deepEqual(
+    Object.keys(lock.publicExecutableContract.handlerSha256).sort(),
+    [...lock.publicToolAllowlist].sort(),
+  );
+  for (const [name, schemaSha256, handlerSha256] of fixture.publicTools) {
+    assert.match(schemaSha256, /^[a-f0-9]{64}$/);
+    assert.match(handlerSha256, /^[a-f0-9]{64}$/);
+    assert.equal(
+      schemaSha256,
+      lock.publicExecutableContract.descriptorSha256[name],
+      `${fixturePath} ${name} schema snapshot drifted from the packaged executable lock`,
+    );
+    assert.equal(
+      handlerSha256,
+      lock.publicExecutableContract.handlerSha256[name],
+      `${fixturePath} ${name} handler snapshot drifted from the packaged executable lock`,
+    );
+  }
+  assert.deepEqual(
+    fixture.hostedMcpToolNames,
+    lock.hostedMcpToolAllowlist,
+    `${fixturePath} hosted MCP tool-name snapshot drifted`,
+  );
+  assert.equal(new Set(fixture.hostedMcpToolNames).size, fixture.hostedMcpToolNames.length);
+  assert.deepEqual(fixture.sourceSha256, {
+    pluginServer: lock.publicExecutableContract.pluginServerSha256,
+    pluginScopes: lock.publicExecutableContract.pluginScopesSha256,
+    jobBriefService: lock.publicExecutableContract.jobBriefServiceSha256,
+  }, `${fixturePath} hosted source snapshot drifted from the packaged executable lock`);
+  for (const digest of [
+    lock.publicExecutableContract.pluginServerSha256,
+    lock.publicExecutableContract.pluginScopesSha256,
+    lock.publicExecutableContract.jobBriefServiceSha256,
+    ...Object.values(lock.publicExecutableContract.descriptorSha256),
+    ...Object.values(lock.publicExecutableContract.handlerSha256),
+  ]) assert.match(digest, /^[a-f0-9]{64}$/);
+  console.log(
+    `Checked-in hosted contract fixture passes for Apply ${fixture.applyContractVersion}; the ${snapshotNames.length}-tool public facade and ${fixture.hostedMcpToolNames.length}-tool hosted MCP catalogs are locked.`,
+  );
+}
+
+function verifyHostedContract({
+  cliRoot = path.join(__dirname, '..'),
+  backendDir = process.env.TRACKLY_BACKEND_DIR,
+  fixtureOptions,
+  coordinatedFixture,
+} = {}) {
+if (coordinatedFixture) {
+  verifyCoordinatedBackendCore(coordinatedFixture);
+  return;
+}
+if (!backendDir) {
+  verifyCheckedInHostedContractFixture(cliRoot, fixtureOptions);
+  return;
+}
+const backendCandidates = backendDir
+  ? [path.resolve(backendDir)]
   : [
       path.resolve(cliRoot, '..', 'backend'),
       path.resolve(cliRoot, '..', 'granola-followup-app'),
@@ -1932,6 +2299,21 @@ const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionC
 const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
 const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
 
+verifyCoordinatedBackendCore({
+  localContract: local,
+  hostedContract: hosted,
+  localApplySource,
+  hostedApplySource,
+  hostedPluginContract,
+  pluginLock,
+  hostedPluginSource,
+  sourcePaths: {
+    localApply: localApplySourcePath,
+    hostedApply: hostedApplySourcePath,
+    hostedPlugin: hostedPluginSourcePath,
+  },
+});
+
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
   'trackly_diagnose_local_path',
@@ -1978,6 +2360,19 @@ assertExportedFactoryUsedByPluginRouter(
   'createTracklyPluginMcpServer',
   hostedPluginRouterPath,
 );
+assertImportBinding(
+  hostedPluginSource,
+  'default',
+  'https',
+  'node:https',
+  hostedPluginSourcePath,
+);
+assertActiveVariableInitializerAst(
+  hostedPluginSource,
+  'BASE_URL',
+  "process.env.BASE_URL || 'https://closeai.mba'",
+  hostedPluginSourcePath,
+);
 assertActiveFunctionDefinitionAst(
   hostedPluginSource,
   'wrapTool',
@@ -1993,6 +2388,68 @@ assertActiveFunctionDefinitionAst(
         return errorContent(error, fallback);
       }
     };
+  }`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'apiRequest',
+  `function apiRequest(
+    method: string,
+    path: string,
+    authToken: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {},
+    timeoutMs = 60_000,
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const url = new URL(path, BASE_URL);
+      const bodyString = body === undefined ? null : JSON.stringify(body);
+      const request = https.request({
+        method,
+        hostname: url.hostname,
+        port: url.port || 443,
+        path: \`\${url.pathname}\${url.search}\`,
+        headers: {
+          Authorization: \`Bearer \${authToken}\`,
+          'User-Agent': \`trackly-plugin-mcp/\${PLUGIN_VERSION}\`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(bodyString ? { 'Content-Length': String(Buffer.byteLength(bodyString)) } : {}),
+          ...extraHeaders,
+        },
+      }, (response) => {
+        response.setEncoding('utf8');
+        let data = '';
+        response.on('data', (chunk) => { data += chunk; });
+        response.on('end', () => {
+          let parsed: any;
+          try {
+            parsed = data ? JSON.parse(data) : {};
+          } catch {
+            reject(new Error('trackly returned an invalid response'));
+            return;
+          }
+          if ((response.statusCode || 500) >= 400) {
+            const error = new Error(
+              typeof parsed?.error === 'string' ? parsed.error : \`trackly request failed (\${response.statusCode})\`,
+            ) as Error & { status?: number; code?: string; responseBody?: any };
+            error.status = response.statusCode;
+            error.code = typeof parsed?.code === 'string'
+              ? parsed.code
+              : (typeof parsed?.error === 'string' ? parsed.error : undefined);
+            error.responseBody = parsed;
+            reject(error);
+            return;
+          }
+          resolve(parsed);
+        });
+      });
+      request.on('error', reject);
+      request.setTimeout(timeoutMs, () => request.destroy(new Error('trackly request timed out')));
+      if (bodyString) request.write(bodyString);
+      request.end();
+    });
   }`,
   hostedPluginSourcePath,
 );
@@ -2415,6 +2872,7 @@ for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) 
         'createTracklyMcpServer',
         'server.registerTool',
         sourcePath,
+        pluginLock.hostedMcpToolAllowlist,
       ))
       .filter((registration) => registration.name === toolName);
     assert.equal(
@@ -2662,6 +3120,23 @@ assertDescriptorUsesTopLevelBinding(
   startOrResumeRegistration,
   'outputSchema',
   'applyOutputSchema',
+  hostedPluginSourcePath,
+);
+assertWrappedHandlerDirectStatementAst(
+  startOrResumeRegistration,
+  `const orchestrationRequest = (
+    method: string,
+    path: string,
+    body?: unknown,
+    headers: Record<string, string> = {},
+  ) => requestApi(
+    method,
+    path,
+    authToken,
+    body,
+    headers,
+    APPLY_ORCHESTRATION_REQUEST_TIMEOUT_MS,
+  );`,
   hostedPluginSourcePath,
 );
 assertWrappedHandlerAssignedRequestEndpoint(
@@ -3163,6 +3638,7 @@ console.log(
 }
 
 module.exports = {
+  CHECKED_IN_HOSTED_FIXTURE_SHA256,
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertActiveFunctionDirectStatementAst,
@@ -3196,6 +3672,8 @@ module.exports = {
   staticStringArrayMap,
   typescriptConstArrayValues,
   verifyHostedContract,
+  verifyCheckedInHostedContractFixture,
+  verifyCoordinatedBackendCore,
   wrappedHandlerReturnProperties,
   wrappedHandlerReturnedObjectProperties,
 };

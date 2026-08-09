@@ -10,6 +10,13 @@ const packageManifest = require('../package.json');
 const serverManifest = require('../server.json');
 const packageLock = require('../package-lock.json');
 const shrinkwrap = require('../npm-shrinkwrap.json');
+const {
+  assertActiveFunctionDefinitionAst,
+  exactSchemaDefinition,
+  parseSchemaExpression,
+  sha256ExactBytes,
+  verifyHostedContract,
+} = require('../scripts/verify-hosted-contract.js');
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
@@ -509,68 +516,153 @@ test('Apply observation contract accepts redacted browser scenario metadata', ()
 });
 
 test('hosted parity verifier compares execution disposition body, alias, and constants', () => {
-  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
-
-  assert.match(verifier, /Hosted and local Trackly Apply MCP contracts drifted outside documented local-only tools/);
-  assert.match(verifier, /trackly_record_apply_execution_dispositions schema alias drifted/);
-  assert.match(verifier, /trackly_lint_application_text/);
-  assert.match(verifier, /trackly_diagnose_local_path/);
-  assert.match(verifier, /must not be advertised by hosted MCP/);
-  assert.match(verifier, /must not be registered by hosted MCP/);
-  for (const constantName of [
-    'applyExecutionMaxTarget',
-    'applyBrowserSurfaces',
-    'applyAccessClassifications',
-    'applyExecutionDispositionSources',
-    'applyExecutionStopReasonCodes',
-  ]) {
-    assert.match(verifier, new RegExp(`'${constantName}'`));
-  }
-  assert.match(verifier, /require\('acorn'\)/);
-  assert.match(verifier, /require\('@babel\/parser'\)/);
-  assert.match(verifier, /contractDeclarationStatements/);
-  assert.match(verifier, /babelParser\.parse\(source/);
-  assert.match(verifier, /plugins: \['typescript'\]/);
-  assert.match(verifier, /node\.type === 'VariableDeclarator'/);
-  assert.match(verifier, /must have exactly one active top-level variable declaration/);
-  assert.match(verifier, /acorn\.parseExpressionAt\(expression, 0, \{ ecmaVersion: 'latest' \}\)/);
-  assert.match(verifier, /ast\.end,\s*expression\.length/);
-  assert.match(verifier, /canonicalSchemaAst\(localApplySchemaAsts\[schemaName\]\)/);
-  assert.match(verifier, /canonicalSchemaAst\(hostedApplySchemaAsts\[schemaName\]\)/);
-  assert.match(verifier, /referencedConstantIdentifiers/);
-  assert.match(verifier, /expectedSchemaConstants/);
-  assert.match(verifier, /explicitly lock every new dependency/);
-  assert.match(verifier, /SAFE_IDEMPOTENCY_KEY semantics drifted between local and hosted Apply schemas/);
-  assert.match(verifier, /contractBackedSchemaConstants/);
-  assert.match(verifier, /hosted executable values must equal/);
-  assert.match(verifier, /namedApplyDependencySha256/);
-  for (const schemaName of [
-    'applyExecutionDispositionSchema',
-    'truthCertificationCommon',
-    'truthCertificationSchema',
-    'startApplyRunSchema',
-  ]) {
-    assert.match(verifier, new RegExp(`'${schemaName}'`));
-  }
+  const locked = 'const applyExecutionDispositionSchema = z.object({ source: z.literal("live") }).strict();';
+  assert.equal(
+    exactSchemaDefinition(locked, 'applyExecutionDispositionSchema', 'locked disposition fixture'),
+    locked,
+  );
+  assert.equal(
+    parseSchemaExpression(locked, 'applyExecutionDispositionSchema', 'locked disposition fixture').type,
+    'CallExpression',
+  );
+  assert.throws(
+    () => exactSchemaDefinition(
+      locked.replace('const ', 'let '),
+      'applyExecutionDispositionSchema',
+      'mutable disposition fixture',
+    ),
+    /must use an immutable const declaration/,
+  );
+  assert.throws(
+    () => exactSchemaDefinition(
+      `${locked} applyExecutionDispositionSchema = z.any();`,
+      'applyExecutionDispositionSchema',
+      'reassigned disposition fixture',
+    ),
+    /must never be assigned or updated after declaration/,
+  );
 });
 
 test('hosted parity verifier proves published wrapper compatibility from parsed ASTs', () => {
-  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
+  const locked = `function projectPublishedSchema(schema) {
+    return schema.superRefine(validatePublishedInput);
+  }`;
+  assert.doesNotThrow(() => assertActiveFunctionDefinitionAst(
+    locked,
+    'projectPublishedSchema',
+    locked,
+    'published wrapper fixture',
+  ));
+  assert.throws(
+    () => assertActiveFunctionDefinitionAst(
+      locked.replace('validatePublishedInput', 'decoyValidator'),
+      'projectPublishedSchema',
+      locked,
+      'drifted published wrapper fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
+});
 
-  assert.match(verifier, /truthCertificationInputSchema/);
-  assert.match(verifier, /hostedPublishedAndParse: 'truthCertificationSchema'/);
-  assert.match(verifier, /startApplyRunInputSchema/);
-  assert.match(verifier, /hostedPublishedAndParse: 'startApplyRunSchema'/);
-  assert.match(verifier, /assertTruthWrapperCompatibility/);
-  assert.match(verifier, /published truth discriminants must exactly cover the hosted parse branches/);
-  assert.match(verifier, /before nullable\/optional widening/);
-  assert.match(verifier, /hosted not_applicable \$\{field\}/);
-  assert.match(verifier, /assertStartRunWrapperCompatibility/);
-  assert.match(verifier, /hostedSchema\.callee\.object/);
-  assert.match(verifier, /before parse-time superRefine/);
-  assert.match(verifier, /\['local', localApplySource, localApplySourcePath, mapping\.localPublished\]/);
-  assert.match(verifier, /\['hosted', hostedApplySource, hostedApplySourcePath, mapping\.hostedPublishedAndParse\]/);
-  assert.match(verifier, /\$\{toolName\} \$\{side\} tools\/list schema must use \$\{schemaName\}/);
+test('coordinated hosted verifier executes disposition, wrapper, and lifecycle wiring end to end', () => {
+  const dispositionTool = 'z.object({ dispositions: z.array(applyExecutionDispositionSchema) }).strict()';
+  const localApplySource = `
+    const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
+    const startApplyRunInputSchema = z.object({ runId: z.number().int() }).strict();
+  `;
+  const hostedApplySource = `
+    const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
+    const startApplyRunSchema = z.object({ runId: z.number().int() }).strict()
+      .superRefine(validateStartApplyRun);
+  `;
+  const hostedPluginSource = `
+    function wrapTool(
+      handler: (params: any) => Promise<unknown>,
+      fallback: string,
+      includeStructuredContent = false,
+    ) {
+      return async (params: any) => {
+        try {
+          return resultContent(await handler(params), includeStructuredContent);
+        } catch (error) {
+          return errorContent(error, fallback);
+        }
+      };
+    }
+  `;
+  const fixture = {
+    localContract: { tools: { trackly_record_apply_execution_dispositions: dispositionTool } },
+    hostedContract: { tools: { trackly_record_apply_execution_dispositions: dispositionTool } },
+    localApplySource,
+    hostedApplySource,
+    hostedPluginContract: { lifecycle: { submissionBoundary: 'manual_only' } },
+    pluginLock: { publicLifecycleContract: { submissionBoundary: 'manual_only' } },
+    hostedPluginSource,
+  };
+  const verify = (candidate) => () => verifyHostedContract({ coordinatedFixture: candidate });
+
+  assert.doesNotThrow(verify(structuredClone(fixture)));
+  const dispositionDrift = structuredClone(fixture);
+  dispositionDrift.hostedApplySource = dispositionDrift.hostedApplySource.replace("z.literal('live')", "z.literal('shadow')");
+  assert.throws(verify(dispositionDrift), /applyExecutionDispositionSchema executable AST drifted/);
+  const wrapperDrift = structuredClone(fixture);
+  wrapperDrift.hostedPluginSource = wrapperDrift.hostedPluginSource.replace('resultContent(', 'shadowResult(');
+  assert.throws(verify(wrapperDrift), /wrapTool.*must preserve its locked executable branch semantics/);
+  const lifecycleDrift = structuredClone(fixture);
+  lifecycleDrift.hostedPluginContract.lifecycle.submissionBoundary = 'automatic';
+  assert.throws(verify(lifecycleDrift), /hosted plugin lifecycle drifted/);
+  const publishedWrapperDrift = structuredClone(fixture);
+  publishedWrapperDrift.localApplySource = publishedWrapperDrift.localApplySource.replace(
+    'runId: z.number().int()',
+    'runId: z.string()',
+  );
+  assert.throws(verify(publishedWrapperDrift), /startApplyRunInputSchema must equal the hosted published object/);
+});
+
+test('standalone hosted verifier executes tool, schema, and handler snapshot wiring end to end', (t) => {
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-hosted-fixture-'));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(temporaryRoot, 'contracts'), { recursive: true });
+  fs.mkdirSync(path.join(temporaryRoot, 'plugins', 'trackly'), { recursive: true });
+  for (const relativePath of [
+    ['contracts', 'trackly-apply-tools.json'],
+    ['plugins', 'trackly', 'skill-lock.json'],
+    ['plugins', 'trackly', 'hosted-contract-fixture.json'],
+  ]) {
+    fs.copyFileSync(path.join(__dirname, '..', ...relativePath), path.join(temporaryRoot, ...relativePath));
+  }
+  const fixturePath = path.join(temporaryRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
+  const originalFixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+  const verifyFixture = (fixture, now = new Date('2026-08-10T12:00:00-07:00')) => {
+    const fixtureSource = `${JSON.stringify(fixture, null, 2)}\n`;
+    fs.writeFileSync(fixturePath, fixtureSource);
+    return () => verifyHostedContract({
+      cliRoot: temporaryRoot,
+      backendDir: null,
+      fixtureOptions: {
+        expectedFixtureSha256: sha256ExactBytes(fixtureSource),
+        now,
+      },
+    });
+  };
+
+  assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
+  const renamed = structuredClone(originalFixture);
+  renamed.publicTools[0][0] = 'trackly_shadow_search';
+  assert.throws(verifyFixture(renamed), /public tool-name snapshot drifted/);
+  const schemaDrift = structuredClone(originalFixture);
+  schemaDrift.publicTools[0][1] = '0'.repeat(64);
+  assert.throws(verifyFixture(schemaDrift), /schema snapshot drifted/);
+  const handlerDrift = structuredClone(originalFixture);
+  handlerDrift.publicTools[0][2] = 'f'.repeat(64);
+  assert.throws(verifyFixture(handlerDrift), /handler snapshot drifted/);
+  const ancestryDrift = structuredClone(originalFixture);
+  ancestryDrift.mergedRuntime.parents[1] = 'a'.repeat(40);
+  assert.throws(verifyFixture(ancestryDrift), /must prove the reviewed runtime commit is a direct parent/);
+  assert.throws(
+    verifyFixture(structuredClone(originalFixture), new Date('2026-09-09T00:00:00-07:00')),
+    /expired and must be regenerated from a fresh reviewed runtime/,
+  );
 });
 
 test('hosted parity verifier fails clearly when the plugin contract has no tools object', () => {
@@ -618,66 +710,27 @@ test('hosted parity verifier fails clearly when the plugin contract has no tools
 });
 
 test('hosted parity verifier binds the public lifecycle promise to executable plugin schemas and handlers', () => {
-  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
-  assert.match(verifier, /activeToolRegistrations\(/);
-  assert.match(verifier, /directToolRegistrationsInExportedFunction\(/);
-  assert.match(verifier, /assertExportedFactoryUsedByPluginRouter\(/);
-  assert.match(verifier, /must directly instantiate \$\{expectedFactory\} exactly once/);
-  assert.match(verifier, /must directly connect its exact factory-result server to its live transport/);
-  assert.match(verifier, /must register every \$\{expectedCallee\} tool unconditionally as a direct function-body statement/);
-  assert.match(verifier, /'registerPluginTool'/);
-  assert.match(verifier, /must register a static string-literal tool name/);
-  assert.match(verifier, /Executable hosted plugin registrations drifted from the packaged public facade allowlist/);
-  assert.match(verifier, /Executable hosted plugin registrations drifted from the hosted plugin contract/);
-  assert.match(verifier, /publicExecutableContract\.descriptorSha256/);
-  assert.match(verifier, /publicExecutableContract\.schemaSha256/);
-  assert.match(verifier, /publicExecutableContract\.handlerSha256/);
-  assert.match(verifier, /publicExecutableContract\.transitiveSchemaSha256/);
-  assert.match(verifier, /publicExecutableContract\.namedApplySchemaSha256/);
-  assert.match(verifier, /localMcpApplyTools: \[localApplySource, localApplySourcePath\]/);
-  assert.match(verifier, /hostedMcpServer: \[hostedApplySource, hostedApplySourcePath\]/);
-  assert.match(verifier, /Named local and hosted Apply schemas drifted from the packaged exact-byte digest lock/);
-  assert.match(verifier, /pluginServerSha256/);
-  assert.match(verifier, /pluginScopesSha256/);
-  assert.match(verifier, /jobBriefServiceSha256/);
-  assert.match(verifier, /APPLY_BROWSER_SURFACES/);
-  assert.match(verifier, /All executable hosted plugin scope mappings must match the packaged public scope lock/);
-  assert.match(verifier, /staticStringArrayMap/);
-  assert.match(verifier, /TSSatisfiesExpression/);
-  assert.match(verifier, /TSAsExpression/);
-  assert.match(verifier, /must contain only static properties \(no spreads or methods\)/);
-  assert.match(verifier, /must contain only string literals/);
-  assert.match(verifier, /registeredInputSchemaName/);
-  assert.match(verifier, /exactly one active server\.registerTool registration/);
-  assert.match(verifier, /exactly one active inputSchema property/);
-  assert.match(verifier, /descriptors or inline schemas drifted from the packaged exact-byte digest lock/);
-  assert.match(verifier, /availableFields/);
-  assert.match(verifier, /hostedPluginContract\.lifecycle/);
-  assert.match(verifier, /pluginLock\.publicLifecycleContract/);
-  assert.match(verifier, /pluginLock\.publicScopeContract/);
-  assert.match(verifier, /readinessOutputSchema/);
-  assert.match(verifier, /applyOutputSchema/);
-  assert.match(verifier, /applyOutputContract/);
-  assert.match(verifier, /must publish only its required locked fields/);
-  assert.match(verifier, /trackly_get_job_brief output must exclude contacts, employees, referrals, actions/);
-  assert.match(verifier, /companySignal must remain a bounded aggregate-only projection/);
-  assert.match(verifier, /progressOutputSchema/);
-  assert.match(verifier, /restart_after_reauthorization/);
-  assert.match(verifier, /trackly_start_or_resume_apply/);
-  assert.match(verifier, /trackly_certify_review_ready/);
-  assert.match(verifier, /plugin-review-ready/);
-  assert.match(verifier, /trackly_reconcile_manual_submission/);
-  assert.match(verifier, /plugin-manual-submission/);
-  assert.match(verifier, /reconcileBranchContract/);
-  assert.match(verifier, /must publish only its locked evidence fields/);
-  assert.match(verifier, /registrationDescriptorPropertyAst/);
-  assert.match(verifier, /certifyInputContract/);
-  assert.match(verifier, /must publish only the locked truth-certification fields/);
-  assert.match(verifier, /has a write scope and must publish its complete locked mutationAnnotations/);
-  assert.match(verifier, /referencedFreeIdentifiers/);
-  assert.match(verifier, /classifyFreeIdentifiers/);
-  assert.match(verifier, /explicitly lock it as a runtime global, shared definition, or contract constant/);
-  assert.match(verifier, /executable definition drifted between local and hosted Apply schemas/);
+  const locked = `function projectLifecycle(value) {
+    return {
+      noSubmit: true,
+      nextAction: value.nextAction,
+    };
+  }`;
+  assert.doesNotThrow(() => assertActiveFunctionDefinitionAst(
+    locked,
+    'projectLifecycle',
+    locked,
+    'lifecycle projection fixture',
+  ));
+  assert.throws(
+    () => assertActiveFunctionDefinitionAst(
+      locked.replace('noSubmit: true', 'noSubmit: false'),
+      'projectLifecycle',
+      locked,
+      'unsafe lifecycle projection fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
 });
 
 test('Apply MCP prompt gates resume preparation on the same browser binding', () => {

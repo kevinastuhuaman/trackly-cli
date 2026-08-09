@@ -171,6 +171,18 @@ test('schema extraction ignores commented and nested decoys and resolves top-lev
     ),
     /must have exactly one active top-level variable declaration/,
   );
+  assert.throws(
+    () => exactSchemaDefinition('let targetSchema = z.string();', 'targetSchema', 'mutable schema fixture'),
+    /must use an immutable const declaration/,
+  );
+  assert.throws(
+    () => exactSchemaDefinition(
+      'const targetSchema = z.string(); targetSchema = z.any();',
+      'targetSchema',
+      'reassigned schema fixture',
+    ),
+    /must never be assigned or updated after declaration/,
+  );
 });
 
 test('scope extraction ignores stale commented mappings and rejects dynamic object members', () => {
@@ -230,7 +242,10 @@ test('registration extraction ignores commented tools and binds the active publi
 
 test('plugin registration proof accepts only unconditional calls in the exported server factory', () => {
   const factoryFixture = (body, returnedServer = 'server') => `
-    export function createTracklyPluginMcpServer() {
+    export function createTracklyPluginMcpServer(
+      authToken: string,
+      requestApi: PluginApiRequest = apiRequest,
+    ) {
       const server = new McpServer({ name: 'trackly', version: PLUGIN_VERSION });
       const registerPluginTool = (name, config, handler) => {
         const securitySchemes = [{
@@ -312,6 +327,13 @@ test('plugin registration proof accepts only unconditional calls in the exported
   assert.throws(
     () => directToolRegistrationsInExportedFunction(factoryFixture(`
       registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+    `).replace('requestApi: PluginApiRequest = apiRequest', 'requestApi: PluginApiRequest = decoyRequest'),
+    'createTracklyPluginMcpServer', 'registerPluginTool', 'request helper provenance fixture'),
+    /must receive authToken and the canonical apiRequest-backed requestApi helper exactly/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
       server.registerTool('trackly_submit', { inputSchema: z.object({}) }, submitHandler);
     `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'direct submit fixture'),
     /must register tools only through the verified registerPluginTool helper/,
@@ -328,6 +350,13 @@ test('plugin registration proof accepts only unconditional calls in the exported
       registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
       server['registerTool']('trackly_submit', { inputSchema: z.object({}) }, submitHandler);
     `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'computed registrar fixture'),
+    /must register tools only through the verified registerPluginTool helper/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      (server as any).registerTool('trackly_submit', { inputSchema: z.object({}) }, submitHandler);
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'typed receiver fixture'),
     /must register tools only through the verified registerPluginTool helper/,
   );
   assert.throws(
@@ -399,6 +428,19 @@ test('hosted schema registration proof uses only direct reachable factory initia
     () => directToolRegistrationsInNamedFactory(
       source.replace(
         'return server;',
+        "server.tool('trackly_uncontracted', 'Uncontracted', {}, handler);\n      return server;",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'tail tool hosted factory fixture',
+      ['trackly_active'],
+    ),
+    /executable tool catalog drifted from the locked hosted MCP allowlist/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        'return server;',
         'abortStartup();\n      return server;',
       ),
       'createTracklyMcpServer',
@@ -465,6 +507,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
     routeWrapperEnd = '',
   ) => `
     import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+    import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
     import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
     import { tracklyOAuthProvider } from './oauth-provider.js';
     import { MCP_PLUGIN_RESOURCE } from './mcp-tokens.js';
@@ -570,6 +613,44 @@ test('plugin registration proof binds the exported factory to the live POST rout
     routerSource,
     'createTracklyPluginMcpServer',
     'router fixture',
+  ));
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace(
+        "import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';",
+        "import { StreamableHTTPServerTransport } from './decoy-transport.js';",
+      ),
+      'createTracklyPluginMcpServer',
+      'decoy transport fixture',
+    ),
+    /must import StreamableHTTPServerTransport as StreamableHTTPServerTransport exactly once from @modelcontextprotocol\/sdk\/server\/streamableHttp\.js/,
+  );
+  for (const competingRoute of [
+    "router.all('/', (_req, res) => res.end());",
+    "router.use('/', (_req, res) => res.end());",
+    "router.route('/').post((_req, res) => res.end());",
+    "router.all('/{*splat}', (_req, res) => res.end());",
+    "router.use(/.*/, (_req, res) => res.end());",
+    "router.post(['/', '/shadow'], (_req, res) => res.end());",
+    "router.use(dynamicMount, (_req, res) => res.end());",
+    "router['post']('/', (_req, res) => res.end());",
+    "router[dynamicMethod]('/', (_req, res) => res.end());",
+    "router.route('/')['post']((_req, res) => res.end());",
+    "router.route('/').get(readHandler).post(writeHandler);",
+  ]) {
+    assert.throws(
+      () => assertExportedFactoryUsedByPluginRouter(
+        routerSource.replace('router.post(', `${competingRoute}\n    router.post(`),
+        'createTracklyPluginMcpServer',
+        'competing route fixture',
+      ),
+      /must not register an earlier router mount that could cover POST \/ ahead of the authenticated route/,
+    );
+  }
+  assert.doesNotThrow(() => assertExportedFactoryUsedByPluginRouter(
+    routerSource.replace('router.post(', "router.use('/health', healthRouter);\n    router.post("),
+    'createTracklyPluginMcpServer',
+    'statically disjoint route fixture',
   ));
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(
@@ -1870,6 +1951,8 @@ function validateBrandAsset(manifest, provenance, packagedBytes) {
   }
 
   assert.match(provenance.packagedAsset, /\.svg$/);
+  assert.match(provenance.packagedSha256, /^[a-f0-9]{64}$/);
+  assert.equal(sha256(packagedBytes), provenance.packagedSha256);
   assert.equal(provenance.byteIdenticalToSource, false);
   assert.equal(provenance.pixelIdenticalToSource, false);
   assert.equal(provenance.visualApprovalRequired, true);
@@ -1977,6 +2060,8 @@ test('public skills reference only the locked 18-tool facade', () => {
   const lock = json('plugins/trackly/skill-lock.json');
   const actual = referencedTools(path.join(PLUGIN, 'skills'));
   assert.equal(lock.publicToolAllowlist.length, 18);
+  assert.equal(lock.hostedMcpToolAllowlist.length, 47);
+  assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 47);
   assert.deepEqual(actual, [...lock.publicToolAllowlist].sort());
   assert.ok(!actual.some((name) => name.includes('referral')));
   assert.deepEqual(lock.publicLifecycleContract, {
@@ -2032,14 +2117,16 @@ test('public skills reference only the locked 18-tool facade', () => {
 
 test('adapted trackly Apply skill is traceable to its source and safety invariants', () => {
   const lock = json('plugins/trackly/skill-lock.json');
+  const skill = read('plugins/trackly/skills/trackly-apply/SKILL.md');
+  const lifecycle = read('plugins/trackly/skills/trackly-apply/references/lifecycle-contract.md');
+  const handoff = read('plugins/trackly/skills/trackly-apply/references/review-handoff.md');
   assert.equal(lock.source.treeSha256, treeSha256(path.join(ROOT, lock.source.path)));
   assert.equal(lock.adapted.treeSha256, treeSha256(path.join(ROOT, lock.adapted.path)));
   assert.match(
-    read('plugins/trackly/skills/trackly-apply/SKILL.md'),
+    skill,
     /`reasonCode: execution_restarted`/,
   );
 
-  const skill = read('plugins/trackly/skills/trackly-apply/SKILL.md');
   assert.match(skill, /^---\nname: trackly-apply\n/);
   assert.match(skill, /Never activate the final Submit control/);
   assert.match(skill, /jobs the user approved/);
@@ -2088,13 +2175,12 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(writing, /If the user declines, does not answer, or gives ambiguous approval, do not call remote lint/);
   assert.match(writing, /local required\/minimum\/maximum-length checks/);
 
-  const lifecycleGuidance = read('plugins/trackly/skills/trackly-apply/references/lifecycle-contract.md');
-  assert.match(lifecycleGuidance, /matching `availability` flag is true/);
-  assert.match(lifecycleGuidance, /strictly projects the result to those requested keys/);
-  assert.match(lifecycleGuidance, /`operation: bind_surface`/);
-  assert.match(lifecycleGuidance, /authoritative next-wave receipt/);
-  assert.match(lifecycleGuidance, /server-verified origin and ATS-tenant policy/);
-  assert.match(lifecycleGuidance, /Resume a parked member only after an explicit user request/);
+  assert.match(lifecycle, /matching `availability` flag is true/);
+  assert.match(lifecycle, /strictly projects the result to those requested keys/);
+  assert.match(lifecycle, /`operation: bind_surface`/);
+  assert.match(lifecycle, /authoritative next-wave receipt/);
+  assert.match(lifecycle, /server-verified origin and ATS-tenant policy/);
+  assert.match(lifecycle, /Resume a parked member only after an explicit user request/);
 
   const discoverySkill = read('plugins/trackly/skills/trackly/SKILL.md');
   assert.match(discoverySkill, /validated posting-date signals only/);
@@ -2125,7 +2211,6 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /Wait until the advertised retry time or estimated return time before one work refetch/);
   assert.match(browserSafety, /verify only the filename visibly committed/);
   assert.match(browserSafety, /never claim an artifact identity, preview, or hash exists/);
-  const lifecycle = read('plugins/trackly/skills/trackly-apply/references/lifecycle-contract.md');
   assert.match(lifecycle, /at most 100 `\{ key, label \}` records each/);
   assert.match(lifecycle, /`profile\.availableFields`/);
   assert.match(lifecycle, /snapshot `profileKeys`/);
@@ -2143,10 +2228,13 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(lifecycle, /`browserBindingHash`/);
   assert.match(lifecycle, /`evidenceFingerprint`/);
   assert.match(lifecycle, /Do not send server-owned internals, resume IDs, filenames, paths, contents, download URLs, or answer values/);
-  const handoff = read('plugins/trackly/skills/trackly-apply/references/review-handoff.md');
   assert.match(handoff, /filename check does not bind or attest the browser-local bytes/);
   assert.match(handoff, /verified preservation receipt and user-visible reachability proof/);
   assert.match(handoff, /Inventory membership alone is not visibility proof/);
+  assert.match(handoff, /Before manual submission/);
+  assert.match(handoff, /leave only those certified tabs at review/);
+  assert.match(handoff, /exclude that reconciled member from any later review handoff/);
+  assert.match(handoff, /Never tell the user to submit an already reconciled member/);
 });
 
 test('submission fixtures cover six positive and three negative cases', () => {
