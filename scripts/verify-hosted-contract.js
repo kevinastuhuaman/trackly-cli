@@ -93,20 +93,32 @@ function directToolRegistrationsInExportedFunction(
   }
   assert.ok(registrations.length > 0, `${expectedFunction} in ${sourcePath} must directly register tools`);
   const firstRegistrationIndex = registrationStatementIndexes[0];
-  assert.ok(
-    factory.body.body.slice(0, firstRegistrationIndex)
-      .every((statement) => statement.type === 'VariableDeclaration'),
-    `${expectedFunction} in ${sourcePath} must not branch, return, or throw before registering tools`,
-  );
   assert.deepEqual(
     registrationStatementIndexes,
     Array.from({ length: registrations.length }, (_, index) => firstRegistrationIndex + index),
     `${expectedFunction} in ${sourcePath} must register tools in one unconditional contiguous block`,
   );
 
-  const directDeclarators = factory.body.body.flatMap((statement) => (
+  const preRegistrationStatements = factory.body.body.slice(0, firstRegistrationIndex);
+  assert.equal(
+    preRegistrationStatements.length,
+    2,
+    `${expectedFunction} in ${sourcePath} must contain only the verified server and registration-helper declarations before registering tools`,
+  );
+  assert.ok(
+    preRegistrationStatements.every((statement) => (
+      statement.type === 'VariableDeclaration' && statement.declarations.length === 1
+    )),
+    `${expectedFunction} in ${sourcePath} must contain only single-binding declarations before registering tools`,
+  );
+  const directDeclarators = preRegistrationStatements.flatMap((statement) => (
     statement.type === 'VariableDeclaration' ? statement.declarations : []
   ));
+  assert.deepEqual(
+    directDeclarators.map((declarator) => declarator.id?.type === 'Identifier' && declarator.id.name),
+    ['server', expectedCallee],
+    `${expectedFunction} in ${sourcePath} must declare only server then ${expectedCallee} before registering tools`,
+  );
   const serverBindings = directDeclarators.filter((declarator) => (
     declarator.id?.type === 'Identifier'
     && declarator.id.name === 'server'
@@ -117,6 +129,14 @@ function directToolRegistrationsInExportedFunction(
     serverBindings.length,
     1,
     `${expectedFunction} in ${sourcePath} must directly create exactly one registered server`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(serverBindings[0].init),
+    canonicalSchemaAst(babelParser.parseExpression(
+      "new McpServer({ name: 'trackly', version: PLUGIN_VERSION })",
+      { plugins: ['typescript'] },
+    )),
+    `${expectedFunction} in ${sourcePath} must use the locked pure server initializer`,
   );
   const registrationHelpers = directDeclarators.filter((declarator) => (
     declarator.id?.type === 'Identifier' && declarator.id.name === expectedCallee
@@ -137,6 +157,13 @@ function directToolRegistrationsInExportedFunction(
     'BlockStatement',
     `${expectedCallee} in ${sourcePath} must use a block body`,
   );
+  assert.deepEqual(
+    registrationHelper.params.map((parameter) => (
+      parameter.type === 'Identifier' ? parameter.name : null
+    )),
+    ['name', 'config', 'handler'],
+    `${expectedCallee} in ${sourcePath} must receive the exact name, config, and handler bindings`,
+  );
   const helperReturnStatements = registrationHelper.body.body.filter((statement) => (
     statement.type === 'ReturnStatement'
   ));
@@ -150,15 +177,22 @@ function directToolRegistrationsInExportedFunction(
     helperReturnStatements[0],
     `${expectedCallee} in ${sourcePath} must end by returning its registration result`,
   );
-  assert.equal(
-    babelCalleeName(helperReturnStatements[0].argument?.callee),
-    'server.registerTool',
-    `${expectedCallee} in ${sourcePath} must register every tool on the exact server returned by the factory`,
-  );
-  assert.ok(
-    registrationHelper.body.body.slice(0, -1)
-      .every((statement) => statement.type === 'VariableDeclaration'),
-    `${expectedCallee} in ${sourcePath} must reach server.registerTool without an earlier branch, return, or throw`,
+  assert.deepEqual(
+    canonicalSchemaAst(registrationHelper.body),
+    canonicalSchemaAst(babelParser.parseExpression(`(name, config, handler) => {
+      const securitySchemes = [{
+        type: 'oauth2',
+        scopes: requiredScopesForPluginTool(name) || [],
+      }];
+      return server.registerTool(name, {
+        ...config,
+        _meta: {
+          ...config._meta,
+          securitySchemes,
+        },
+      } as any, handler);
+    }`, { plugins: ['typescript'] }).body),
+    `${expectedCallee} in ${sourcePath} must forward the exact name, config, and handler bindings through the locked security metadata augmentation`,
   );
 
   const factoryReturns = [];
@@ -2198,7 +2232,7 @@ const applyOutputContract = {
   status: 'z.enum(APPLY_EXECUTION_STATUS_VALUES).nullable()',
   batchId: 'nullableCountSchema',
   memberIds: 'z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET)',
-  nextAction: "z.enum(['work_ready', 'use_active_target', 'advance_or_refresh', 'restart_after_reauthorization'])",
+  nextAction: "z.enum(['work_ready', 'use_active_target', 'advance_or_refresh', 'restart_after_reauthorization', 'complete', 'manual_review'])",
   noSubmit: 'z.literal(true)',
 };
 assert.deepEqual(
@@ -2621,10 +2655,15 @@ for (const [confirmation, contract] of Object.entries(reconcileBranchContract)) 
     );
   }
 }
-assertWrappedHandlerRequestEndpoint(
+assertWrappedHandlerAst(
   reconcileRegistration,
-  'POST',
-  '`/api/jobscout/apply/runs/${runId}/plugin-manual-submission`',
+  `({ runId, idempotencyKey, ...body }) => requestApi(
+    'POST',
+    \`/api/jobscout/apply/runs/\${runId}/plugin-manual-submission\`,
+    authToken,
+    body,
+    { 'Idempotency-Key': idempotencyKey },
+  )`,
   hostedPluginSourcePath,
 );
 

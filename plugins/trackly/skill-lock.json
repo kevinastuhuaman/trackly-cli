@@ -8,7 +8,7 @@
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "2779867158763e357ba1971fe48268e7b6c25e2b584ece2290781a36a4954db3"
+    "treeSha256": "88b45c36f58d322bc804dbabf87e05ebb1697ac0338dabb2521927f153915d8e"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -75,7 +75,7 @@
   "publicExecutableContract": {
     "descriptorSha256": {
       "trackly_search_jobs": "6e72672960c93c127fcd38588fcd2444ba59dea169c0d46d300c70201b6aca1a",
-      "trackly_get_job": "430412cdc6feb700031c970a63e77bc3990be9f46e3cc7c9629fb187f16a4d3c",
+      "trackly_get_job": "cba56f95a6b6cd44b3f440c3005f1daab9dbe1ae2e923070fcffde517d94c1d1",
       "trackly_search_companies": "fb72369ef77512c279a4544c0978fe10a592fbcf7032be872e10a9364a02a8de",
       "trackly_get_job_brief": "c64829b0bc2f0c0347f440f9261dca16675a886adc045f6dca7c56e22dcb0725",
       "trackly_get_preferences": "3a848d9864eaa749a6964ae05a3520ccfb755d93cad85540ec16c7f3761935b4",
@@ -95,7 +95,7 @@
     },
     "handlerSha256": {
       "trackly_search_jobs": "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481",
-      "trackly_get_job": "33845dc25c55483d705d4140e32bb9a9c0cd310ce740b7914356c9932b9b7efc",
+      "trackly_get_job": "44cb4d59112b1752e5ee450427981084b299b909d0901406dafe12de24625eab",
       "trackly_search_companies": "812ea0129798aabd2c3de29cc5ed70ce92cb47fe4bf117a99616860397b0bc8d",
       "trackly_get_job_brief": "462d7c379bfea90f3cff8030b68b22830ba4db2f5952531fa7230db7b625639f",
       "trackly_get_preferences": "359dae5b5485dee12788f054413d1690f2527dfc6472202f9e75682c1dbdf8ac",
@@ -105,7 +105,7 @@
       "trackly_save_application_answers": "441c563c75a323165cf87a323134ff210314dd91d5c392047dfaba1cca756df2",
       "trackly_grant_sensitive_storage_consent": "77c53b12516d4b05f7853ba7a326c667e95be8a718dcebb77fc54f806dec4f84",
       "trackly_revoke_sensitive_storage_consent": "223aa22074b9f857177c3b0f45a5d1d8f262bcdee3afb7c0478d222232b893cf",
-      "trackly_start_or_resume_apply": "e6ff9537910724f20f3d98d740e2aa06c66128129f7dee377752185c04db4e8d",
+      "trackly_start_or_resume_apply": "647f203340c62d92366907f75473352f5f868e909e894f178b24baab9631c034",
       "trackly_get_apply_work": "bd78a4561bb04b3ecf40e11149c9e69551af0f0c67c1fe3788a2962b1fdba028",
       "trackly_report_apply_progress": "1acbc6cd4782177761ab1d5eb3a10d647459d3702a4b987d8913970f466c460c",
       "trackly_prepare_resume_artifact": "bcc1f89678a3cd53aed2864556a8afb056a94535a85051d39379e5b71e98d3ed",
@@ -113,9 +113,9 @@
       "trackly_reconcile_manual_submission": "32be19dadef3c8e3a1d9f320d3c1a9a0cde3845f930dac85641409f25a722b0a",
       "trackly_stop_apply": "8363bfe5eb7fb8ed4093b1f01bdaa9ebcb599ac35004fd13bab0ae6a2ab4f1ce"
     },
-    "pluginServerSha256": "fb5c5fbbf00db07b9ca7b83a65b3ae22b7f6c49faa0194b3fadbd56ed4f8b568",
+    "pluginServerSha256": "f75fd1785b65594120b545c4fecee47a61d9b07719f8331b66777758b15a8ef6",
     "pluginScopesSha256": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
-    "jobBriefServiceSha256": "eb1633b0632146abd7e7f5feff62f4383dfaae8847d3be8d9bf2a5511ca75a18",
+    "jobBriefServiceSha256": "38c1e59c85f3de09fd09ff6bfd94aa86ad00d6276a3202675ec27fac2fc8a4ab",
     "schemaSha256": {
       "SAFE_IDEMPOTENCY_KEY": "046859665306e5aeaf57032c76268934e1b98c95d4c17a88434062c9b6a4547a",
       "SAFE_CODE": "a35176c6c3f6ee563d4b6f6f68e4c546d8b03b03915d37bf55dd5a7011927574",
@@ -126,7 +126,7 @@
       "nullableCountSchema": "5ab8b408c3388ddab2fffb55c82c85a963553e6da82201f61e5fe4aa9d1f04a0",
       "profileFieldReferenceSchema": "f9784ffa6175af0782a4e5479c8ffd59ed1f0767e7104295755bd1e4e00c35cf",
       "readinessOutputSchema": "268e3b324f349da8c32e6d21f17b8951d9ce0329b46b1a9f178df4f7966427c3",
-      "applyOutputSchema": "9f75bc88c47f2ab93848087dc1089100650e2a0209b638d256267be44239b194",
+      "applyOutputSchema": "743c5a2696269a1735917c57a4b927e4adc25f130d208e217e46438d90c53bb8",
       "progressOutputSchema": "a9b8e00cfa4c7fad0a90488d23c19207f71a065d4f28ecbac549bc23ada074c8",
       "reviewOutputSchema": "a6e1fbdb32df0f8f72ddbc1c7f93f78ffce9b31580222f6a1efa74fc62fcead8",
       "resumeOutputSchema": "14fc07ae13c6b4f38d54f658edb55fdb00d16f6fdc77fa966235fdf4d9665af6"

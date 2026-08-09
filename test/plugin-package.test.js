@@ -228,10 +228,19 @@ test('registration extraction ignores commented tools and binds the active publi
 test('plugin registration proof accepts only unconditional calls in the exported server factory', () => {
   const factoryFixture = (body, returnedServer = 'server') => `
     export function createTracklyPluginMcpServer() {
-      const server = new McpServer({ name: 'trackly', version: '1.0.0' });
+      const server = new McpServer({ name: 'trackly', version: PLUGIN_VERSION });
       const registerPluginTool = (name, config, handler) => {
-        const securitySchemes = [];
-        return server.registerTool(name, config, handler);
+        const securitySchemes = [{
+          type: 'oauth2',
+          scopes: requiredScopesForPluginTool(name) || [],
+        }];
+        return server.registerTool(name, {
+          ...config,
+          _meta: {
+            ...config._meta,
+            securitySchemes,
+          },
+        } as any, handler);
       };
       ${body}
       return ${returnedServer};
@@ -262,10 +271,26 @@ test('plugin registration proof accepts only unconditional calls in the exported
   );
   assert.throws(
     () => directToolRegistrationsInExportedFunction(factoryFixture(`
+        registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+    `).replace(
+      'const server = new McpServer',
+      'const abort = abortStartup();\n      const server = new McpServer',
+    ), 'createTracklyPluginMcpServer', 'registerPluginTool', 'executable initializer fixture'),
+    /only the verified server and registration-helper declarations/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+        registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+    `).replace('server.registerTool(name, {', 'server.registerTool(alias, {'),
+    'createTracklyPluginMcpServer', 'registerPluginTool', 'forwarded name fixture'),
+    /must forward the exact name, config, and handler bindings/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
         if (disabled) return server;
         registerPluginTool('trackly_unreachable', { inputSchema: z.object({}) }, handler);
     `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'early return fixture'),
-    /must not branch, return, or throw before registering tools/,
+    /must contain only the verified server and registration-helper declarations before registering tools/,
   );
   assert.throws(
     () => directToolRegistrationsInExportedFunction(factoryFixture(`
@@ -279,7 +304,7 @@ test('plugin registration proof accepts only unconditional calls in the exported
       registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
     `).replace('return server.registerTool', 'return decoyServer.registerTool'),
     'createTracklyPluginMcpServer', 'registerPluginTool', 'wrong registration server fixture'),
-    /must register every tool on the exact server returned by the factory/,
+    /must forward the exact name, config, and handler bindings/,
   );
 });
 
@@ -1087,8 +1112,14 @@ test('start, progress, and reconciliation checks bind active endpoint control fl
   );
 
   const reconcileSource = `
-    registerPluginTool('trackly_reconcile_manual_submission', { inputSchema }, wrapTool(({ runId }) =>
-      requestApi('POST', \`/api/jobscout/apply/runs/\${runId}/wrong-reconciliation\`, authToken, body)
+    registerPluginTool('trackly_reconcile_manual_submission', { inputSchema }, wrapTool(({ runId, idempotencyKey, ...body }) =>
+      requestApi(
+        'POST',
+        \`/api/jobscout/apply/runs/\${runId}/plugin-manual-submission\`,
+        authToken,
+        body,
+        { 'Idempotency-Key': wrongKey },
+      )
     ));
   `;
   const [reconcile] = activeToolRegistrations(
@@ -1097,13 +1128,18 @@ test('start, progress, and reconciliation checks bind active endpoint control fl
     'reconcile endpoint fixture',
   );
   assert.throws(
-    () => assertWrappedHandlerRequestEndpoint(
+    () => assertWrappedHandlerAst(
       reconcile,
-      'POST',
-      '`/api/jobscout/apply/runs/${runId}/plugin-manual-submission`',
+      `({ runId, idempotencyKey, ...body }) => requestApi(
+        'POST',
+        \`/api/jobscout/apply/runs/\${runId}/plugin-manual-submission\`,
+        authToken,
+        body,
+        { 'Idempotency-Key': idempotencyKey },
+      )`,
       'reconcile endpoint fixture',
     ),
-    /must target `\/api\/jobscout\/apply\/runs\/\$\{runId\}\/plugin-manual-submission`/,
+    /must preserve its complete locked executable semantics/,
   );
 });
 
@@ -1667,7 +1703,11 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /atomically records the review checkpoint, truth certification, and review-ready outcome/);
   assert.match(skill, /atomically records typed confirmation evidence and the submitted outcome/);
   assert.match(skill, /keep that browser-local upload explicitly unbound and outside the truth certification/);
-  assert.match(skill, /at least once every 60 seconds during active browser work/);
+  assert.match(skill, /There is no generic heartbeat operation/);
+  assert.match(skill, /only when one of its supported lifecycle operations actually occurs/);
+  assert.doesNotMatch(skill, /at least once every 60 seconds during active browser work/);
+  assert.match(skill, /`nextAction: complete`/);
+  assert.match(skill, /`nextAction: manual_review`/);
   assert.match(skill, /first pass for every mutable member in the current bound wave/);
   assert.match(skill, /Wait until the advertised retry time or estimated return time before one work refetch/);
   assert.match(browserSafety, /verify only the filename visibly committed/);
