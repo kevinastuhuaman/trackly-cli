@@ -72,11 +72,44 @@ function directToolRegistrationsInNamedFactory(source, expectedFunction, expecte
     1,
     `${sourcePath} must export exactly one ${expectedFunction} function declaration`,
   );
-  const factoryStatements = factories[0].declaration.body.body;
+  const factory = factories[0].declaration;
+  const factoryStatements = factory.body.body;
+  const expectedCalleeParts = expectedCallee.split('.');
+  assert.equal(expectedCalleeParts.length, 2, `${expectedCallee} must be a direct receiver method`);
+  const [expectedServerBinding, expectedMethod] = expectedCalleeParts;
+  const serverBindings = factoryStatements.flatMap((statement) => (
+    statement.type === 'VariableDeclaration'
+      ? statement.declarations.filter((declarator) => (
+        declarator.id?.type === 'Identifier'
+        && declarator.id.name === expectedServerBinding
+        && declarator.init?.type === 'NewExpression'
+        && babelCalleeName(declarator.init.callee) === 'McpServer'
+      ))
+      : []
+  ));
+  assert.equal(
+    serverBindings.length,
+    1,
+    `${expectedFunction} in ${sourcePath} must directly create exactly one ${expectedServerBinding} McpServer binding`,
+  );
   const registrationIndexes = [];
   const registrations = factoryStatements.flatMap((statement, index) => {
     const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
-    if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== expectedCallee) return [];
+    if (call?.type !== 'CallExpression'
+      || call.callee?.type !== 'MemberExpression'
+      || call.callee.computed
+      || call.callee.property?.type !== 'Identifier'
+      || call.callee.property.name !== expectedMethod) return [];
+    assert.equal(
+      call.callee.object?.type,
+      'Identifier',
+      `${expectedMethod} in ${sourcePath} must be called on the exact ${expectedServerBinding} factory binding`,
+    );
+    assert.equal(
+      call.callee.object.name,
+      expectedServerBinding,
+      `${expectedMethod} in ${sourcePath} must be called on the exact ${expectedServerBinding} factory binding`,
+    );
     assert.equal(
       call.arguments[0]?.type,
       'StringLiteral',
@@ -95,6 +128,39 @@ function directToolRegistrationsInNamedFactory(source, expectedFunction, expecte
       statement.type === 'VariableDeclaration' || statement.type === 'ExpressionStatement'
     )),
     `${expectedFunction} in ${sourcePath} must reach every ${expectedCallee} registration without an earlier branch, return, throw, or disabled path`,
+  );
+  const factoryReturns = [];
+  function visitReturns(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitReturns(child);
+      return;
+    }
+    if (
+      node !== factory
+      && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
+    ) return;
+    if (node.type === 'ReturnStatement') factoryReturns.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitReturns(child);
+    }
+  }
+  visitReturns(factory);
+  assert.equal(
+    factoryReturns.length,
+    1,
+    `${expectedFunction} in ${sourcePath} must have exactly one reachable factory return`,
+  );
+  assert.equal(
+    factoryStatements.at(-1),
+    factoryReturns[0],
+    `${expectedFunction} in ${sourcePath} must end with its sole reachable factory return`,
+  );
+  assert.ok(
+    factoryReturns[0].argument?.type === 'Identifier'
+      && factoryReturns[0].argument.name === expectedServerBinding,
+    `${expectedFunction} in ${sourcePath} must return the exact ${expectedServerBinding} that received the verified registrations`,
   );
   return registrations;
 }

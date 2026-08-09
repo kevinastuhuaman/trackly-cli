@@ -358,6 +358,27 @@ test('hosted schema registration proof uses only direct reachable factory initia
     ),
     /must reach every server\.registerTool registration without an earlier branch, return, throw, or disabled path/,
   );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+        "decoyServer.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'decoy receiver hosted factory fixture',
+    ),
+    /registerTool.*must be called on the exact server factory binding/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace('return server;', 'return decoyServer;'),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'wrong return hosted factory fixture',
+    ),
+    /must return the exact server that received the verified registrations/,
+  );
 });
 
 test('plugin registration proof binds the exported factory to the live POST route', () => {
