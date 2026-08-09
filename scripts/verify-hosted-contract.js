@@ -27,6 +27,70 @@ function parseFullSource(source, sourcePath) {
   return ast;
 }
 
+function babelCalleeName(node) {
+  if (node?.type === 'Identifier') return node.name;
+  if (node?.type !== 'MemberExpression' || node.computed) return null;
+  const objectName = babelCalleeName(node.object);
+  const propertyName = node.property?.type === 'Identifier' ? node.property.name : null;
+  return objectName && propertyName ? `${objectName}.${propertyName}` : null;
+}
+
+function activeToolRegistrations(source, expectedCallee, sourcePath) {
+  const registrations = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'CallExpression' && babelCalleeName(node.callee) === expectedCallee) {
+      assert.equal(
+        node.arguments[0]?.type,
+        'StringLiteral',
+        `${expectedCallee} in ${sourcePath} must register a static string-literal tool name`,
+      );
+      registrations.push({ name: node.arguments[0].value, call: node });
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(parseFullSource(source, sourcePath));
+  return registrations;
+}
+
+function registeredInputSchemaName(registration, sourcePath) {
+  let descriptor = registration.call.arguments[1];
+  while (descriptor?.type === 'TSSatisfiesExpression' || descriptor?.type === 'TSAsExpression') {
+    descriptor = descriptor.expression;
+  }
+  assert.equal(
+    descriptor?.type,
+    'ObjectExpression',
+    `${registration.name} in ${sourcePath} must publish an object descriptor`,
+  );
+  const inputSchemaProperties = descriptor.properties.filter((property) => (
+    property.type === 'ObjectProperty'
+    && !property.computed
+    && (
+      (property.key.type === 'Identifier' && property.key.name === 'inputSchema')
+      || (property.key.type === 'StringLiteral' && property.key.value === 'inputSchema')
+    )
+  ));
+  assert.equal(
+    inputSchemaProperties.length,
+    1,
+    `${registration.name} in ${sourcePath} must publish exactly one active inputSchema property`,
+  );
+  assert.equal(
+    inputSchemaProperties[0].value.type,
+    'Identifier',
+    `${registration.name} in ${sourcePath} must publish a named inputSchema identifier`,
+  );
+  return inputSchemaProperties[0].value.name;
+}
+
 function activeVariableDeclarator(source, name, sourcePath) {
   const matches = [];
   function visit(node, parent = null) {
@@ -407,8 +471,12 @@ assert.match(
 );
 
 const hostedPluginTools = Object.keys(hostedPluginContract.tools).sort();
-const executablePluginTools = [...hostedPluginSource.matchAll(/\bregisterPluginTool\(\s*['"]([^'"]+)['"]/g)]
-  .map((match) => match[1]);
+const executablePluginRegistrations = activeToolRegistrations(
+  hostedPluginSource,
+  'registerPluginTool',
+  hostedPluginSourcePath,
+);
+const executablePluginTools = executablePluginRegistrations.map((registration) => registration.name);
 const sortedExecutablePluginTools = [...executablePluginTools].sort();
 assert.equal(hostedPluginContract.contractVersion, '1.0.0');
 assert.deepEqual(
@@ -711,16 +779,20 @@ const publishedSchemaCompatibility = {
   },
 };
 for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) {
-  for (const [side, sourceText, schemaName] of [
-    ['local', localApplySource, mapping.localPublished],
-    ['hosted', hostedApplySource, mapping.hostedPublishedAndParse],
+  for (const [side, sourceText, sourcePath, schemaName] of [
+    ['local', localApplySource, localApplySourcePath, mapping.localPublished],
+    ['hosted', hostedApplySource, hostedApplySourcePath, mapping.hostedPublishedAndParse],
   ]) {
-    const registration = new RegExp(
-      `server\\.registerTool\\(\\s*['"]${toolName}['"]\\s*,\\s*\\{[\\s\\S]{0,1000}?inputSchema:\\s*${schemaName}\\b`,
+    const registrations = activeToolRegistrations(sourceText, 'server.registerTool', sourcePath)
+      .filter((registration) => registration.name === toolName);
+    assert.equal(
+      registrations.length,
+      1,
+      `${toolName} ${side} must have exactly one active server.registerTool registration`,
     );
-    assert.match(
-      sourceText,
-      registration,
+    assert.equal(
+      registeredInputSchemaName(registrations[0], sourcePath),
+      schemaName,
       `${toolName} ${side} tools/list schema must use ${schemaName}`,
     );
   }
@@ -830,10 +902,12 @@ console.log(
 }
 
 module.exports = {
+  activeToolRegistrations,
   canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
+  registeredInputSchemaName,
   schemaDefinition,
   sha256ExactBytes,
   staticStringArrayMap,

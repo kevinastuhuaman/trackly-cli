@@ -567,8 +567,8 @@ test('hosted parity verifier proves published wrapper compatibility from parsed 
   assert.match(verifier, /assertStartRunWrapperCompatibility/);
   assert.match(verifier, /hostedSchema\.callee\.object/);
   assert.match(verifier, /before parse-time superRefine/);
-  assert.match(verifier, /\['local', localApplySource, mapping\.localPublished\]/);
-  assert.match(verifier, /\['hosted', hostedApplySource, mapping\.hostedPublishedAndParse\]/);
+  assert.match(verifier, /\['local', localApplySource, localApplySourcePath, mapping\.localPublished\]/);
+  assert.match(verifier, /\['hosted', hostedApplySource, hostedApplySourcePath, mapping\.hostedPublishedAndParse\]/);
   assert.match(verifier, /\$\{toolName\} \$\{side\} tools\/list schema must use \$\{schemaName\}/);
 });
 
@@ -618,7 +618,9 @@ test('hosted parity verifier fails clearly when the plugin contract has no tools
 
 test('hosted parity verifier binds the public lifecycle promise to executable plugin schemas and handlers', () => {
   const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
-  assert.match(verifier, /hostedPluginSource\.matchAll/);
+  assert.match(verifier, /activeToolRegistrations\(/);
+  assert.match(verifier, /'registerPluginTool'/);
+  assert.match(verifier, /must register a static string-literal tool name/);
   assert.match(verifier, /Executable hosted plugin registrations drifted from the packaged public facade allowlist/);
   assert.match(verifier, /Executable hosted plugin registrations drifted from the hosted plugin contract/);
   assert.match(verifier, /publicExecutableContract\.descriptorSha256/);
@@ -637,6 +639,9 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /TSAsExpression/);
   assert.match(verifier, /must contain only static properties \(no spreads or methods\)/);
   assert.match(verifier, /must contain only string literals/);
+  assert.match(verifier, /registeredInputSchemaName/);
+  assert.match(verifier, /exactly one active server\.registerTool registration/);
+  assert.match(verifier, /exactly one active inputSchema property/);
   assert.match(verifier, /descriptors or inline schemas drifted from the packaged exact-byte digest lock/);
   assert.match(verifier, /availableFields/);
   assert.match(verifier, /hostedPluginContract\.lifecycle/);

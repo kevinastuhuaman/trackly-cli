@@ -10,10 +10,12 @@ const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 
 const {
+  activeToolRegistrations,
   canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
+  registeredInputSchemaName,
   sha256ExactBytes,
   staticStringArrayMap,
 } = require('../scripts/verify-hosted-contract.js');
@@ -157,6 +159,34 @@ test('scope extraction ignores stale commented mappings and rejects dynamic obje
     ),
     /only static properties \(no spreads or methods\)/,
   );
+});
+
+test('registration extraction ignores commented tools and binds the active published schema', () => {
+  const pluginSource = `
+    // registerPluginTool('trackly_commented_out', {}, handler);
+    registerPluginTool('trackly_active', {}, handler);
+  `;
+  assert.deepEqual(
+    activeToolRegistrations(pluginSource, 'registerPluginTool', 'plugin registration fixture')
+      .map((registration) => registration.name),
+    ['trackly_active'],
+  );
+
+  const applySource = `
+    /* server.registerTool('trackly_apply', { inputSchema: staleSchema }, handler); */
+    server.registerTool(
+      'trackly_apply',
+      { inputSchema: activeSchema } as const,
+      handler,
+    );
+  `;
+  const [registration] = activeToolRegistrations(
+    applySource,
+    'server.registerTool',
+    'Apply registration fixture',
+  );
+  assert.equal(registration.name, 'trackly_apply');
+  assert.equal(registeredInputSchemaName(registration, 'Apply registration fixture'), 'activeSchema');
 });
 
 test('importing executable digest helpers never runs hosted verification as a side effect', () => {
