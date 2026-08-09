@@ -99,6 +99,33 @@ function schemaDefinition(source, name, sourcePath) {
   assert.fail(`${name} is unterminated in ${sourcePath}`);
 }
 
+function conditionAfter(source, anchor, sourcePath) {
+  const anchorIndex = source.indexOf(anchor);
+  assert.ok(anchorIndex >= 0, `${anchor} is missing from ${sourcePath}`);
+  const ifIndex = source.indexOf('if', anchorIndex + anchor.length);
+  const start = source.indexOf('(', ifIndex);
+  assert.ok(ifIndex >= 0 && start >= 0, `validation condition is missing from ${sourcePath}`);
+  let parens = 0;
+  let quote = '';
+  let escaped = false;
+  for (let index = start; index < source.length; index++) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
+    if (char === '(') parens += 1;
+    else if (char === ')') {
+      parens -= 1;
+      if (parens === 0) return source.slice(start + 1, index).trim();
+    }
+  }
+  assert.fail(`validation condition is unterminated in ${sourcePath}`);
+}
+
 const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
 for (const schemaName of [
   'applyExecutionDispositionSchema',
@@ -132,15 +159,27 @@ assert.equal(
   normalizeSchema(schemaDefinition(hostedApplySource, 'startApplyRunSchema', hostedApplySourcePath)),
   'start Apply run advertised fields drifted between hosted and local MCP',
 );
-const localStartApplyRunSchema = normalizeSchema(schemaDefinition(
+const localStartApplyRunSchema = schemaDefinition(
   localApplySource,
   'startApplyRunSchema',
   localApplySourcePath,
-));
-assert.match(localStartApplyRunSchema, /\.superRefine\(/);
-assert.match(hostedApplySource, /batchValues\.some\(\(item\) => item !== undefined\)/);
-assert.match(hostedApplySource, /batchValues\.some\(\(item\) => item === undefined\)/);
-assert.match(hostedApplySource, /incomplete_apply_batch_binding/);
+);
+assert.match(normalizeSchema(localStartApplyRunSchema), /\.superRefine\(/);
+const hostedStartToolStart = hostedApplySource.indexOf("'trackly_start_apply_run'");
+const hostedStartToolEnd = hostedApplySource.indexOf('\n  server.tool(', hostedStartToolStart);
+assert.ok(hostedStartToolStart >= 0 && hostedStartToolEnd > hostedStartToolStart);
+const hostedStartTool = hostedApplySource.slice(hostedStartToolStart, hostedStartToolEnd);
+assert.equal(
+  normalizeSchema(schemaDefinition(localStartApplyRunSchema, 'batchValues', localApplySourcePath)),
+  normalizeSchema(schemaDefinition(hostedStartTool, 'batchValues', hostedApplySourcePath)),
+  'start Apply run batch-binding members drifted between hosted and local MCP',
+);
+assert.equal(
+  normalizeSchema(conditionAfter(localStartApplyRunSchema, 'const batchValues', localApplySourcePath)),
+  normalizeSchema(conditionAfter(hostedStartTool, 'const batchValues', hostedApplySourcePath)),
+  'start Apply run complete validation condition drifted between hosted and local MCP',
+);
+assert.match(hostedStartTool, /incomplete_apply_batch_binding/);
 
 console.log(
   `Trackly Apply MCP contracts and named executable schemas match at ${local.contractVersion}.`,
