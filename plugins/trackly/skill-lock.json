@@ -8,7 +8,7 @@
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "ea983757e28583f69bcb0d0029b5b8f60776099b4902fe4672c212df7cc62004"
+    "treeSha256": "ad10032649a227a133adcac804be13c2fdbe83dc66da70b4d48408d9ec8b4a7a"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -24,6 +24,7 @@
   },
   "publicLifecycleContract": {
     "readinessMissingProfileFields": "canonical_key_and_public_label_only",
+    "readinessAvailableProfileFields": "saved_canonical_key_and_public_label_only",
     "startOrResume": "returns_claimed_batch_bound_runs",
     "leaseHandling": "facade_owned_never_model_visible",
     "leaseRenewal": "facade_owned_on_every_work_and_mutation_path",

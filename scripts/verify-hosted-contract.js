@@ -139,6 +139,9 @@ for (const schemaName of [
 }
 
 const hostedPluginTools = Object.keys(hostedPluginContract.tools).sort();
+const executablePluginTools = [...hostedPluginSource.matchAll(/\bregisterPluginTool\(\s*['"]([^'"]+)['"]/g)]
+  .map((match) => match[1]);
+const sortedExecutablePluginTools = [...executablePluginTools].sort();
 assert.equal(hostedPluginContract.contractVersion, '1.0.0');
 assert.deepEqual(
   hostedPluginContract.lifecycle,
@@ -160,14 +163,29 @@ assert.match(
 assert.deepEqual(
   hostedPluginTools,
   [...pluginLock.publicToolAllowlist].sort(),
-  'Executable hosted plugin tools drifted from the packaged public facade allowlist',
+  'Hosted plugin contract tools drifted from the packaged public facade allowlist',
+);
+assert.equal(
+  new Set(executablePluginTools).size,
+  executablePluginTools.length,
+  'Executable hosted plugin source registers a public tool name more than once',
+);
+assert.deepEqual(
+  sortedExecutablePluginTools,
+  [...pluginLock.publicToolAllowlist].sort(),
+  'Executable hosted plugin registrations drifted from the packaged public facade allowlist',
+);
+assert.deepEqual(
+  sortedExecutablePluginTools,
+  hostedPluginTools,
+  'Executable hosted plugin registrations drifted from the hosted plugin contract',
 );
 assert.ok(
-  hostedPluginTools.every((name) => !/referral|contact|outreach|trackly_chat/.test(name)),
+  executablePluginTools.every((name) => !/referral|contact|outreach|trackly_chat|(?:^|_)submit(?:_|$)/.test(name)),
   'Hosted plugin must not expose referral, contact, outreach, or agent-in-agent tools',
 );
 assert.ok(
-  !hostedPluginTools.includes('trackly_submit_application'),
+  !executablePluginTools.includes('trackly_submit_application'),
   'Hosted plugin must not expose an application submission tool',
 );
 
@@ -184,16 +202,27 @@ const readinessSchema = schemaDefinition(
   'readinessOutputSchema',
   hostedPluginSourcePath,
 );
+const profileFieldReferenceSchema = schemaDefinition(
+  hostedPluginSource,
+  'profileFieldReferenceSchema',
+  hostedPluginSourcePath,
+);
 assert.match(readinessSchema, /missingRequired/);
-assert.match(readinessSchema, /key: z\.string\(\)\.min\(1\)\.max\(200\)/);
-assert.match(readinessSchema, /label: z\.string\(\)\.min\(1\)\.max\(1000\)/);
+assert.match(readinessSchema, /availableFields/);
+assert.match(readinessSchema, /missingRequired: z\.array\(profileFieldReferenceSchema\)\.max\(100\)/);
+assert.match(readinessSchema, /availableFields: z\.array\(profileFieldReferenceSchema\)\.max\(100\)/);
+assert.match(profileFieldReferenceSchema, /key: z\.string\(\)\.min\(1\)\.max\(200\)/);
+assert.match(profileFieldReferenceSchema, /label: z\.string\(\)\.min\(1\)\.max\(1000\)/);
 
 const applySchema = schemaDefinition(
   hostedPluginSource,
   'applyOutputSchema',
   hostedPluginSourcePath,
 );
-for (const field of ['batchId', 'memberIds', 'nextAction', 'restart_after_reauthorization']) {
+for (const field of [
+  'activeTarget', 'batchId', 'memberIds', 'nextAction',
+  'use_active_target', 'advance_or_refresh', 'restart_after_reauthorization',
+]) {
   assert.match(applySchema, new RegExp(`\\b${field}\\b`), `Apply output is missing ${field}`);
 }
 assert.doesNotMatch(applySchema, /\bleaseToken\b/);
@@ -207,6 +236,8 @@ assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/appl
 const getWork = pluginToolDefinition('trackly_get_apply_work');
 assert.match(getWork, /annotations: mutationAnnotations\(\)/);
 assert.match(getWork, /plugin-work/);
+assert.match(getWork, /memberIds: z\.array\(z\.number\(\)\.int\(\)\.min\(1\)\)\.min\(1\)/);
+assert.match(getWork, /profileKeys: z\.array\(z\.string\(\)\.min\(1\)\.max\(200\)\)\.max\(100\)\.optional\(\)/);
 assert.doesNotMatch(getWork, /readOnlyAnnotations/);
 
 const progress = pluginToolDefinition('trackly_report_apply_progress');

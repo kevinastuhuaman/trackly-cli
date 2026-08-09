@@ -4,9 +4,11 @@ The public facade owns one resumable, batch-bound lifecycle. Do not recreate it 
 
 ## Readiness and missing profile facts
 
-`trackly_get_apply_readiness` returns `profile.missingRequired` as at most 100 `{ key, label }` records. `key` is a canonical profile-catalog key and `label` is its public schema label. The response intentionally contains no answer value, option value, contact detail, resume identity, or sensitive metadata.
+`trackly_get_apply_readiness` returns `profile.missingRequired` and `profile.availableFields` as at most 100 `{ key, label }` records each. In both, `key` is a canonical profile-catalog key and `label` is its public schema label. `missingRequired` identifies absent required facts; `availableFields` is the sorted intersection of saved profile fields and the canonical schema. Both intentionally contain no answer value, option value, contact detail, resume identity, or sensitive metadata.
 
 Ask the user only for the returned missing facts. Save a fact with `trackly_save_application_answers` only after the user confirms its value and scope, then refetch readiness. Never turn a label, model guess, employer-page value, or one-time truthfulness attestation into a reusable profile answer.
+
+After bound work reveals which canonical facts its forms need, intersect those keys with `profile.availableFields`. Request only that minimal intersection through the snapshot `profileKeys` field on `trackly_get_apply_work`. Never request all available fields, and never infer a saved answer from its key or label.
 
 ## Establish bound work
 
@@ -14,9 +16,13 @@ Call `trackly_start_or_resume_apply` with `target`, a fresh `idempotencyKey`, an
 
 The authenticated facade derives, owns, and renews the stable private batch lease on every work and mutation path. No public tool accepts or returns a lease token. Never request, infer, persist, display, or send one in an observation, certification, or reconciliation call.
 
-If `targetMismatch=true`, preserve the active execution and follow `nextAction`; never restart it to force a new target. If `nextAction` is `restart_after_reauthorization`, the active execution belongs to an earlier OAuth grant: do not read, claim, or mutate its work. Explain the boundary and obtain explicit user confirmation, then call `trackly_stop_apply` with the returned execution ID and revision and `reasonCode: execution_restarted`. Verify the stopped state before calling `trackly_start_or_resume_apply` again with a fresh idempotency key. Never adopt an execution across grants.
+If `targetMismatch=true`, preserve the active execution and follow `nextAction`; never restart it to force a new target. For `nextAction: use_active_target`, call `trackly_start_or_resume_apply` again with the returned `activeTarget`, the same browser surface, and a fresh idempotency key. Do not reuse the rejected target or idempotency key. If `nextAction` is `restart_after_reauthorization`, the active execution belongs to an earlier OAuth grant: do not read, claim, or mutate its work. Explain the boundary and obtain explicit user confirmation, then call `trackly_stop_apply` with the returned execution ID and revision and `reasonCode: execution_restarted`. Verify the stopped state before calling `trackly_start_or_resume_apply` again with a fresh idempotency key. Never adopt an execution across grants.
 
-If no member IDs are returned for another reason, follow `nextAction` rather than inventing work. Fetch the packet with `trackly_get_apply_work` using the returned execution ID and a snapshot whose member IDs and browser surface exactly match the returned binding. This call atomically renews the facade-owned private lease, so its scope and annotation intentionally treat it as a mutation even though the lease stays hidden.
+Never call a snapshot with empty `memberIds`. For `nextAction: advance_or_refresh`, call `trackly_get_apply_work` with the returned execution ID and no `snapshot`, then obey its authoritative next action or terminal state. Stop on any other empty-binding result rather than inventing work.
+
+With nonempty `memberIds`, first fetch a value-free packet with `trackly_get_apply_work` using the returned execution ID and a snapshot whose member IDs and browser surface exactly match the returned binding, omitting `profileKeys`. Use its form requirements to choose the minimal necessary saved keys from readiness, then refetch the same bounded snapshot with only those keys in `profileKeys`. These calls atomically renew the facade-owned private lease, so their scope and annotation intentionally treat them as mutations even though the lease stays hidden.
+
+Before any private form data, call `trackly_get_job` for every distinct `jobId` in the bound snapshot. Compare the live page with the authoritative employer, exact title, job URL, provider, and authorized origin for that job; do not infer any identity field. A mismatch or an unverified redirect origin is a hard stop.
 
 ## Atomically certify review readiness
 

@@ -574,6 +574,10 @@ test('hosted parity verifier fails clearly when the plugin contract has no tools
 
 test('hosted parity verifier binds the public lifecycle promise to executable plugin schemas and handlers', () => {
   const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
+  assert.match(verifier, /hostedPluginSource\.matchAll/);
+  assert.match(verifier, /Executable hosted plugin registrations drifted from the packaged public facade allowlist/);
+  assert.match(verifier, /Executable hosted plugin registrations drifted from the hosted plugin contract/);
+  assert.match(verifier, /availableFields/);
   assert.match(verifier, /hostedPluginContract\.lifecycle/);
   assert.match(verifier, /pluginLock\.publicLifecycleContract/);
   assert.match(verifier, /pluginLock\.publicScopeContract/);

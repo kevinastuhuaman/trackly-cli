@@ -33,17 +33,17 @@
       "id": "apply-to-review",
       "fixture": "synthetic-review-ready-application",
       "prompt": "Use trackly Apply to fill my next approved application, ask me to attach the required resume, and stop for review.",
-      "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_prepare_resume_artifact", "trackly_certify_review_ready"],
-      "expectedResultShape": ["profile.missingRequired[].key", "profile.missingRequired[].label", "executionId", "batchId", "memberIds", "nextAction", "requiresLocalAgentOrManualUpload", "visibleFilenameConfirmation", "durableReviewReady", "manualSubmitRequired"],
-      "mustNot": ["activate Submit"]
+      "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_get_job", "trackly_get_apply_work", "trackly_prepare_resume_artifact", "trackly_certify_review_ready"],
+      "expectedResultShape": ["profile.missingRequired[].key", "profile.missingRequired[].label", "profile.availableFields[].key", "profile.availableFields[].label", "executionId", "batchId", "memberIds", "nextAction", "requiresLocalAgentOrManualUpload", "visibleFilenameConfirmation", "durableReviewReady", "manualSubmitRequired"],
+      "mustNot": ["activate Submit", "infer employer, title, job URL, provider, or origin", "request all saved profile fields"]
     },
     {
       "id": "resume-apply",
       "fixture": "synthetic-interrupted-application",
       "prompt": "Resume my active trackly Apply work and show any missing input.",
-      "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work"],
+      "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_get_job"],
       "expectedResultShape": ["existingExecution", "executionId", "batchId", "memberIds", "nextAction"],
-      "mustNot": ["change the active target", "restart or duplicate active work", "adopt an execution from an earlier OAuth grant"]
+      "mustNot": ["change the active target", "restart or duplicate active work", "adopt an execution from an earlier OAuth grant", "call a snapshot with empty memberIds"]
     },
     {
       "id": "reconcile-manual-submission",

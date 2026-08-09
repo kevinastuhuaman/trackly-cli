@@ -133,6 +133,7 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.ok(!actual.some((name) => name.includes('referral')));
   assert.deepEqual(lock.publicLifecycleContract, {
     readinessMissingProfileFields: 'canonical_key_and_public_label_only',
+    readinessAvailableProfileFields: 'saved_canonical_key_and_public_label_only',
     startOrResume: 'returns_claimed_batch_bound_runs',
     leaseHandling: 'facade_owned_never_model_visible',
     leaseRenewal: 'facade_owned_on_every_work_and_mutation_path',
@@ -156,19 +157,28 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /Never activate the final Submit control/);
   assert.match(skill, /jobs the user approved/);
   assert.match(skill, /Never invent identity, legal, immigration/);
-  assert.match(skill, /verify HTTPS, employer, role, ATS host/);
+  assert.match(skill, /authoritative employer, exact title, job URL, provider, and authorized origin/);
   assert.match(skill, /CAPTCHA, OTP, login credentials, account creation/);
   assert.match(skill, /visible success state or the user's explicit confirmation/);
   assert.match(skill, /requiresLocalAgentOrManualUpload/);
   assert.match(skill, /profile\.missingRequired/);
-  assert.match(skill, /returned execution ID and a snapshot bounded to the returned member IDs/);
+  assert.match(skill, /profile\.availableFields/);
+  assert.match(skill, /never send a snapshot/);
+  assert.match(skill, /`nextAction: use_active_target`/);
+  assert.match(skill, /`nextAction: advance_or_refresh`/);
+  assert.match(skill, /only that minimal intersection as `profileKeys`/);
+  assert.match(skill, /For every distinct `jobId` in the bound snapshot, call `trackly_get_job`/);
   assert.match(skill, /atomically records the review checkpoint, truth certification, and review-ready outcome/);
   assert.match(skill, /atomically records typed confirmation evidence and the submitted outcome/);
   const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
   assert.match(browserSafety, /verify only the filename visibly committed/);
   assert.match(browserSafety, /never claim an artifact identity, preview, or hash exists/);
   const lifecycle = read('plugins/trackly/skills/trackly-apply/references/lifecycle-contract.md');
-  assert.match(lifecycle, /at most 100 `\{ key, label \}` records/);
+  assert.match(lifecycle, /at most 100 `\{ key, label \}` records each/);
+  assert.match(lifecycle, /`profile\.availableFields`/);
+  assert.match(lifecycle, /snapshot `profileKeys`/);
+  assert.match(lifecycle, /Never call a snapshot with empty `memberIds`/);
+  assert.match(lifecycle, /call `trackly_get_job` for every distinct `jobId`/);
   assert.match(lifecycle, /`executionId`, `revision`, `batchId`, `memberIds`, and `nextAction`/);
   assert.match(lifecycle, /No public tool accepts or returns a lease token/);
   assert.match(lifecycle, /`knownFieldsCommitted: true`/);
@@ -200,11 +210,14 @@ test('submission fixtures cover six positive and three negative cases', () => {
   assert.ok(fixtures.negative.every((item) => item.fixture));
   assert.ok(fixtures.positive.some((item) => item.id === 'apply-to-review'));
   assert.ok(fixtures.positive.find((item) => item.id === 'apply-to-review').expected.includes('trackly_prepare_resume_artifact'));
+  assert.ok(fixtures.positive.find((item) => item.id === 'apply-to-review').expected.includes('trackly_get_job'));
   assert.deepEqual(
     fixtures.positive.find((item) => item.id === 'apply-to-review').expectedResultShape,
     [
       'profile.missingRequired[].key',
       'profile.missingRequired[].label',
+      'profile.availableFields[].key',
+      'profile.availableFields[].label',
       'executionId',
       'batchId',
       'memberIds',
