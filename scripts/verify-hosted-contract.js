@@ -60,6 +60,137 @@ function activeToolRegistrations(source, expectedCallee, sourcePath) {
   return registrations;
 }
 
+function directToolRegistrationsInExportedFunction(
+  source,
+  expectedFunction,
+  expectedCallee,
+  sourcePath,
+) {
+  const ast = parseFullSource(source, sourcePath);
+  const factories = ast.program.body.filter((statement) => (
+    statement.type === 'ExportNamedDeclaration'
+    && statement.declaration?.type === 'FunctionDeclaration'
+    && statement.declaration.id?.name === expectedFunction
+  ));
+  assert.equal(
+    factories.length,
+    1,
+    `${sourcePath} must export exactly one ${expectedFunction} function declaration`,
+  );
+  const factory = factories[0].declaration;
+  const registrations = [];
+  const registrationStatementIndexes = [];
+  for (const [index, statement] of factory.body.body.entries()) {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== expectedCallee) continue;
+    assert.equal(
+      call.arguments[0]?.type,
+      'StringLiteral',
+      `${expectedCallee} in ${sourcePath} must register a static string-literal tool name`,
+    );
+    registrations.push({ name: call.arguments[0].value, call });
+    registrationStatementIndexes.push(index);
+  }
+  assert.ok(registrations.length > 0, `${expectedFunction} in ${sourcePath} must directly register tools`);
+  const firstRegistrationIndex = registrationStatementIndexes[0];
+  assert.ok(
+    factory.body.body.slice(0, firstRegistrationIndex)
+      .every((statement) => statement.type === 'VariableDeclaration'),
+    `${expectedFunction} in ${sourcePath} must not branch, return, or throw before registering tools`,
+  );
+  assert.deepEqual(
+    registrationStatementIndexes,
+    Array.from({ length: registrations.length }, (_, index) => firstRegistrationIndex + index),
+    `${expectedFunction} in ${sourcePath} must register tools in one unconditional contiguous block`,
+  );
+
+  const nestedRegistrations = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'CallExpression' && babelCalleeName(node.callee) === expectedCallee) {
+      nestedRegistrations.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(factory.body);
+  assert.equal(
+    nestedRegistrations.length,
+    registrations.length,
+    `${expectedFunction} in ${sourcePath} must register every ${expectedCallee} tool unconditionally as a direct function-body statement`,
+  );
+  return registrations;
+}
+
+function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const imports = ast.program.body.filter((statement) => (
+    statement.type === 'ImportDeclaration'
+    && statement.source.value === './plugin-server.js'
+    && statement.specifiers.some((specifier) => (
+      specifier.type === 'ImportSpecifier'
+      && specifier.imported?.name === expectedFactory
+      && specifier.local?.name === expectedFactory
+    ))
+  ));
+  assert.equal(
+    imports.length,
+    1,
+    `${sourcePath} must import ${expectedFactory} exactly once from ./plugin-server.js`,
+  );
+  const postRoutes = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (
+      node.type === 'CallExpression'
+      && babelCalleeName(node.callee) === 'router.post'
+      && node.arguments[0]?.type === 'StringLiteral'
+      && node.arguments[0].value === '/'
+    ) {
+      postRoutes.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(ast);
+  assert.equal(postRoutes.length, 1, `${sourcePath} must define exactly one POST / plugin route`);
+  const handler = postRoutes[0].arguments.at(-1);
+  assert.ok(
+    handler?.type === 'ArrowFunctionExpression' || handler?.type === 'FunctionExpression',
+    `POST / in ${sourcePath} must end with a function handler`,
+  );
+  assert.equal(handler.body?.type, 'BlockStatement', `POST / handler in ${sourcePath} must use a block body`);
+  const factoryCalls = handler.body.body.flatMap((statement) => {
+    if (statement.type !== 'VariableDeclaration') return [];
+    return statement.declarations.filter((declarator) => (
+      declarator.init?.type === 'CallExpression'
+      && babelCalleeName(declarator.init.callee) === expectedFactory
+    ));
+  });
+  assert.equal(
+    factoryCalls.length,
+    1,
+    `POST / handler in ${sourcePath} must directly instantiate ${expectedFactory} exactly once`,
+  );
+  assert.equal(factoryCalls[0].id?.type, 'Identifier');
+  assert.equal(factoryCalls[0].id.name, 'server');
+  assert.equal(factoryCalls[0].init.arguments.length, 1);
+  assert.equal(factoryCalls[0].init.arguments[0]?.type, 'Identifier');
+  assert.equal(factoryCalls[0].init.arguments[0].name, 'authToken');
+}
+
 function registrationArgumentSources(source, registration, sourcePath) {
   assert.ok(
     registration?.call?.arguments?.length >= 3,
@@ -382,6 +513,27 @@ function referencedFreeIdentifiers(ast) {
   return [...identifiers].sort();
 }
 
+function classifyFreeIdentifiers(identifiers, categories, label) {
+  const classifications = {};
+  for (const [category, names] of Object.entries(categories)) {
+    for (const name of names) {
+      assert.equal(
+        classifications[name],
+        undefined,
+        `${label} dependency ${name} is assigned to more than one classification`,
+      );
+      classifications[name] = category;
+    }
+  }
+  for (const name of identifiers) {
+    assert.ok(
+      classifications[name],
+      `${label} dependency ${name} is unclassified; explicitly lock it as a runtime global, shared definition, or contract constant`,
+    );
+  }
+  return Object.fromEntries(identifiers.map((name) => [name, classifications[name]]));
+}
+
 function activeNamedDefinitionAst(source, name, sourcePath) {
   const matches = [];
   function visit(node) {
@@ -572,6 +724,7 @@ const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-to
 const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
 const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
+const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
 const hostedPluginScopesPath = path.join(backendRoot, 'src', 'mcp', 'plugin-scopes.ts');
 const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
 const hostedApplicationProfileServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'service.ts');
@@ -605,6 +758,7 @@ if (
   );
 }
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
+const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
 const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
@@ -651,8 +805,14 @@ assert.match(
 );
 
 const hostedPluginTools = Object.keys(hostedPluginContract.tools).sort();
-const executablePluginRegistrations = activeToolRegistrations(
+assertExportedFactoryUsedByPluginRouter(
+  hostedPluginRouterSource,
+  'createTracklyPluginMcpServer',
+  hostedPluginRouterPath,
+);
+const executablePluginRegistrations = directToolRegistrationsInExportedFunction(
   hostedPluginSource,
+  'createTracklyPluginMcpServer',
   'registerPluginTool',
   hostedPluginSourcePath,
 );
@@ -891,49 +1051,50 @@ const expectedSchemaConstants = [
   'APPLY_EXECUTION_DISPOSITION_SOURCES',
   'SAFE_IDEMPOTENCY_KEY',
 ];
-for (const [side, schemaAsts] of [
-  ['local', localApplySchemaAsts],
-  ['hosted', hostedApplySchemaAsts],
-]) {
-  const referencedConstants = [...new Set(
-    sharedParseSchemaNames.flatMap((schemaName) => referencedConstantIdentifiers(schemaAsts[schemaName])),
-  )].sort();
-  assert.deepEqual(
-    referencedConstants,
-    expectedSchemaConstants,
-    `${side} Apply schema transitive constant audit changed; explicitly lock and compare every new dependency`,
-  );
-}
-
-const sharedLowerCamelDependencies = {};
-const schemaGlobalIdentifiers = new Set(['undefined', 'z']);
+const classifiedSchemaDependencies = {};
 for (const [side, sourceText, sourcePath, schemaAsts] of [
   ['local', localApplySource, localApplySourcePath, localApplySchemaAsts],
   ['hosted', hostedApplySource, hostedApplySourcePath, hostedApplySchemaAsts],
 ]) {
   const dependencies = [...new Set(
     sharedParseSchemaNames.flatMap((schemaName) => referencedFreeIdentifiers(schemaAsts[schemaName])),
-  )]
-    .filter((name) => /^[a-z]/.test(name) && !schemaGlobalIdentifiers.has(name))
-    .sort();
-  sharedLowerCamelDependencies[side] = { sourceText, sourcePath, dependencies };
+  )].sort();
+  classifiedSchemaDependencies[side] = {
+    sourceText,
+    sourcePath,
+    dependencies: classifyFreeIdentifiers(dependencies, {
+      runtimeGlobal: ['undefined', 'z'],
+      sharedDefinition: sharedParseSchemaNames,
+      contractConstant: expectedSchemaConstants,
+    }, `${side} Apply schema`),
+  };
 }
 assert.deepEqual(
-  sharedLowerCamelDependencies.local.dependencies,
-  sharedLowerCamelDependencies.hosted.dependencies,
-  'Local and hosted Apply schemas must reference the same lower-camel shared helpers',
+  classifiedSchemaDependencies.local.dependencies,
+  classifiedSchemaDependencies.hosted.dependencies,
+  'Local and hosted Apply schemas must reference the same explicitly classified dependencies',
 );
-for (const dependencyName of sharedLowerCamelDependencies.local.dependencies) {
+const sharedDefinitionDependencies = Object.entries(classifiedSchemaDependencies.local.dependencies)
+  .filter(([, classification]) => classification === 'sharedDefinition')
+  .map(([name]) => name);
+assert.deepEqual(
+  Object.entries(classifiedSchemaDependencies.local.dependencies)
+    .filter(([, classification]) => classification === 'contractConstant')
+    .map(([name]) => name),
+  expectedSchemaConstants,
+  'Apply schema transitive contract-constant audit changed; explicitly lock every new dependency',
+);
+for (const dependencyName of sharedDefinitionDependencies) {
   assert.deepEqual(
     canonicalSchemaAst(activeNamedDefinitionAst(
-      sharedLowerCamelDependencies.local.sourceText,
+      classifiedSchemaDependencies.local.sourceText,
       dependencyName,
-      sharedLowerCamelDependencies.local.sourcePath,
+      classifiedSchemaDependencies.local.sourcePath,
     )),
     canonicalSchemaAst(activeNamedDefinitionAst(
-      sharedLowerCamelDependencies.hosted.sourceText,
+      classifiedSchemaDependencies.hosted.sourceText,
       dependencyName,
-      sharedLowerCamelDependencies.hosted.sourcePath,
+      classifiedSchemaDependencies.hosted.sourcePath,
     )),
     `${dependencyName} executable definition drifted between local and hosted Apply schemas`,
   );
@@ -1129,17 +1290,76 @@ for (const [field, expression] of Object.entries(certifyInputContract)) {
 assert.match(certify, /plugin-review-ready/);
 
 const reconcile = pluginToolDefinition('trackly_reconcile_manual_submission');
-for (const field of [
-  'batchId', 'memberId', 'expectedMemberVersion', 'inspectionEpoch',
-  'browserBindingHash', 'evidenceFingerprint', 'idempotencyKey',
-  'confirmation', 'explicitUserConfirmed',
-]) {
-  assert.match(reconcile, new RegExp(`\\b${field}\\b`), `Manual reconciliation is missing ${field}`);
+const reconcileInputSchema = registrationDescriptorPropertyAst(
+  hostedPluginSource,
+  pluginToolRegistration('trackly_reconcile_manual_submission'),
+  'inputSchema',
+  hostedPluginSourcePath,
+);
+const reconcileUnion = assertCall(
+  reconcileInputSchema,
+  'z.discriminatedUnion',
+  'trackly_reconcile_manual_submission.inputSchema',
+);
+assert.equal(reconcileUnion.arguments[0]?.type, 'Literal');
+assert.equal(reconcileUnion.arguments[0].value, 'confirmation');
+assert.equal(reconcileUnion.arguments[1]?.type, 'ArrayExpression');
+assert.equal(reconcileUnion.arguments[1].elements.length, 2);
+const reconcileBranchContract = {
+  user_confirmation: {
+    runId: 'z.number().int().min(1)',
+    confirmation: "z.literal('user_confirmation')",
+    explicitUserConfirmed: 'z.literal(true)',
+    batchId: 'z.number().int().min(1)',
+    memberId: 'z.number().int().min(1)',
+    expectedMemberVersion: 'z.number().int().min(1)',
+    inspectionEpoch: 'z.number().int().min(1)',
+    browserBindingHash: 'z.string().regex(SHA256)',
+    evidenceFingerprint: 'z.string().regex(SHA256)',
+    idempotencyKey: 'z.string().min(16).max(170).regex(SAFE_IDEMPOTENCY_KEY)',
+  },
+  success_page: {
+    runId: 'z.number().int().min(1)',
+    confirmation: "z.literal('success_page')",
+    batchId: 'z.number().int().min(1)',
+    memberId: 'z.number().int().min(1)',
+    expectedMemberVersion: 'z.number().int().min(1)',
+    inspectionEpoch: 'z.number().int().min(1)',
+    browserBindingHash: 'z.string().regex(SHA256)',
+    evidenceFingerprint: 'z.string().regex(SHA256)',
+    idempotencyKey: 'z.string().min(16).max(170).regex(SAFE_IDEMPOTENCY_KEY)',
+  },
+};
+const reconcileBranches = new Map(reconcileUnion.arguments[1].elements.map((branch, index) => {
+  const properties = namedProperties(
+    objectSchemaProperties(branch, `trackly_reconcile_manual_submission branch ${index + 1}`),
+    `trackly_reconcile_manual_submission branch ${index + 1}`,
+  );
+  const confirmation = assertCall(
+    properties.confirmation,
+    'z.literal',
+    `trackly_reconcile_manual_submission branch ${index + 1}.confirmation`,
+  ).arguments[0]?.value;
+  return [confirmation, properties];
+}));
+assert.deepEqual([...reconcileBranches.keys()], Object.keys(reconcileBranchContract));
+for (const [confirmation, contract] of Object.entries(reconcileBranchContract)) {
+  const properties = reconcileBranches.get(confirmation);
+  assert.deepEqual(
+    Object.keys(properties),
+    Object.keys(contract),
+    `trackly_reconcile_manual_submission ${confirmation} must publish only its locked evidence fields`,
+  );
+  for (const [field, expression] of Object.entries(contract)) {
+    assertSchemaPropertyExpression(
+      properties,
+      field,
+      expression,
+      `trackly_reconcile_manual_submission.${confirmation}`,
+    );
+  }
 }
 assert.match(reconcile, /plugin-manual-submission/);
-assert.match(reconcile, /inspectionEpoch: z\.number\(\)\.int\(\)\.min\(1\)/);
-assert.match(reconcile, /explicitUserConfirmed: z\.literal\(true\)/);
-assert.doesNotMatch(reconcile, /\bleaseToken\b/);
 
 console.log(
   `Trackly Apply MCP contracts match at ${local.contractVersion}; the ${hostedPluginTools.length}-tool public plugin facade matches at ${hostedPluginContract.contractVersion}.`,
@@ -1149,8 +1369,11 @@ console.log(
 module.exports = {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertExportedFactoryUsedByPluginRouter,
   assertSchemaPropertyExpression,
   canonicalSchemaAst,
+  classifyFreeIdentifiers,
+  directToolRegistrationsInExportedFunction,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,

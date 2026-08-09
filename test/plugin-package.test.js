@@ -12,7 +12,10 @@ const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 const {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertExportedFactoryUsedByPluginRouter,
   canonicalSchemaAst,
+  classifyFreeIdentifiers,
+  directToolRegistrationsInExportedFunction,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
@@ -199,6 +202,73 @@ test('registration extraction ignores commented tools and binds the active publi
   assert.equal(registeredInputSchemaName(registration, 'Apply registration fixture'), 'activeSchema');
 });
 
+test('plugin registration proof accepts only unconditional calls in the exported server factory', () => {
+  const source = `
+    registerPluginTool('trackly_decoy', { inputSchema: z.object({}) }, decoyHandler);
+    export function createTracklyPluginMcpServer() {
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      registerPluginTool('trackly_two', { inputSchema: z.object({}) }, twoHandler);
+      return server;
+    }
+  `;
+  assert.deepEqual(
+    directToolRegistrationsInExportedFunction(
+      source,
+      'createTracklyPluginMcpServer',
+      'registerPluginTool',
+      'server factory fixture',
+    ).map(({ name }) => name),
+    ['trackly_one', 'trackly_two'],
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(`
+      export function createTracklyPluginMcpServer() {
+        registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+        if (false) registerPluginTool('trackly_decoy', { inputSchema: z.object({}) }, handler);
+        return server;
+      }
+    `, 'createTracklyPluginMcpServer', 'registerPluginTool', 'conditional registration fixture'),
+    /must register every registerPluginTool tool unconditionally as a direct function-body statement/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(`
+      export function createTracklyPluginMcpServer() {
+        if (disabled) return server;
+        registerPluginTool('trackly_unreachable', { inputSchema: z.object({}) }, handler);
+        return server;
+      }
+    `, 'createTracklyPluginMcpServer', 'registerPluginTool', 'early return fixture'),
+    /must not branch, return, or throw before registering tools/,
+  );
+});
+
+test('plugin registration proof binds the exported factory to the live POST route', () => {
+  const routerSource = `
+    import { createTracklyPluginMcpServer } from './plugin-server.js';
+    router.post('/', middleware, async (req, res) => {
+      const authToken = generateToken(req.auth);
+      const server = createTracklyPluginMcpServer(authToken);
+      await server.connect(transport);
+    });
+  `;
+  assert.doesNotThrow(() => assertExportedFactoryUsedByPluginRouter(
+    routerSource,
+    'createTracklyPluginMcpServer',
+    'router fixture',
+  ));
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(`
+      import { createTracklyPluginMcpServer } from './plugin-server.js';
+      router.post('/', middleware, async () => {
+        if (false) {
+          const server = createTracklyPluginMcpServer(authToken);
+        }
+      });
+    `, 'createTracklyPluginMcpServer', 'nested factory fixture'),
+    /must directly instantiate createTracklyPluginMcpServer exactly once/,
+  );
+});
+
 test('descriptor extraction binds active annotation and input-schema expressions instead of comments', () => {
   const source = `
     registerPluginTool('trackly_mutation', {
@@ -311,7 +381,7 @@ test('schema AST canonicalization ignores parser positions but preserves literal
   );
 });
 
-test('free dependency audit includes lower-camel helpers and ignores callback bindings', () => {
+test('free dependency audit is naming-agnostic and ignores callback bindings', () => {
   const schema = parseSchemaExpression(`
     const example = z.object({
       country: iso3166Alpha2Schema,
@@ -331,6 +401,26 @@ test('free dependency audit includes lower-camel helpers and ignores callback bi
     canonicalSchemaAst(activeNamedDefinitionAst(local, 'iso3166Alpha2Schema', 'local helper fixture')),
     canonicalSchemaAst(activeNamedDefinitionAst(hosted, 'iso3166Alpha2Schema', 'hosted helper fixture')),
     'divergent lower-camel helper definitions must remain visible to parity checks',
+  );
+
+  const identifiers = ['$dollar', 'ALL_CAPS', 'PascalCase', '_private', 'camelCase'];
+  assert.deepEqual(
+    classifyFreeIdentifiers(identifiers, {
+      runtimeGlobal: ['$dollar'],
+      sharedDefinition: ['PascalCase', '_private', 'camelCase'],
+      contractConstant: ['ALL_CAPS'],
+    }, 'mixed-name fixture'),
+    {
+      $dollar: 'runtimeGlobal',
+      ALL_CAPS: 'contractConstant',
+      PascalCase: 'sharedDefinition',
+      _private: 'sharedDefinition',
+      camelCase: 'sharedDefinition',
+    },
+  );
+  assert.throws(
+    () => classifyFreeIdentifiers(['unclassifiedName'], { runtimeGlobal: ['z'] }, 'failure fixture'),
+    /dependency unclassifiedName is unclassified/,
   );
 });
 

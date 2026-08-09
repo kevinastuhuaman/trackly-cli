@@ -538,7 +538,7 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   assert.match(verifier, /canonicalSchemaAst\(hostedApplySchemaAsts\[schemaName\]\)/);
   assert.match(verifier, /referencedConstantIdentifiers/);
   assert.match(verifier, /expectedSchemaConstants/);
-  assert.match(verifier, /explicitly lock and compare every new dependency/);
+  assert.match(verifier, /explicitly lock every new dependency/);
   assert.match(verifier, /SAFE_IDEMPOTENCY_KEY semantics drifted between local and hosted Apply schemas/);
   assert.match(verifier, /contractBackedSchemaConstants/);
   assert.match(verifier, /hosted executable values must equal/);
@@ -619,6 +619,10 @@ test('hosted parity verifier fails clearly when the plugin contract has no tools
 test('hosted parity verifier binds the public lifecycle promise to executable plugin schemas and handlers', () => {
   const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
   assert.match(verifier, /activeToolRegistrations\(/);
+  assert.match(verifier, /directToolRegistrationsInExportedFunction\(/);
+  assert.match(verifier, /assertExportedFactoryUsedByPluginRouter\(/);
+  assert.match(verifier, /must directly instantiate \$\{expectedFactory\} exactly once/);
+  assert.match(verifier, /must register every \$\{expectedCallee\} tool unconditionally as a direct function-body statement/);
   assert.match(verifier, /'registerPluginTool'/);
   assert.match(verifier, /must register a static string-literal tool name/);
   assert.match(verifier, /Executable hosted plugin registrations drifted from the packaged public facade allowlist/);
@@ -656,11 +660,15 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /plugin-review-ready/);
   assert.match(verifier, /trackly_reconcile_manual_submission/);
   assert.match(verifier, /plugin-manual-submission/);
+  assert.match(verifier, /reconcileBranchContract/);
+  assert.match(verifier, /must publish only its locked evidence fields/);
   assert.match(verifier, /registrationDescriptorPropertyAst/);
   assert.match(verifier, /certifyInputContract/);
   assert.match(verifier, /must publish only the locked truth-certification fields/);
   assert.match(verifier, /has a write scope and must publish mutationAnnotations/);
   assert.match(verifier, /referencedFreeIdentifiers/);
+  assert.match(verifier, /classifyFreeIdentifiers/);
+  assert.match(verifier, /explicitly lock it as a runtime global, shared definition, or contract constant/);
   assert.match(verifier, /executable definition drifted between local and hosted Apply schemas/);
 });
 
