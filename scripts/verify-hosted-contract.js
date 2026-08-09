@@ -19,6 +19,8 @@ const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.joi
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
 const localApplySourcePath = path.join(cliRoot, 'mcp', 'apply-tools.js');
 const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
+const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
+const pluginLockPath = path.join(cliRoot, 'plugins', 'trackly', 'skill-lock.json');
 
 if (!fs.existsSync(hostedContractPath)) {
   throw new Error(`Hosted contract not found at ${hostedContractPath}. Set TRACKLY_BACKEND_DIR to the close-ai checkout.`);
@@ -28,6 +30,8 @@ const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
 const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
 const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
+const hostedPluginContract = JSON.parse(fs.readFileSync(hostedPluginContractPath, 'utf8'));
+const pluginLock = JSON.parse(fs.readFileSync(pluginLockPath, 'utf8'));
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
   'trackly_diagnose_local_path',
@@ -113,6 +117,22 @@ for (const schemaName of [
   );
 }
 
+const hostedPluginTools = Object.keys(hostedPluginContract.tools).sort();
+assert.equal(hostedPluginContract.contractVersion, '1.0.0');
+assert.deepEqual(
+  hostedPluginTools,
+  [...pluginLock.publicToolAllowlist].sort(),
+  'Executable hosted plugin tools drifted from the packaged public facade allowlist',
+);
+assert.ok(
+  hostedPluginTools.every((name) => !/referral|contact|outreach|trackly_chat/.test(name)),
+  'Hosted plugin must not expose referral, contact, outreach, or agent-in-agent tools',
+);
+assert.ok(
+  !hostedPluginTools.includes('trackly_submit_application'),
+  'Hosted plugin must not expose an application submission tool',
+);
+
 console.log(
-  `Trackly Apply MCP contracts and named executable schemas match at ${local.contractVersion}.`,
+  `Trackly Apply MCP contracts, named executable schemas, and the ${hostedPluginTools.length}-tool public plugin facade match at ${local.contractVersion}.`,
 );

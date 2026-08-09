@@ -1,0 +1,45 @@
+{
+  "formatVersion": 1,
+  "adaptationVersion": "1.0.0",
+  "source": {
+    "path": "skills/trackly-apply",
+    "skillVersion": "4.4.2",
+    "treeSha256": "d965b263adf0b8bd98a98aa9de167d2ffacd9320f4e37d580769a5a423ff6c89"
+  },
+  "adapted": {
+    "path": "plugins/trackly/skills/trackly-apply",
+    "treeSha256": "6b65b0610e29628fb09dee88da8efbd8a4c9a826f8fbfdce4bfb9a7b41efa6f2"
+  },
+  "adaptation": {
+    "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
+    "policy": "Preserve source safety and manual-submit semantics while expressing the workflow only through the public facade allowlist.",
+    "requiredSafetyInvariants": [
+      "user-approved work only",
+      "never activate Submit",
+      "never invent application answers",
+      "verify HTTPS employer and job identity before private data",
+      "stop on CAPTCHA OTP credentials account creation or unobservable state",
+      "reconcile submission only after success evidence or explicit user confirmation"
+    ]
+  },
+  "publicToolAllowlist": [
+    "trackly_search_jobs",
+    "trackly_get_job",
+    "trackly_search_companies",
+    "trackly_get_job_brief",
+    "trackly_get_preferences",
+    "trackly_get_apply_readiness",
+    "trackly_lint_application_text",
+    "trackly_update_status",
+    "trackly_save_application_answers",
+    "trackly_grant_sensitive_storage_consent",
+    "trackly_revoke_sensitive_storage_consent",
+    "trackly_start_or_resume_apply",
+    "trackly_get_apply_work",
+    "trackly_report_apply_progress",
+    "trackly_prepare_resume_artifact",
+    "trackly_certify_review_ready",
+    "trackly_reconcile_manual_submission",
+    "trackly_stop_apply"
+  ]
+}

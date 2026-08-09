@@ -1,0 +1,16 @@
+interface:
+  display_name: "trackly"
+  short_description: "Find and track current job openings"
+  brand_color: "#000000"
+  default_prompt: "Use $trackly to find recent roles that match my preferences."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "trackly"
+      description: "The authenticated trackly job search and application MCP facade"
+      transport: "streamable_http"
+      url: "https://mcp.usetrackly.app/api/plugin/trackly/mcp"
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,16 @@
+interface:
+  display_name: "trackly Apply"
+  short_description: "Fill approved applications for review"
+  brand_color: "#000000"
+  default_prompt: "Use $trackly-apply to fill my next approved application and stop before Submit."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "trackly"
+      description: "The authenticated trackly job search and application MCP facade"
+      transport: "streamable_http"
+      url: "https://mcp.usetrackly.app/api/plugin/trackly/mcp"
+
+policy:
+  allow_implicit_invocation: true
