@@ -517,6 +517,7 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   assert.match(verifier, /trackly_diagnose_local_path/);
   assert.match(verifier, /must not be advertised by hosted MCP/);
   assert.match(verifier, /must not be registered by hosted MCP/);
+  assert.match(verifier, /truth certification executable branch constraints drifted/);
   for (const constantName of [
     'applyExecutionMaxTarget',
     'applyBrowserSurfaces',

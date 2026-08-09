@@ -116,7 +116,7 @@ function isMcpAnalyticsEnabled(env = process.env) {
 
 function scrubString(value) {
   if (typeof value !== 'string') return '';
-  return value
+  let sanitized = value
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [redacted]')
     .replace(/\btrk_[A-Za-z0-9_-]+\b/g, REDACTED)
     .replace(/\bph[a-z]_[A-Za-z0-9_-]{12,}\b/gi, REDACTED)
@@ -124,6 +124,16 @@ function scrubString(value) {
     .replace(/\/Users\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, '<local-path>')
     .replace(/\/home\/[^/\s"'`]+(?:\/[^\s"'`]*)?/g, '<local-path>')
     .replace(/[A-Za-z]:\\Users\\[^\\\s"'`]+(?:\\[^\s"'`]*)?/g, '<local-path>');
+  const localPrefixes = new Set([
+    process.env.HOME,
+    process.env.USERPROFILE,
+    process.env.TRACKLY_CONFIG_DIR,
+    process.cwd(),
+  ].filter((candidate) => typeof candidate === 'string' && candidate.length > 1));
+  for (const prefix of localPrefixes) {
+    sanitized = sanitized.split(prefix).join('<local-path>');
+  }
+  return sanitized;
 }
 
 function contentLength(value) {

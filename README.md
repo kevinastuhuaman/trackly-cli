@@ -291,6 +291,14 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 trackly-cli includes a built-in MCP server with 49 tools: 48 Trackly job-search and application tools plus `get_more_tools`, which lets agents report a missing capability. Run `trackly mcp` or use `trackly agent setup --client claude`.
 
+MCP usage analytics are on by default and relay through Trackly so the free
+service can be debugged and improved. They exclude résumé text, profile answers,
+demographic or work-authorization answers, and application notes. Turn off future
+collection with **Share usage analytics** in Account Settings. Operators may also
+disable local MCP instrumentation with `TRACKLY_MCP_ANALYTICS_DISABLED=1` (or
+`TRACKLY_MCP_ANALYTICS_ENABLED=0`); the account setting remains authoritative
+for authenticated backend capture.
+
 **How do I use Claude Code for job hunting?**
 
 Add trackly as an MCP server in Claude Code. Then ask questions naturally: "Find PM jobs at fintech companies in SF", "What companies are hiring for engineering?", or "Mark job 1234 as applied." Claude will use trackly's MCP tools to search and manage your applications.

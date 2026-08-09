@@ -121,14 +121,11 @@ const hostedTruthSchema = normalizeSchema(schemaDefinition(
   'truthCertificationSchema',
   hostedApplySourcePath,
 ));
-assert.match(localTruthSchema, /z\.discriminatedUnion\('resumeDependency'/);
-assert.match(hostedTruthSchema, /z\.object\(\{\.\.\.truthCertificationCommon/);
-assert.match(hostedTruthSchema, /resumeDependency:z\.enum\(\['approved','not_applicable'\]\)/);
-assert.match(hostedTruthSchema, /resumeId:z\.number\(\)\.int\(\)\.min\(1\)\.nullable\(\)\.optional\(\)/);
-assert.match(hostedTruthSchema, /resumeSha256:z\.string\(\)\.regex\(\/\^\[a-f0-9\]\{64\}\$\/\)\.nullable\(\)\.optional\(\)/);
-assert.match(hostedApplySource, /const approved = body\.resumeDependency === 'approved'/);
-assert.match(hostedApplySource, /\(approved && !hasApprovedResume\) \|\| \(!approved && hasUnexpectedResume\)/);
-assert.match(hostedApplySource, /invalid_truth_certification_resume_dependency/);
+assert.equal(
+  localTruthSchema,
+  hostedTruthSchema,
+  'truth certification executable branch constraints drifted between hosted and local MCP',
+);
 
 assert.equal(
   normalizeSchema(schemaDefinition(localApplySource, 'startApplyRunInputSchema', localApplySourcePath)),

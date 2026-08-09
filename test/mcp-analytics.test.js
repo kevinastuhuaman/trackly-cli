@@ -429,6 +429,33 @@ test('error telemetry removes secrets, user paths, and sensitive payload values'
   }]);
 });
 
+test('string redaction removes configured and arbitrary working-directory prefixes', () => {
+  const previousConfigDir = process.env.TRACKLY_CONFIG_DIR;
+  process.env.TRACKLY_CONFIG_DIR = '/srv/trackly-private';
+  try {
+    const result = sanitizeMcpAnalyticsEvent({
+      event: '$mcp_tool_call',
+      properties: {
+        $mcp_tool_name: 'trackly_search_jobs',
+        $mcp_response: {
+          configured: '/srv/trackly-private/config.json failed',
+          working: `${process.cwd()}/mcp/server.js failed`,
+        },
+      },
+    });
+    const serialized = JSON.stringify(result);
+    assert.doesNotMatch(serialized, /srv\/trackly-private/);
+    assert.doesNotMatch(
+      serialized,
+      new RegExp(process.cwd().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+    assert.match(serialized, /<local-path>/);
+  } finally {
+    if (previousConfigDir === undefined) delete process.env.TRACKLY_CONFIG_DIR;
+    else process.env.TRACKLY_CONFIG_DIR = previousConfigDir;
+  }
+});
+
 test('enabled instrumentation advertises optional context and strips it before handlers', async (t) => {
   const captures = [];
   const posthog = {
