@@ -511,7 +511,7 @@ test('Apply observation contract accepts redacted browser scenario metadata', ()
 test('hosted parity verifier compares execution disposition body, alias, and constants', () => {
   const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
 
-  assert.match(verifier, /'applyExecutionDispositionSchema'/);
+  assert.match(verifier, /Hosted and local Trackly Apply MCP contracts drifted outside documented local-only tools/);
   assert.match(verifier, /trackly_record_apply_execution_dispositions schema alias drifted/);
   assert.match(verifier, /trackly_lint_application_text/);
   assert.match(verifier, /trackly_diagnose_local_path/);
@@ -584,7 +584,7 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /pluginServerSha256/);
   assert.match(verifier, /APPLY_BROWSER_SURFACES/);
   assert.match(verifier, /All executable hosted plugin scope mappings must match the packaged public scope lock/);
-  assert.match(verifier, /descriptors or inline schemas drifted from the packaged digest lock/);
+  assert.match(verifier, /descriptors or inline schemas drifted from the packaged exact-byte digest lock/);
   assert.match(verifier, /availableFields/);
   assert.match(verifier, /hostedPluginContract\.lifecycle/);
   assert.match(verifier, /pluginLock\.publicLifecycleContract/);

@@ -9,10 +9,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 
-const {
-  normalizeJavaScriptTrivia,
-  sha256: sha256ExecutableSource,
-} = require('../scripts/verify-hosted-contract.js');
+const { sha256ExactBytes } = require('../scripts/verify-hosted-contract.js');
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
@@ -59,7 +56,7 @@ function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-test('executable digest normalization preserves literal contents and removes only syntax trivia', () => {
+test('executable digest hashing is exact-byte and fail-closed on formatting changes', () => {
   const compact = 'const value={label:"two words",template:`keep this space`,pattern:/a b/};';
   const formatted = `
     // formatting-only comment
@@ -70,70 +67,32 @@ test('executable digest normalization preserves literal contents and removes onl
     };
   `;
 
-  assert.equal(normalizeJavaScriptTrivia(formatted), normalizeJavaScriptTrivia(compact));
-  assert.equal(sha256ExecutableSource(formatted), sha256ExecutableSource(compact));
+  assert.notEqual(sha256ExactBytes(formatted), sha256ExactBytes(compact));
   assert.notEqual(
-    normalizeJavaScriptTrivia('const result = left + +right;'),
-    normalizeJavaScriptTrivia('const result = left++ + right;'),
-    'removing trivia must not merge adjacent tokens into a different operator',
-  );
-  assert.notEqual(
-    normalizeJavaScriptTrivia('function result() { return\nvalue; }'),
-    normalizeJavaScriptTrivia('function result() { return value; }'),
-    'line terminators in automatic-semicolon-insertion-sensitive positions must affect digests',
-  );
-  assert.notEqual(
-    normalizeJavaScriptTrivia('a\n++b;'),
-    normalizeJavaScriptTrivia('a++\nb;'),
-    'line terminators must distinguish prefix from postfix increment expressions',
-  );
-  assert.notEqual(
-    normalizeJavaScriptTrivia('a\n--b;'),
-    normalizeJavaScriptTrivia('a--\nb;'),
-    'line terminators must distinguish prefix from postfix decrement expressions',
-  );
-  assert.notEqual(
-    normalizeJavaScriptTrivia('a\n++b;'),
-    normalizeJavaScriptTrivia('a ++b;'),
-    'a line terminator before an update operator must remain digest-significant',
-  );
-  assert.notEqual(
-    normalizeJavaScriptTrivia('a++\nb;'),
-    normalizeJavaScriptTrivia('a++ b;'),
-    'a line terminator after an update operator must remain digest-significant',
-  );
-  assert.notEqual(
-    sha256ExecutableSource(compact),
-    sha256ExecutableSource(compact.replace('two words', 'twowords')),
+    sha256ExactBytes(compact),
+    sha256ExactBytes(compact.replace('two words', 'twowords')),
     'spaces inside quoted literals must affect executable digests',
   );
   assert.notEqual(
-    sha256ExecutableSource(compact),
-    sha256ExecutableSource(compact.replace('keep this space', 'keepthisspace')),
+    sha256ExactBytes(compact),
+    sha256ExactBytes(compact.replace('keep this space', 'keepthisspace')),
     'spaces inside template literals must affect executable digests',
   );
   assert.notEqual(
-    sha256ExecutableSource(compact),
-    sha256ExecutableSource(compact.replace('/a b/', '/ab/')),
+    sha256ExactBytes(compact),
+    sha256ExactBytes(compact.replace('/a b/', '/ab/')),
     'spaces inside regular-expression literals must affect executable digests',
   );
   assert.notEqual(
-    normalizeJavaScriptTrivia('if (enabled) /a b/.test(value);'),
-    normalizeJavaScriptTrivia('if (enabled) /a  b/.test(value);'),
-    'regular-expression bytes after a control-flow condition must remain digest-significant',
+    sha256ExactBytes('if (ok) {} else /a b/.test(value)'),
+    sha256ExactBytes('if (ok) {} else /a  b/.test(value)'),
+    'regular-expression bytes after an else branch must remain digest-significant',
   );
-  for (const source of [
-    'calculate(value) / divisor / next;',
-    '(value) / divisor / next;',
-  ]) {
-    assert.deepEqual(
-      JSON.parse(normalizeJavaScriptTrivia(source)),
-      source.startsWith('calculate')
-        ? ['calculate', '(', 'value', ')', '/', 'divisor', '/', 'next', ';']
-        : ['(', 'value', ')', '/', 'divisor', '/', 'next', ';'],
-      'a slash after an ordinary call or grouping parenthesis must remain division',
-    );
-  }
+  assert.notEqual(
+    sha256ExactBytes('do /a b/.test(value); while(ok)'),
+    sha256ExactBytes('do /a  b/.test(value); while(ok)'),
+    'regular-expression bytes after do must remain digest-significant',
+  );
 });
 
 test('importing executable digest helpers never runs hosted verification as a side effect', () => {
@@ -400,16 +359,45 @@ test('submission fixtures cover six positive and three negative cases', () => {
   assert.ok(fixtures.negative.every((item) => item.fixture));
   assert.ok(fixtures.positive.some((item) => item.id === 'apply-to-review'));
   const applyToReview = fixtures.positive.find((item) => item.id === 'apply-to-review');
-  assert.ok(applyToReview.expected.includes('trackly_prepare_resume_artifact'));
-  assert.ok(applyToReview.expected.includes('trackly_get_job'));
   assert.deepEqual(applyToReview.turns.map((turn) => turn.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+  assert.deepEqual(
+    applyToReview.turns.map((turn) => turn.expected || []),
+    [
+      [],
+      [
+        'trackly_get_apply_readiness',
+        'trackly_start_or_resume_apply',
+        'trackly_get_apply_work',
+        'trackly_get_job',
+        'trackly_get_apply_work',
+        'trackly_prepare_resume_artifact',
+        'trackly_report_apply_progress',
+      ],
+      [],
+      [],
+      [],
+      ['trackly_certify_review_ready', 'trackly_get_apply_work'],
+    ],
+  );
+  assert.deepEqual(
+    applyToReview.expected,
+    [
+      'trackly_get_apply_readiness',
+      'trackly_start_or_resume_apply',
+      'trackly_get_apply_work',
+      'trackly_get_job',
+      'trackly_get_apply_work',
+      'trackly_prepare_resume_artifact',
+      'trackly_report_apply_progress',
+      'trackly_certify_review_ready',
+      'trackly_get_apply_work',
+    ],
+  );
   assert.match(applyToReview.turns[2].content, /attached the intended resume.*filename/s);
   assert.match(applyToReview.turns[2].content, /Synthetic-Reviewer-0001-Resume\.pdf/);
   assert.match(applyToReview.turns[4].content, /exact complete application.*truthful/s);
   assert.ok(applyToReview.turns.slice(0, 5).every((turn) => !(turn.expected || []).includes('trackly_certify_review_ready')));
-  assert.deepEqual(applyToReview.turns[5].expected, ['trackly_certify_review_ready', 'trackly_get_apply_work']);
   assert.match(applyToReview.turns[5].content, /immediately refetch.*only after the refetch verifies the durable review-ready handoff/s);
-  assert.deepEqual(applyToReview.expected.slice(-2), ['trackly_certify_review_ready', 'trackly_get_apply_work']);
   assert.deepEqual(
     applyToReview.expectedResultShape,
     [
@@ -435,9 +423,15 @@ test('submission fixtures cover six positive and three negative cases', () => {
     fixtures.positive.find((item) => item.id === 'search-recent-product').expectedResultShape,
     ['jobs[].id', 'jobs[].title', 'jobs[].companyName', 'jobs[].location', 'jobs[].jobUrl'],
   );
-  assert.equal(
-    fixtures.positive.find((item) => item.id === 'resume-apply').expected[0],
-    'trackly_get_apply_readiness',
+  assert.deepEqual(
+    fixtures.positive.find((item) => item.id === 'resume-apply').expected,
+    [
+      'trackly_get_apply_readiness',
+      'trackly_start_or_resume_apply',
+      'trackly_get_apply_work',
+      'trackly_get_job',
+      'trackly_get_apply_work',
+    ],
   );
   assert.ok(fixtures.negative.some((item) => item.id === 'no-autosubmit'));
   assert.ok(fixtures.negative.some((item) => item.id === 'no-referral-intelligence'));

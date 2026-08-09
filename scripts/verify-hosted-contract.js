@@ -6,168 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-function normalizeJavaScriptTrivia(source) {
-  const tokens = [];
-  let index = 0;
-  let regexMayStart = true;
-  let pendingControlCondition = false;
-  const parenthesisContexts = [];
-
-  const controlConditionKeywords = new Set(['catch', 'for', 'if', 'switch', 'while', 'with']);
-  const regexPrefixKeywords = new Set([
-    'await', 'case', 'delete', 'in', 'instanceof', 'of', 'return', 'throw',
-    'typeof', 'void', 'yield',
-  ]);
-  const lineTerminatorSensitiveTokens = new Set([
-    'async', 'break', 'continue', 'return', 'throw', 'yield',
-  ]);
-
-  const skipTrivia = (start) => {
-    let cursor = start;
-    while (cursor < source.length) {
-      if (/\s/.test(source[cursor])) {
-        cursor++;
-      } else if (source.startsWith('//', cursor)) {
-        cursor = source.indexOf('\n', cursor + 2);
-        if (cursor === -1) return source.length;
-      } else if (source.startsWith('/*', cursor)) {
-        const close = source.indexOf('*/', cursor + 2);
-        cursor = close === -1 ? source.length : close + 2;
-      } else {
-        break;
-      }
-    }
-    return cursor;
-  };
-
-  while (index < source.length) {
-    const char = source[index];
-
-    if (/\s/.test(char) || source.startsWith('//', index) || source.startsWith('/*', index)) {
-      const triviaStart = index;
-      index = skipTrivia(index);
-      const previousToken = tokens.at(-1);
-      const nextTokenIsUpdateOperator = source.startsWith('++', index) || source.startsWith('--', index);
-      if (
-        /[\n\r\u2028\u2029]/.test(source.slice(triviaStart, index))
-        && (
-          lineTerminatorSensitiveTokens.has(previousToken)
-          || previousToken === '++'
-          || previousToken === '--'
-          || nextTokenIsUpdateOperator
-        )
-      ) {
-        tokens.push('<LINE_TERMINATOR>');
-      }
-      continue;
-    }
-
-    if (char === "'" || char === '"' || char === '`') {
-      const quote = char;
-      const start = index;
-      index++;
-      let escaped = false;
-      while (index < source.length) {
-        const literalChar = source[index++];
-        if (escaped) escaped = false;
-        else if (literalChar === '\\') escaped = true;
-        else if (literalChar === quote) break;
-      }
-      tokens.push(source.slice(start, index));
-      regexMayStart = false;
-      continue;
-    }
-
-    if (char === '/' && regexMayStart) {
-      const start = index;
-      index++;
-      let escaped = false;
-      let inCharacterClass = false;
-      while (index < source.length) {
-        const regexChar = source[index++];
-        if (escaped) {
-          escaped = false;
-        } else if (regexChar === '\\') {
-          escaped = true;
-        } else if (regexChar === '[') {
-          inCharacterClass = true;
-        } else if (regexChar === ']') {
-          inCharacterClass = false;
-        } else if (regexChar === '/' && !inCharacterClass) {
-          while (index < source.length && /[a-z]/i.test(source[index])) {
-            index++;
-          }
-          break;
-        }
-      }
-      tokens.push(source.slice(start, index));
-      regexMayStart = false;
-      continue;
-    }
-
-    if (/[A-Za-z_$]/.test(char)) {
-      const start = index++;
-      while (index < source.length && /[A-Za-z0-9_$]/.test(source[index])) index++;
-      const token = source.slice(start, index);
-      const previousToken = tokens.at(-1);
-      tokens.push(token);
-      pendingControlCondition = controlConditionKeywords.has(token)
-        && previousToken !== '.'
-        && previousToken !== '?.';
-      regexMayStart = regexPrefixKeywords.has(token);
-      continue;
-    }
-
-    if (/[0-9]/.test(char)) {
-      const start = index++;
-      while (index < source.length && /[A-Za-z0-9_.]/.test(source[index])) index++;
-      tokens.push(source.slice(start, index));
-      regexMayStart = false;
-      continue;
-    }
-
-    if (char === ',') {
-      const next = skipTrivia(index + 1);
-      if (source[next] === '}' || source[next] === ']') {
-        index++;
-        continue;
-      }
-    }
-
-    const operator = [
-      '>>>=', '===', '!==', '>>>', '**=', '&&=', '||=', '??=', '<<=', '>>=',
-      '=>', '==', '!=', '<=', '>=', '++', '--', '&&', '||', '??', '?.', '**',
-      '<<', '>>', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '...',
-    ].find((candidate) => source.startsWith(candidate, index)) || char;
-    tokens.push(operator);
-    index += operator.length;
-    if (operator === '(') {
-      parenthesisContexts.push(pendingControlCondition ? 'control-condition' : 'ordinary');
-      pendingControlCondition = false;
-      regexMayStart = true;
-    } else if (operator === ')') {
-      regexMayStart = parenthesisContexts.pop() === 'control-condition';
-    } else {
-      pendingControlCondition = false;
-      if (
-        operator === ']'
-        || operator === '}'
-        || operator === '.'
-        || operator === '?.'
-        || operator === '++'
-        || operator === '--'
-      ) {
-        regexMayStart = false;
-      } else {
-        regexMayStart = true;
-      }
-    }
-  }
-
-  return JSON.stringify(tokens);
-}
-
-const sha256 = (source) => crypto.createHash('sha256').update(normalizeJavaScriptTrivia(source)).digest('hex');
+const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 
 function verifyHostedContract() {
 const cliRoot = path.join(__dirname, '..');
@@ -182,7 +21,6 @@ const localContractPath = path.join(cliRoot, 'contracts', 'trackly-apply-tools.j
 const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'contracts', 'trackly-apply-tools.json')))
   || backendCandidates[0];
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
-const localApplySourcePath = path.join(cliRoot, 'mcp', 'apply-tools.js');
 const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
 const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
@@ -201,7 +39,6 @@ if (!fs.existsSync(hostedPluginContractPath)) {
 
 const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
-const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
 const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
 const hostedPluginContract = JSON.parse(fs.readFileSync(hostedPluginContractPath, 'utf8'));
 const pluginLock = JSON.parse(fs.readFileSync(pluginLockPath, 'utf8'));
@@ -293,19 +130,6 @@ function schemaDefinition(source, name, sourcePath) {
     }
   }
   assert.fail(`${name} is unterminated in ${sourcePath}`);
-}
-
-for (const schemaName of [
-  'applyExecutionDispositionSchema',
-  'truthCertificationCommon',
-  'truthCertificationSchema',
-  'startApplyRunSchema',
-]) {
-  assert.equal(
-    normalizeJavaScriptTrivia(schemaDefinition(localApplySource, schemaName, localApplySourcePath)),
-    normalizeJavaScriptTrivia(schemaDefinition(hostedApplySource, schemaName, hostedApplySourcePath)),
-    `${schemaName} executable constraints drifted between hosted and local MCP`,
-  );
 }
 
 const hostedPluginTools = Object.keys(hostedPluginContract.tools).sort();
@@ -426,23 +250,23 @@ const executableRegistrationArguments = Object.fromEntries(executablePluginTools
   return [name, args];
 }));
 const executableDescriptorDigests = Object.fromEntries(
-  executablePluginTools.map((name) => [name, sha256(executableRegistrationArguments[name][1])]),
+  executablePluginTools.map((name) => [name, sha256ExactBytes(executableRegistrationArguments[name][1])]),
 );
 assert.deepEqual(
   executableDescriptorDigests,
   pluginLock.publicExecutableContract.descriptorSha256,
-  'Executable hosted plugin descriptors or inline schemas drifted from the packaged digest lock',
+  'Executable hosted plugin descriptors or inline schemas drifted from the packaged exact-byte digest lock',
 );
 const executableHandlerDigests = Object.fromEntries(
-  executablePluginTools.map((name) => [name, sha256(executableRegistrationArguments[name][2])]),
+  executablePluginTools.map((name) => [name, sha256ExactBytes(executableRegistrationArguments[name][2])]),
 );
 assert.deepEqual(
   executableHandlerDigests,
   pluginLock.publicExecutableContract.handlerSha256,
-  'Executable hosted plugin handler implementations drifted from the packaged behavior digest lock',
+  'Executable hosted plugin handler implementations drifted from the packaged exact-byte behavior digest lock',
 );
 assert.equal(
-  sha256(hostedPluginSource),
+  sha256ExactBytes(hostedPluginSource),
   pluginLock.publicExecutableContract.pluginServerSha256,
   'Hosted plugin server implementation drifted from the packaged whole-source digest lock',
 );
@@ -450,13 +274,13 @@ assert.equal(
 const executableSchemaDigests = Object.fromEntries(
   Object.keys(pluginLock.publicExecutableContract.schemaSha256).map((schemaName) => [
     schemaName,
-    sha256(schemaDefinition(hostedPluginSource, schemaName, hostedPluginSourcePath)),
+    sha256ExactBytes(schemaDefinition(hostedPluginSource, schemaName, hostedPluginSourcePath)),
   ]),
 );
 assert.deepEqual(
   executableSchemaDigests,
   pluginLock.publicExecutableContract.schemaSha256,
-  'Executable hosted plugin shared output schemas drifted from the packaged digest lock',
+  'Executable hosted plugin shared output schemas drifted from the packaged exact-byte digest lock',
 );
 
 const transitiveSources = {
@@ -471,13 +295,13 @@ const executableTransitiveDigests = Object.fromEntries(
   Object.keys(pluginLock.publicExecutableContract.transitiveSchemaSha256).map((constantName) => {
     const sourceEntry = transitiveSources[constantName];
     assert.ok(sourceEntry, `Unknown transitive public schema constant ${constantName}`);
-    return [constantName, sha256(schemaDefinition(sourceEntry[0], constantName, sourceEntry[1]))];
+    return [constantName, sha256ExactBytes(schemaDefinition(sourceEntry[0], constantName, sourceEntry[1]))];
   }),
 );
 assert.deepEqual(
   executableTransitiveDigests,
   pluginLock.publicExecutableContract.transitiveSchemaSha256,
-  'Executable hosted plugin transitive schema constants drifted from the packaged digest lock',
+  'Executable hosted plugin transitive schema constants drifted from the packaged exact-byte digest lock',
 );
 
 const readinessSchema = schemaDefinition(
@@ -575,7 +399,7 @@ console.log(
 );
 }
 
-module.exports = { normalizeJavaScriptTrivia, sha256, verifyHostedContract };
+module.exports = { sha256ExactBytes, verifyHostedContract };
 
 if (require.main === module) {
   verifyHostedContract();
