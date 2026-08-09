@@ -14,6 +14,7 @@ const {
   maintenanceOutput,
   loadConfig,
   saveConfig,
+  synchronizeAnalyticsPreferenceBeforeLogout,
 } = require('../lib/client');
 const { color, isJSON, outputJobs, outputCompanies, outputStats, outputContacts, outputReferralCampaign, outputNetworkBrief, outputCompanyBrief, outputCompanyWorkspace, outputError } = require('../lib/formatters');
 const http = require('http');
@@ -544,6 +545,7 @@ p{color:#a1a1aa;font-size:15px;line-height:1.5}
 }
 
 async function cmdLogout() {
+  await synchronizeAnalyticsPreferenceBeforeLogout();
   clearConfig();
   console.log(color('green', 'Logged out. Credentials cleared.'));
 }

@@ -430,9 +430,8 @@ test('all existing Trackly tools keep context optional when analytics is enabled
   });
 
   const listed = await client.listTools();
-  const sourceTools = listed.tools.filter((tool) => tool.name !== 'get_more_tools');
-  assert.equal(sourceTools.length, 48);
-  for (const tool of sourceTools) {
+  assert.equal(listed.tools.length, 49);
+  for (const tool of listed.tools) {
     assert.ok(tool.inputSchema.properties.context, `${tool.name} has optional context`);
     assert.ok(!tool.inputSchema.required?.includes('context'), `${tool.name} does not require context`);
   }
@@ -686,7 +685,13 @@ test('enabled instrumentation advertises optional context and strips it before h
   assert.ok(searchTool);
   assert.ok(searchTool.inputSchema.properties.context);
   assert.ok(!searchTool.inputSchema.required.includes('context'));
-  assert.ok(listed.tools.some((tool) => tool.name === 'get_more_tools'));
+  const missingCapabilityTool = listed.tools.find((tool) => tool.name === 'get_more_tools');
+  assert.ok(missingCapabilityTool);
+  assert.ok(!missingCapabilityTool.inputSchema.required?.includes('context'));
+  await assert.doesNotReject(client.callTool({
+    name: 'get_more_tools',
+    arguments: {},
+  }));
 
   await assert.doesNotReject(client.callTool({
     name: 'trackly_search_jobs',

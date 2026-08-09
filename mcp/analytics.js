@@ -352,9 +352,11 @@ function addOptionalContextToTools(server) {
     throw new Error('unsupported_mcp_sdk_tool_registry');
   }
 
-  for (const tool of Object.values(tools)) {
+  for (const [toolName, tool] of Object.entries(tools)) {
     const shape = tool?.inputSchema?.shape;
-    if (!shape || typeof shape !== 'object' || Object.hasOwn(shape, 'context')) continue;
+    if (!shape || typeof shape !== 'object') continue;
+    const isMissingCapabilityTool = toolName === 'get_more_tools';
+    if (Object.hasOwn(shape, 'context') && !isMissingCapabilityTool) continue;
 
     const originalHandler = tool.handler;
     tool.update({
@@ -363,6 +365,7 @@ function addOptionalContextToTools(server) {
         context: z.string().max(1_000).optional().describe(CONTEXT_DESCRIPTION),
       },
       callback: (args, extra) => {
+        if (isMissingCapabilityTool) return originalHandler(args, extra);
         if (!args || typeof args !== 'object' || !Object.hasOwn(args, 'context')) {
           return originalHandler(args, extra);
         }
@@ -371,6 +374,34 @@ function addOptionalContextToTools(server) {
       },
     });
   }
+}
+
+function makeMissingCapabilityContextOptional(server) {
+  const handlers = server?.server?._requestHandlers;
+  const originalListTools = handlers?.get('tools/list');
+  if (!handlers || typeof originalListTools !== 'function') {
+    return;
+  }
+  handlers.set('tools/list', async (...args) => {
+    const response = await originalListTools(...args);
+    if (!Array.isArray(response?.tools)) return response;
+    return {
+      ...response,
+      tools: response.tools.map((tool) => {
+        if (tool?.name !== 'get_more_tools') return tool;
+        const required = Array.isArray(tool.inputSchema?.required)
+          ? tool.inputSchema.required.filter((key) => key !== 'context')
+          : undefined;
+        return {
+          ...tool,
+          inputSchema: {
+            ...tool.inputSchema,
+            ...(required?.length ? { required } : { required: undefined }),
+          },
+        };
+      }),
+    };
+  });
 }
 
 function runtimeEventProperties(env = process.env) {
@@ -553,6 +584,9 @@ function configureMcpAnalytics(server, options = {}) {
       eventProperties: () => eventProperties,
       logger: () => {},
     });
+    // The SDK advertises get_more_tools virtually from its tools/list handler.
+    // Normalize that descriptor without changing its missing-capability capture.
+    makeMissingCapabilityContextOptional(server);
 
     analyticsState.set(server, { analytics, relay });
     return { enabled: true, analytics };

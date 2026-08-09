@@ -442,6 +442,45 @@ test('logout clearing preserves only the anonymous analytics opt-out', async (t)
   });
 });
 
+test('logout sync preserves the authoritative analytics opt-out before credentials clear', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    client.saveConfig({ token: 'jwt', refreshToken: 'rt' });
+    const request = async () => ({ success: true, shareUsageAnalytics: false });
+
+    await client.synchronizeAnalyticsPreferenceBeforeLogout(request);
+    client.clearConfig();
+
+    assert.deepEqual(client.loadConfig(), { mcpAnalyticsOptOut: true });
+  });
+});
+
+test('logout sync fails closed when the authoritative preference is unavailable', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    client.saveConfig({ token: 'jwt', refreshToken: 'rt' });
+
+    await client.synchronizeAnalyticsPreferenceBeforeLogout(async () => {
+      throw new Error('network unavailable');
+    });
+    client.clearConfig();
+
+    assert.deepEqual(client.loadConfig(), { mcpAnalyticsOptOut: true });
+  });
+});
+
 test('logout clearing removes malformed or non-object config', async (t) => {
   const configDir = createTempConfigDir();
   t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
