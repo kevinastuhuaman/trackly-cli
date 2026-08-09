@@ -60,6 +60,14 @@ function activeToolRegistrations(source, expectedCallee, sourcePath) {
   return registrations;
 }
 
+function registrationArgumentSources(source, registration, sourcePath) {
+  assert.ok(
+    registration?.call?.arguments?.length >= 3,
+    `${registration?.name || 'Tool'} registration in ${sourcePath} must contain name, descriptor, and handler`,
+  );
+  return registration.call.arguments.map((argument) => source.slice(argument.start, argument.end));
+}
+
 function registeredInputSchemaName(registration, sourcePath) {
   let descriptor = registration.call.arguments[1];
   while (descriptor?.type === 'TSSatisfiesExpression' || descriptor?.type === 'TSAsExpression') {
@@ -177,6 +185,26 @@ function schemaDefinition(source, name, sourcePath) {
   return source.slice(bounds.expressionStart, bounds.expressionEnd);
 }
 
+function schemaObjectPropertyAsts(source, name, sourcePath) {
+  const schemaAst = parseSchemaExpression(source, name, sourcePath);
+  return namedProperties(objectSchemaProperties(schemaAst, name), name);
+}
+
+function parseExpectedExpression(expression, label) {
+  const ast = acorn.parseExpressionAt(expression, 0, { ecmaVersion: 'latest' });
+  assert.equal(ast.end, expression.length, `${label} must contain one complete expression`);
+  return ast;
+}
+
+function assertSchemaPropertyExpression(properties, property, expression, label) {
+  assert.ok(properties[property], `${label} is missing ${property}`);
+  assert.deepEqual(
+    canonicalSchemaAst(properties[property]),
+    canonicalSchemaAst(parseExpectedExpression(expression, `${label}.${property}`)),
+    `${label}.${property} must equal ${expression}`,
+  );
+}
+
 function exactSchemaDefinition(source, name, sourcePath) {
   const bounds = schemaDefinitionBounds(source, name, sourcePath);
   return source.slice(bounds.declarationStart, bounds.declarationEnd);
@@ -270,6 +298,10 @@ function assertCall(node, expectedCallee, label) {
 }
 
 function objectSchemaProperties(node, label) {
+  while (node?.type === 'CallExpression' && memberName(node.callee) === 'strict') {
+    assert.equal(node.arguments.length, 0, `${label} .strict() must not take arguments`);
+    node = node.callee.object;
+  }
   const call = assertCall(node, 'z.object', label);
   assert.equal(call.arguments.length, 1, `${label} must pass one object shape`);
   assert.equal(call.arguments[0]?.type, 'ObjectExpression', `${label} must contain an object shape`);
@@ -535,54 +567,20 @@ assert.ok(
   'Hosted plugin must not expose an application submission tool',
 );
 
-function pluginToolDefinition(name) {
-  const marker = `registerPluginTool('${name}'`;
-  const start = hostedPluginSource.indexOf(marker);
-  assert.notEqual(start, -1, `${name} is missing from ${hostedPluginSourcePath}`);
-  const next = hostedPluginSource.indexOf("registerPluginTool('", start + marker.length);
-  return hostedPluginSource.slice(start, next === -1 ? hostedPluginSource.length : next);
+function pluginToolRegistration(name) {
+  const matches = executablePluginRegistrations.filter((registration) => registration.name === name);
+  assert.equal(matches.length, 1, `${name} must have exactly one active registration in ${hostedPluginSourcePath}`);
+  return matches[0];
 }
 
-function topLevelCallArguments(callSource, name) {
-  const open = callSource.indexOf('(');
-  assert.notEqual(open, -1, `${name} registration has no argument list`);
-  const argumentsList = [];
-  let start = open + 1;
-  let parens = 0;
-  let braces = 0;
-  let brackets = 0;
-  let quote = '';
-  let escaped = false;
-  for (let index = start; index < callSource.length; index++) {
-    const char = callSource[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (char === '\\') escaped = true;
-      else if (char === quote) quote = '';
-      continue;
-    }
-    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
-    if (char === '(') parens++;
-    else if (char === ')' && parens > 0) parens--;
-    else if (char === '{') braces++;
-    else if (char === '}') braces--;
-    else if (char === '[') brackets++;
-    else if (char === ']') brackets--;
-    else if (char === ',' && parens === 0 && braces === 0 && brackets === 0) {
-      argumentsList.push(callSource.slice(start, index).trim());
-      start = index + 1;
-    } else if (char === ')' && parens === 0 && braces === 0 && brackets === 0) {
-      argumentsList.push(callSource.slice(start, index).trim());
-      return argumentsList;
-    }
-  }
-  assert.fail(`${name} registration has an unterminated argument list`);
+function pluginToolDefinition(name) {
+  const registration = pluginToolRegistration(name);
+  return hostedPluginSource.slice(registration.call.start, registration.call.end);
 }
 
 const executableRegistrationArguments = Object.fromEntries(executablePluginTools.map((name) => {
-  const args = topLevelCallArguments(pluginToolDefinition(name), name);
-  assert.ok(args.length >= 3, `${name} registration must contain name, descriptor, and handler`);
-  return [name, args];
+  const registration = pluginToolRegistration(name);
+  return [name, registrationArgumentSources(hostedPluginSource, registration, hostedPluginSourcePath)];
 }));
 const executableDescriptorDigests = Object.fromEntries(
   executablePluginTools.map((name) => [name, sha256ExactBytes(executableRegistrationArguments[name][1])]),
@@ -806,22 +804,45 @@ assertStartRunWrapperCompatibility(
   hostedApplySchemaAsts.startApplyRunSchema,
 );
 
-const readinessSchema = schemaDefinition(
+const readinessRootProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
   'readinessOutputSchema',
   hostedPluginSourcePath,
 );
-const profileFieldReferenceSchema = schemaDefinition(
+assert.ok(readinessRootProperties.profile, 'readinessOutputSchema is missing profile');
+const readinessProperties = namedProperties(
+  objectSchemaProperties(readinessRootProperties.profile, 'readinessOutputSchema.profile'),
+  'readinessOutputSchema.profile',
+);
+const profileFieldReferenceProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
   'profileFieldReferenceSchema',
   hostedPluginSourcePath,
 );
-assert.match(readinessSchema, /missingRequired/);
-assert.match(readinessSchema, /availableFields/);
-assert.match(readinessSchema, /missingRequired: z\.array\(profileFieldReferenceSchema\)\.max\(100\)/);
-assert.match(readinessSchema, /availableFields: z\.array\(profileFieldReferenceSchema\)\.max\(100\)/);
-assert.match(profileFieldReferenceSchema, /key: z\.string\(\)\.min\(1\)\.max\(200\)/);
-assert.match(profileFieldReferenceSchema, /label: z\.string\(\)\.min\(1\)\.max\(1000\)/);
+assertSchemaPropertyExpression(
+  readinessProperties,
+  'missingRequired',
+  'z.array(profileFieldReferenceSchema).max(100)',
+  'readinessOutputSchema',
+);
+assertSchemaPropertyExpression(
+  readinessProperties,
+  'availableFields',
+  'z.array(profileFieldReferenceSchema).max(100)',
+  'readinessOutputSchema',
+);
+assertSchemaPropertyExpression(
+  profileFieldReferenceProperties,
+  'key',
+  'z.string().min(1).max(200)',
+  'profileFieldReferenceSchema',
+);
+assertSchemaPropertyExpression(
+  profileFieldReferenceProperties,
+  'label',
+  'z.string().min(1).max(1000)',
+  'profileFieldReferenceSchema',
+);
 
 const applySchema = schemaDefinition(
   hostedPluginSource,
@@ -903,11 +924,14 @@ console.log(
 
 module.exports = {
   activeToolRegistrations,
+  assertSchemaPropertyExpression,
   canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
   registeredInputSchemaName,
+  registrationArgumentSources,
+  schemaObjectPropertyAsts,
   schemaDefinition,
   sha256ExactBytes,
   staticStringArrayMap,

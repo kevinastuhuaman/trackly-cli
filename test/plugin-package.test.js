@@ -16,6 +16,8 @@ const {
   parseSchemaExpression,
   referencedConstantIdentifiers,
   registeredInputSchemaName,
+  registrationArgumentSources,
+  schemaObjectPropertyAsts,
   sha256ExactBytes,
   staticStringArrayMap,
 } = require('../scripts/verify-hosted-contract.js');
@@ -163,13 +165,18 @@ test('scope extraction ignores stale commented mappings and rejects dynamic obje
 
 test('registration extraction ignores commented tools and binds the active published schema', () => {
   const pluginSource = `
-    // registerPluginTool('trackly_commented_out', {}, handler);
-    registerPluginTool('trackly_active', {}, handler);
+    // registerPluginTool('trackly_active', { stale: true }, staleHandler);
+    registerPluginTool('trackly_active', { active: true }, activeHandler);
   `;
+  const [pluginRegistration] = activeToolRegistrations(
+    pluginSource,
+    'registerPluginTool',
+    'plugin registration fixture',
+  );
+  assert.equal(pluginRegistration.name, 'trackly_active');
   assert.deepEqual(
-    activeToolRegistrations(pluginSource, 'registerPluginTool', 'plugin registration fixture')
-      .map((registration) => registration.name),
-    ['trackly_active'],
+    registrationArgumentSources(pluginSource, pluginRegistration, 'plugin registration fixture'),
+    ["'trackly_active'", '{ active: true }', 'activeHandler'],
   );
 
   const applySource = `
@@ -187,6 +194,22 @@ test('registration extraction ignores commented tools and binds the active publi
   );
   assert.equal(registration.name, 'trackly_apply');
   assert.equal(registeredInputSchemaName(registration, 'Apply registration fixture'), 'activeSchema');
+});
+
+test('schema property extraction ignores stale property text in comments', () => {
+  const properties = schemaObjectPropertyAsts(`
+    const readinessOutputSchema = z.object({
+      profile: z.object({
+        // missingRequired: z.array(profileFieldReferenceSchema),
+        missingRequired: z.array(profileFieldReferenceSchema).max(100),
+        /* availableFields: z.any(), */
+        availableFields: z.array(profileFieldReferenceSchema).max(100),
+      }).strict(),
+    }).strict();
+  `, 'readinessOutputSchema', 'readiness fixture');
+
+  assert.deepEqual(Object.keys(properties), ['profile']);
+  assert.equal(properties.profile.type, 'CallExpression');
 });
 
 test('importing executable digest helpers never runs hosted verification as a side effect', () => {
