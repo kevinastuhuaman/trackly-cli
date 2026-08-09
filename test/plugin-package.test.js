@@ -395,7 +395,30 @@ test('local Apply registrations are bound to the helper reached by createServer'
       throwMcpResourceError,
     });`,
     'local server fixture',
+    { mustPrecedeSoleFinalReturn: true },
   ));
+  const registrationStatement = `registerApplyTools(server, {
+      wrapTool,
+      mcpUserAgent: MCP_USER_AGENT,
+      throwMcpResourceError,
+    });`;
+  const deadRegistrationSource = `
+    function createServer() {
+      const server = makeServer();
+      return server;
+      ${registrationStatement}
+    }
+  `;
+  assert.throws(
+    () => assertActiveFunctionDirectStatementAst(
+      deadRegistrationSource,
+      'createServer',
+      registrationStatement,
+      'dead local registration fixture',
+      { mustPrecedeSoleFinalReturn: true },
+    ),
+    /must end with its sole return after its locked direct statement/,
+  );
   assert.throws(
     () => assertCommonJsDestructuredRequire(
       serverSource.replace("require('./apply-tools')", "require('./decoy-tools')"),

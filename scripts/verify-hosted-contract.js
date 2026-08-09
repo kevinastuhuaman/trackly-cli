@@ -1236,7 +1236,13 @@ function assertActiveFunctionDefinitionAst(source, name, expectedSource, sourceP
   );
 }
 
-function assertActiveFunctionDirectStatementAst(source, name, expectedStatement, sourcePath) {
+function assertActiveFunctionDirectStatementAst(
+  source,
+  name,
+  expectedStatement,
+  sourcePath,
+  { mustPrecedeSoleFinalReturn = false } = {},
+) {
   const definition = activeNamedDefinitionAst(source, name, sourcePath);
   const body = definition.body;
   assert.equal(body?.type, 'BlockStatement', `${name} in ${sourcePath} must use a block body`);
@@ -1255,6 +1261,45 @@ function assertActiveFunctionDirectStatementAst(source, name, expectedStatement,
     1,
     `${name} in ${sourcePath} must execute its locked direct statement exactly once`,
   );
+  if (mustPrecedeSoleFinalReturn) {
+    const statementIndex = body.body.indexOf(matches[0]);
+    const returns = [];
+    function visitReturns(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) visitReturns(child);
+        return;
+      }
+      if (node !== definition
+        && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)) return;
+      if (node.type === 'ReturnStatement') returns.push(node);
+      for (const [key, child] of Object.entries(node)) {
+        if (key === 'loc' || key === 'extra') continue;
+        visitReturns(child);
+      }
+    }
+    visitReturns(definition);
+    assert.equal(
+      returns.length,
+      1,
+      `${name} in ${sourcePath} must have exactly one reachable return after its locked direct statement`,
+    );
+    assert.equal(
+      body.body.at(-1),
+      returns[0],
+      `${name} in ${sourcePath} must end with its sole return after its locked direct statement`,
+    );
+    assert.ok(
+      statementIndex >= 0 && statementIndex < body.body.length - 1,
+      `${name} in ${sourcePath} must execute its locked direct statement before the sole final return`,
+    );
+    assert.ok(
+      body.body.slice(0, statementIndex + 1).every((statement) => (
+        statement.type === 'VariableDeclaration' || statement.type === 'ExpressionStatement'
+      )),
+      `${name} in ${sourcePath} must reach its locked direct statement without an earlier branch, return, or throw`,
+    );
+  }
 }
 
 function assertActiveVariableInitializerAst(source, name, expectedExpression, sourcePath) {
@@ -2547,6 +2592,7 @@ assertActiveFunctionDirectStatementAst(
     throwMcpResourceError,
   });`,
   localServerSourcePath,
+  { mustPrecedeSoleFinalReturn: true },
 );
 
 verifyCoordinatedBackendCore({
