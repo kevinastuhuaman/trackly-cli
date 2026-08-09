@@ -1,6 +1,6 @@
 [![npm](https://img.shields.io/npm/v/trackly-cli.svg)](https://www.npmjs.com/package/trackly-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node 20+](https://img.shields.io/badge/node-20+-brightgreen.svg)](https://nodejs.org/)
+[![Node 20.20+ or 22.22+](https://img.shields.io/badge/node-20.20%2B%20%7C%2022.22%2B-brightgreen.svg)](https://nodejs.org/)
 [![MCP Server](https://img.shields.io/badge/MCP-Server-blue.svg)](https://modelcontextprotocol.io/)
 
 # trackly-cli
@@ -31,11 +31,11 @@ trackly login
 trackly jobs --function product
 ```
 
-> **Prerequisites:** [Node.js 20+](https://nodejs.org/) (LTS recommended). On macOS with the official `.pkg` installer, global npm installs may require `sudo`.
+> **Prerequisites:** [Node.js 20.20+ or 22.22+](https://nodejs.org/) (LTS recommended). On macOS with the official `.pkg` installer, global npm installs may require `sudo`.
 
 ## At a Glance
 
-3,800+ companies | 170K+ jobs | 40+ ATS types | CLI + MCP | 48 local MCP tools
+3,800+ companies | 170K+ jobs | 40+ ATS types | CLI + MCP | 49 local MCP tools
 
 ## CLI Commands
 
@@ -209,6 +209,7 @@ Then use natural language in any of these clients:
 | trackly_record_application_outcomes | Bulk-record up to 20 leased batch outcomes with per-member conflicts |
 | trackly_prepare_resume | Prepare a private expiring resume file for upload |
 | trackly_verify_prepared_resume | Recheck the confirmed resume immediately before attachment |
+| get_more_tools | Report a missing capability so Trackly can improve its MCP surface |
 
 ## Authentication
 
@@ -274,7 +275,7 @@ trackly config --base-url http://127.0.0.1:3000  # Point at a different backend
 | Job search + filters | Yes | Yes | Yes |
 | Apply/save/dismiss | Yes | Yes | Yes |
 | AI-powered search | Yes (trackly ask) | Yes | Yes |
-| MCP integration | Yes (48 local tools) | -- | -- |
+| MCP integration | Yes (49 local tools) | -- | -- |
 | Browser required | No | Yes | No |
 | Best for | Terminal + AI agents | Visual browsing | Custom integrations |
 
@@ -288,7 +289,7 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 **What MCP servers exist for job searching?**
 
-trackly-cli includes a built-in MCP server with 48 tools for job search, company lookup, discovery preferences, application tracking, accessible execution and frozen-batch orchestration, profile onboarding, beta evidence, and manual-submit form preparation. Run `trackly mcp` or use `trackly agent setup --client claude`.
+trackly-cli includes a built-in MCP server with 49 tools: 48 Trackly job-search and application tools plus `get_more_tools`, which lets agents report a missing capability. Run `trackly mcp` or use `trackly agent setup --client claude`.
 
 **How do I use Claude Code for job hunting?**
 

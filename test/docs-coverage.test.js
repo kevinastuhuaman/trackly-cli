@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
+const RUNTIME_INJECTED_TOOL_NAMES = ['get_more_tools'];
 
 // --- pure helpers (also exercised against a synthetic fixture below) ---
 
@@ -60,7 +61,7 @@ function documented(haystack, name) {
 
 // Returns the coverage gaps as a list of { tool, where }.
 function coverageGaps(serverSrc, readmeSrc, docsSrc) {
-  const names = extractToolNames(serverSrc);
+  const names = [...extractToolNames(serverSrc), ...RUNTIME_INJECTED_TOOL_NAMES];
   const region = mcpTableRegion(readmeSrc);
   const gaps = [];
   for (const name of names) {
@@ -110,7 +111,7 @@ test('every MCP tool is documented in the README table AND docs/trackly-tools.md
 });
 
 test('README "N tools" count claims all match the real tool count', () => {
-  const count = extractToolNames(serverSrc).length;
+  const count = extractToolNames(serverSrc).length + RUNTIME_INJECTED_TOOL_NAMES.length;
   const claims = toolCountClaims(readmeSrc);
   assert.ok(claims.length > 0, 'expected at least one "N tools" claim in README');
   for (const c of claims) {

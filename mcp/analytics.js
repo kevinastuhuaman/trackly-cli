@@ -22,6 +22,7 @@ const CONTEXT_DESCRIPTION =
 const ANONYMOUS_RELAY_EVENTS = new Set([
   '$exception',
   '$mcp_initialize',
+  '$mcp_missing_capability',
   '$mcp_tools_list',
 ]);
 
@@ -110,6 +111,7 @@ function isMcpAnalyticsEnabled(env = process.env) {
 }
 
 function scrubString(value) {
+  if (typeof value !== 'string') return '';
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [redacted]')
     .replace(/\btrk_[A-Za-z0-9_-]+\b/g, REDACTED)
@@ -186,8 +188,8 @@ function sanitizeMcpAnalyticsEvent(event) {
   delete properties.username;
   delete properties.$mcp_conversation_id;
 
-  const toolName = properties.$mcp_tool_name;
-  if (typeof toolName === 'string' && !RICH_PAYLOAD_TOOLS.has(toolName)) {
+  const toolName = properties.$mcp_tool_name ?? properties.$mcp_resource_name;
+  if (typeof toolName !== 'string' || !RICH_PAYLOAD_TOOLS.has(toolName)) {
     delete properties.$mcp_parameters;
     delete properties.$mcp_response;
     delete properties.$mcp_intent;
@@ -281,9 +283,11 @@ function createBackendRelay(options = {}) {
           body: JSON.stringify(event),
           signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
         });
-        // A rejected capture is analytics-only. Reading or retrying the body
-        // could delay shutdown and must never mutate the user's auth config.
-        if (!response?.ok) return;
+        // A capture response is analytics-only. Cancel the unread body so
+        // keep-alive connections are not retained until garbage collection.
+        if (response?.body && typeof response.body.cancel === 'function') {
+          await response.body.cancel().catch(() => {});
+        }
       })().catch(() => {}).finally(() => pending.delete(delivery));
       pending.add(delivery);
     } catch {

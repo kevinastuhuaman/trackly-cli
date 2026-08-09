@@ -82,6 +82,54 @@ test('backend relay is anonymous before auth and backend-identified after auth',
   }
 });
 
+test('anonymous relay preserves setup failures and missing-capability reports only', async () => {
+  const previous = {
+    apiKey: process.env.TRACKLY_API_KEY,
+    baseUrl: process.env.TRACKLY_BASE_URL,
+    configDir: process.env.TRACKLY_CONFIG_DIR,
+  };
+  const events = [];
+  let cancellations = 0;
+  const relay = createBackendRelay({
+    fetch: async (_url, options) => {
+      events.push(JSON.parse(options.body));
+      return {
+        ok: true,
+        body: { async cancel() { cancellations += 1; } },
+      };
+    },
+  });
+
+  try {
+    delete process.env.TRACKLY_API_KEY;
+    process.env.TRACKLY_BASE_URL = 'https://closeai.mba';
+    process.env.TRACKLY_CONFIG_DIR = `/tmp/trackly-mcp-analytics-anonymous-${process.pid}`;
+    relay.capture({
+      event: '$mcp_missing_capability',
+      properties: {
+        $mcp_resource_name: 'get_more_tools',
+        $mcp_intent: 'Compare two saved jobs side by side.',
+      },
+    });
+    relay.capture({
+      event: '$mcp_tool_call',
+      properties: { $mcp_tool_name: 'trackly_search_jobs' },
+    });
+    await relay.flush();
+
+    assert.deepEqual(events.map((event) => event.event), ['$mcp_missing_capability']);
+    assert.equal(events[0].properties.$mcp_intent, 'Compare two saved jobs side by side.');
+    assert.equal(cancellations, 1);
+  } finally {
+    if (previous.apiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previous.apiKey;
+    if (previous.baseUrl === undefined) delete process.env.TRACKLY_BASE_URL;
+    else process.env.TRACKLY_BASE_URL = previous.baseUrl;
+    if (previous.configDir === undefined) delete process.env.TRACKLY_CONFIG_DIR;
+    else process.env.TRACKLY_CONFIG_DIR = previous.configDir;
+  }
+});
+
 test('disabled analytics never loads the SDK or mutates the server', () => {
   let loads = 0;
   const server = {};
@@ -223,6 +271,33 @@ test('private profile and Apply tools never send arguments, responses, or intent
   assert.equal(result.properties.$mcp_intent, undefined);
   assert.equal(result.properties.$mcp_duration_ms, 18);
   assert.equal(result.properties.$mcp_is_error, false);
+});
+
+test('rich payloads fail closed when a tool name is missing', () => {
+  const result = sanitizeMcpAnalyticsEvent({
+    event: '$mcp_tool_call',
+    properties: {
+      $mcp_parameters: { request: { params: { arguments: { keywords: 'private' } } } },
+      $mcp_response: { content: [{ type: 'text', text: '{"jobs":[]}' }] },
+      $mcp_intent: 'Find roles for this person.',
+    },
+  });
+
+  assert.equal(result.properties.$mcp_parameters, undefined);
+  assert.equal(result.properties.$mcp_response, undefined);
+  assert.equal(result.properties.$mcp_intent, undefined);
+});
+
+test('missing-capability intent uses the SDK resource-name shape', () => {
+  const result = sanitizeMcpAnalyticsEvent({
+    event: '$mcp_missing_capability',
+    properties: {
+      $mcp_resource_name: 'get_more_tools',
+      $mcp_intent: 'Compare two saved jobs side by side.',
+    },
+  });
+
+  assert.equal(result.properties.$mcp_intent, 'Compare two saved jobs side by side.');
 });
 
 test('client identity is removed because authenticated identity is backend-owned', () => {

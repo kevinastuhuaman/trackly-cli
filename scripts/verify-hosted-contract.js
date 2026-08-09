@@ -103,8 +103,6 @@ const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])
 for (const schemaName of [
   'applyExecutionDispositionSchema',
   'truthCertificationCommon',
-  'truthCertificationSchema',
-  'startApplyRunSchema',
 ]) {
   assert.equal(
     normalizeSchema(schemaDefinition(localApplySource, schemaName, localApplySourcePath)),
@@ -112,6 +110,40 @@ for (const schemaName of [
     `${schemaName} executable constraints drifted between hosted and local MCP`,
   );
 }
+
+const localTruthSchema = normalizeSchema(schemaDefinition(
+  localApplySource,
+  'truthCertificationSchema',
+  localApplySourcePath,
+));
+const hostedTruthSchema = normalizeSchema(schemaDefinition(
+  hostedApplySource,
+  'truthCertificationSchema',
+  hostedApplySourcePath,
+));
+assert.match(localTruthSchema, /z\.discriminatedUnion\('resumeDependency'/);
+assert.match(hostedTruthSchema, /z\.object\(\{\.\.\.truthCertificationCommon/);
+assert.match(hostedTruthSchema, /resumeDependency:z\.enum\(\['approved','not_applicable'\]\)/);
+assert.match(hostedTruthSchema, /resumeId:z\.number\(\)\.int\(\)\.min\(1\)\.nullable\(\)\.optional\(\)/);
+assert.match(hostedTruthSchema, /resumeSha256:z\.string\(\)\.regex\(\/\^\[a-f0-9\]\{64\}\$\/\)\.nullable\(\)\.optional\(\)/);
+assert.match(hostedApplySource, /const approved = body\.resumeDependency === 'approved'/);
+assert.match(hostedApplySource, /\(approved && !hasApprovedResume\) \|\| \(!approved && hasUnexpectedResume\)/);
+assert.match(hostedApplySource, /invalid_truth_certification_resume_dependency/);
+
+assert.equal(
+  normalizeSchema(schemaDefinition(localApplySource, 'startApplyRunInputSchema', localApplySourcePath)),
+  normalizeSchema(schemaDefinition(hostedApplySource, 'startApplyRunSchema', hostedApplySourcePath)),
+  'start Apply run advertised fields drifted between hosted and local MCP',
+);
+const localStartApplyRunSchema = normalizeSchema(schemaDefinition(
+  localApplySource,
+  'startApplyRunSchema',
+  localApplySourcePath,
+));
+assert.match(localStartApplyRunSchema, /\.superRefine\(/);
+assert.match(hostedApplySource, /batchValues\.some\(\(item\) => item !== undefined\)/);
+assert.match(hostedApplySource, /batchValues\.some\(\(item\) => item === undefined\)/);
+assert.match(hostedApplySource, /incomplete_apply_batch_binding/);
 
 console.log(
   `Trackly Apply MCP contracts and named executable schemas match at ${local.contractVersion}.`,
