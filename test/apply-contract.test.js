@@ -622,6 +622,7 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /directToolRegistrationsInExportedFunction\(/);
   assert.match(verifier, /assertExportedFactoryUsedByPluginRouter\(/);
   assert.match(verifier, /must directly instantiate \$\{expectedFactory\} exactly once/);
+  assert.match(verifier, /must directly connect its exact factory-result server to its live transport/);
   assert.match(verifier, /must register every \$\{expectedCallee\} tool unconditionally as a direct function-body statement/);
   assert.match(verifier, /'registerPluginTool'/);
   assert.match(verifier, /must register a static string-literal tool name/);
@@ -653,6 +654,10 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /pluginLock\.publicScopeContract/);
   assert.match(verifier, /readinessOutputSchema/);
   assert.match(verifier, /applyOutputSchema/);
+  assert.match(verifier, /applyOutputContract/);
+  assert.match(verifier, /must publish only its required locked fields/);
+  assert.match(verifier, /trackly_get_job_brief output must exclude contacts, employees, referrals, actions/);
+  assert.match(verifier, /companySignal must remain a bounded aggregate-only projection/);
   assert.match(verifier, /progressOutputSchema/);
   assert.match(verifier, /restart_after_reauthorization/);
   assert.match(verifier, /trackly_start_or_resume_apply/);

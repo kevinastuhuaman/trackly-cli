@@ -248,7 +248,12 @@ test('plugin registration proof binds the exported factory to the live POST rout
     router.post('/', middleware, async (req, res) => {
       const authToken = generateToken(req.auth);
       const server = createTracklyPluginMcpServer(authToken);
-      await server.connect(transport);
+      const transport = new StreamableHTTPServerTransport({});
+      try {
+        await server.connect(transport);
+      } finally {
+        await server.close();
+      }
     });
   `;
   assert.doesNotThrow(() => assertExportedFactoryUsedByPluginRouter(
@@ -266,6 +271,21 @@ test('plugin registration proof binds the exported factory to the live POST rout
       });
     `, 'createTracklyPluginMcpServer', 'nested factory fixture'),
     /must directly instantiate createTracklyPluginMcpServer exactly once/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(`
+      import { createTracklyPluginMcpServer } from './plugin-server.js';
+      router.post('/', middleware, async () => {
+        const server = createTracklyPluginMcpServer(authToken);
+        const transport = new StreamableHTTPServerTransport({});
+        try {
+          await decoyServer.connect(transport);
+        } finally {
+          await server.close();
+        }
+      });
+    `, 'createTracklyPluginMcpServer', 'wrong server fixture'),
+    /must directly connect its exact factory-result server to its live transport/,
   );
 });
 
@@ -632,8 +652,20 @@ test('public skills reference only the locked 18-tool facade', () => {
     readinessMissingProfileFields: 'canonical_key_and_public_label_only',
     readinessAvailableProfileFields: 'saved_canonical_key_and_public_label_only',
     startOrResume: 'returns_claimed_batch_bound_runs',
+    readinessSections: 'independently_available_with_explicit_availability',
+    readinessCardAvailability: 'unavailable_sections_never_render_as_saved_state',
+    readinessQueueCount: 'page_count_with_has_more_lower_bound',
     leaseHandling: 'facade_owned_never_model_visible',
     leaseRenewal: 'facade_owned_on_every_work_and_mutation_path',
+    waveLeaseRecovery: 'claim_unleased_or_renew_same_facade_lease',
+    surfaceBinding: 'value_free_via_report_progress_with_facade_owned_lease_and_concurrency_receipt',
+    observationBulk: 'atomic_grant_bound_idempotent_replay',
+    profileEducation: 'bounded_explicitly_confirmed_user_approved_replace_all',
+    advanceReceipt: 'returns_prepared_batch_and_member_ids',
+    applyWorkOutput: 'discriminated_allowlisted_structured_content',
+    applyWorkProfileProjection: 'requested_fields_and_resume_availability_boolean_only',
+    conditionalSensitiveScopes: 'required_only_for_requested_sensitive_fields',
+    jobBriefRecentPosts: 'validated_posted_at_only',
     resumeHandling: 'manual_unbound_not_attested',
     certifyReviewReady: 'atomic_checkpoint_truth_outcome_manual_resume_unbound',
     reconcileManualSubmission: 'atomic_current_epoch_evidence_outcome',
@@ -642,7 +674,7 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.deepEqual(Object.keys(lock.publicScopeContract).sort(), [...lock.publicToolAllowlist].sort());
   assert.deepEqual(
     lock.publicScopeContract.trackly_get_apply_work,
-    ['profile:read', 'sensitive:read', 'apply:read', 'apply:write'],
+    ['profile:read', 'apply:read', 'apply:write'],
   );
   assert.deepEqual(
     Object.keys(lock.publicExecutableContract.descriptorSha256).sort(),
@@ -681,12 +713,43 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /requiresLocalAgentOrManualUpload/);
   assert.match(skill, /profile\.missingRequired/);
   assert.match(skill, /profile\.availableFields/);
+  assert.match(skill, /matching `availability` flag is true/);
+  assert.match(skill, /`queue\.pageCount` is only the returned page count/);
+  assert.match(skill, /strict projection: only requested profile fields may appear/);
+  assert.match(skill, /resume data is reduced to availability booleans/);
+  assert.match(skill, /additionally requires sensitive read permission/);
+  assert.match(skill, /additionally requires sensitive write permission/);
+  assert.match(skill, /`operation: bind_surface`/);
+  assert.match(skill, /receipt matches that member, run, version, and inspection epoch/);
+  assert.match(skill, /prepared next-wave receipt/);
   assert.match(skill, /never send a snapshot/);
   assert.match(skill, /Before any form mutation, require a verified end-to-end preservation path/);
   assert.match(skill, /complete current controller-owned and user-owned tab inventories/);
   assert.match(skill, /Before ending every browser turn/);
   assert.match(skill, /explicit keep list with `status: handoff`/);
   assert.match(skill, /durably hand off every live tab and verify every receipt/);
+  assert.match(skill, /Never silently send a complete draft or multiple fields/);
+  assert.match(skill, /one non-sensitive field at a time/);
+  assert.match(skill, /exact field label and exact proposed text/);
+  assert.match(skill, /process that text transiently without logging, storing, or echoing it/);
+  assert.match(skill, /Call the tool with exactly one `items` entry only after that approval/);
+  assert.match(skill, /Approval for one field never covers another field or later revision/);
+  assert.match(skill, /use local length\/required checks plus manual user review as the fallback/);
+
+  const writing = read('plugins/trackly/skills/trackly-apply/references/application-writing.md');
+  assert.match(writing, /Keep the complete draft local/);
+  assert.match(writing, /Remote lint is optional/);
+  assert.match(writing, /without logging, storing, or echoing the text/);
+  assert.match(writing, /exactly one `items` entry/);
+  assert.match(writing, /contact data, legal or immigration answers, credentials, demographic data, compensation data/);
+  assert.match(writing, /If the user declines, does not answer, or gives ambiguous approval, do not call remote lint/);
+  assert.match(writing, /local required\/minimum\/maximum-length checks/);
+
+  const lifecycleGuidance = read('plugins/trackly/skills/trackly-apply/references/lifecycle-contract.md');
+  assert.match(lifecycleGuidance, /matching `availability` flag is true/);
+  assert.match(lifecycleGuidance, /strictly projects the result to those requested keys/);
+  assert.match(lifecycleGuidance, /`operation: bind_surface`/);
+  assert.match(lifecycleGuidance, /authoritative next-wave receipt/);
 
   const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
   assert.match(browserSafety, /tab and unsaved-draft preservation path exists before any mutation/);

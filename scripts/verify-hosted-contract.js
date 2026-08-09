@@ -189,6 +189,38 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
   assert.equal(factoryCalls[0].init.arguments.length, 1);
   assert.equal(factoryCalls[0].init.arguments[0]?.type, 'Identifier');
   assert.equal(factoryCalls[0].init.arguments[0].name, 'authToken');
+
+  const transportDeclarations = handler.body.body.flatMap((statement) => {
+    if (statement.type !== 'VariableDeclaration') return [];
+    return statement.declarations.filter((declarator) => (
+      declarator.id?.type === 'Identifier'
+      && declarator.id.name === 'transport'
+      && declarator.init?.type === 'NewExpression'
+      && babelCalleeName(declarator.init.callee) === 'StreamableHTTPServerTransport'
+    ));
+  });
+  assert.equal(
+    transportDeclarations.length,
+    1,
+    `POST / handler in ${sourcePath} must directly create exactly one StreamableHTTPServerTransport`,
+  );
+  const directConnects = handler.body.body.flatMap((statement) => {
+    if (statement.type !== 'TryStatement') return [];
+    return statement.block.body.filter((candidate) => (
+      candidate.type === 'ExpressionStatement'
+      && candidate.expression?.type === 'AwaitExpression'
+      && candidate.expression.argument?.type === 'CallExpression'
+      && babelCalleeName(candidate.expression.argument.callee) === 'server.connect'
+      && candidate.expression.argument.arguments.length === 1
+      && candidate.expression.argument.arguments[0]?.type === 'Identifier'
+      && candidate.expression.argument.arguments[0].name === 'transport'
+    ));
+  });
+  assert.equal(
+    directConnects.length,
+    1,
+    `POST / handler in ${sourcePath} must directly connect its exact factory-result server to its live transport`,
+  );
 }
 
 function registrationArgumentSources(source, registration, sourcePath) {
@@ -261,6 +293,37 @@ function registrationDescriptorPropertyAst(source, registration, propertyName, s
     registrationDescriptorPropertySource(source, registration, propertyName, sourcePath),
     `${registration.name}.${propertyName} in ${sourcePath}`,
   );
+}
+
+function staticBabelObjectProperties(node, label) {
+  assert.equal(node?.type, 'ObjectExpression', `${label} must be an object expression`);
+  const entries = node.properties.map((property) => {
+    assert.equal(property.type, 'ObjectProperty', `${label} must not contain spreads or methods`);
+    assert.equal(property.computed, false, `${label} must not contain computed properties`);
+    const name = property.key.type === 'Identifier'
+      ? property.key.name
+      : property.key.type === 'StringLiteral'
+        ? property.key.value
+        : null;
+    assert.equal(typeof name, 'string', `${label} must use static property names`);
+    return [name, property.value];
+  });
+  assert.equal(new Set(entries.map(([name]) => name)).size, entries.length, `${label} must not repeat fields`);
+  return Object.fromEntries(entries);
+}
+
+function wrappedHandlerReturnProperties(registration, sourcePath) {
+  const wrapper = registration.call.arguments[2];
+  assert.equal(wrapper?.type, 'CallExpression', `${registration.name} handler in ${sourcePath} must use a wrapper call`);
+  const handler = wrapper.arguments[0];
+  assert.ok(
+    handler?.type === 'ArrowFunctionExpression' || handler?.type === 'FunctionExpression',
+    `${registration.name} wrapper in ${sourcePath} must receive a function handler`,
+  );
+  assert.equal(handler.body?.type, 'BlockStatement', `${registration.name} handler in ${sourcePath} must use a block body`);
+  const returns = handler.body.body.filter((statement) => statement.type === 'ReturnStatement');
+  assert.equal(returns.length, 1, `${registration.name} handler in ${sourcePath} must directly return one projection`);
+  return staticBabelObjectProperties(returns[0].argument, `${registration.name} output projection`);
 }
 
 function activeVariableDeclarator(source, name, sourcePath) {
@@ -1170,6 +1233,36 @@ assertStartRunWrapperCompatibility(
   hostedApplySchemaAsts.startApplyRunSchema,
 );
 
+const jobBriefRegistration = pluginToolRegistration('trackly_get_job_brief');
+const jobBriefDescriptor = jobBriefRegistration.call.arguments[1];
+const jobBriefDescriptorProperties = staticBabelObjectProperties(
+  jobBriefDescriptor,
+  'trackly_get_job_brief descriptor',
+);
+assert.deepEqual(
+  Object.keys(jobBriefDescriptorProperties),
+  ['title', 'description', 'inputSchema', 'annotations'],
+  'trackly_get_job_brief must not publish an unverified output schema',
+);
+const jobBriefOutputProperties = wrappedHandlerReturnProperties(
+  jobBriefRegistration,
+  hostedPluginSourcePath,
+);
+assert.deepEqual(
+  Object.keys(jobBriefOutputProperties),
+  ['jobId', 'companyName', 'companySignal'],
+  'trackly_get_job_brief output must exclude contacts, employees, referrals, actions, and raw backend fields',
+);
+const jobBriefCompanySignalProperties = staticBabelObjectProperties(
+  jobBriefOutputProperties.companySignal,
+  'trackly_get_job_brief companySignal projection',
+);
+assert.deepEqual(
+  Object.keys(jobBriefCompanySignalProperties),
+  ['openRoleCount', 'pmRoleCount', 'postedLast7d', 'latestPostedAt'],
+  'trackly_get_job_brief companySignal must remain a bounded aggregate-only projection',
+);
+
 const readinessRootProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
   'readinessOutputSchema',
@@ -1210,18 +1303,37 @@ assertSchemaPropertyExpression(
   'profileFieldReferenceSchema',
 );
 
-const applySchema = schemaDefinition(
+const applyOutputProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
   'applyOutputSchema',
   hostedPluginSourcePath,
 );
-for (const field of [
-  'activeTarget', 'batchId', 'memberIds', 'nextAction',
-  'use_active_target', 'advance_or_refresh', 'restart_after_reauthorization',
-]) {
-  assert.match(applySchema, new RegExp(`\\b${field}\\b`), `Apply output is missing ${field}`);
+const applyOutputContract = {
+  view: "z.literal('apply')",
+  success: 'z.boolean()',
+  active: 'z.boolean()',
+  resumed: 'z.boolean()',
+  started: 'z.boolean()',
+  targetMismatch: 'z.boolean()',
+  target: 'nullableCountSchema',
+  requestedTarget: 'nullableCountSchema',
+  activeTarget: 'nullableCountSchema',
+  executionId: 'nullableCountSchema',
+  revision: 'nullableCountSchema',
+  status: 'z.enum(APPLY_EXECUTION_STATUS_VALUES).nullable()',
+  batchId: 'nullableCountSchema',
+  memberIds: 'z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET)',
+  nextAction: "z.enum(['work_ready', 'use_active_target', 'advance_or_refresh', 'restart_after_reauthorization'])",
+  noSubmit: 'z.literal(true)',
+};
+assert.deepEqual(
+  Object.keys(applyOutputProperties),
+  Object.keys(applyOutputContract),
+  'applyOutputSchema must publish only its required locked fields',
+);
+for (const [field, expression] of Object.entries(applyOutputContract)) {
+  assertSchemaPropertyExpression(applyOutputProperties, field, expression, 'applyOutputSchema');
 }
-assert.doesNotMatch(applySchema, /\bleaseToken\b/);
 const startOrResume = pluginToolDefinition('trackly_start_or_resume_apply');
 for (const marker of ['browserSurface', 'plugin-prepare']) {
   assert.match(startOrResume, new RegExp(marker.replaceAll('/', '\\/')));
@@ -1237,18 +1349,35 @@ assert.match(getWork, /profileKeys: z\.array\(z\.string\(\)\.min\(1\)\.max\(200\
 const progress = pluginToolDefinition('trackly_report_apply_progress');
 assert.match(progress, /plugin-observations\/bulk/);
 assert.doesNotMatch(progress, /\bleaseToken\b/);
-const progressSchema = schemaDefinition(
+const progressOutputProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
   'progressOutputSchema',
   hostedPluginSourcePath,
 );
-for (const field of ['success', 'operation', 'recordedCount', 'noSubmit']) {
-  assert.match(progressSchema, new RegExp(`\\b${field}\\b`), `Progress output is missing ${field}`);
+const progressOutputContract = {
+  success: 'z.boolean()',
+  operation: "z.enum(['bind_surface', 'record_dispositions', 'record_observations', 'advance'])",
+  recordedCount: 'z.number().int().nonnegative()',
+  batchId: 'nullableCountSchema.optional()',
+  memberIds: 'z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET).optional()',
+  binding: `z.object({
+    memberId: z.number().int().min(1),
+    runId: z.number().int().min(1),
+    memberVersion: z.number().int().min(1),
+    inspectionEpoch: z.number().int().nonnegative(),
+    replay: z.boolean(),
+  }).strict().optional()`,
+  nextAction: "z.enum(['work_ready', 'advance_or_refresh']).optional()",
+  noSubmit: 'z.literal(true)',
+};
+assert.deepEqual(
+  Object.keys(progressOutputProperties),
+  Object.keys(progressOutputContract),
+  'progressOutputSchema must publish only its required locked fields',
+);
+for (const [field, expression] of Object.entries(progressOutputContract)) {
+  assertSchemaPropertyExpression(progressOutputProperties, field, expression, 'progressOutputSchema');
 }
-assert.match(progressSchema, /operation: z\.enum\(\['record_dispositions', 'record_observations', 'advance'\]\)/);
-assert.match(progressSchema, /recordedCount: z\.number\(\)\.int\(\)\.nonnegative\(\)/);
-assert.match(progressSchema, /noSubmit: z\.literal\(true\)/);
-assert.doesNotMatch(progressSchema, /\brunId\b|\bmemberId\b|\bbatchId\b|\bexecutionId\b/);
 assert.match(progress, /plugin-work/);
 
 const certify = pluginToolDefinition('trackly_certify_review_ready');

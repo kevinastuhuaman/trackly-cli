@@ -4,11 +4,13 @@ The public facade owns one resumable, batch-bound lifecycle. Do not recreate it 
 
 ## Readiness and missing profile facts
 
-`trackly_get_apply_readiness` returns `profile.missingRequired` and `profile.availableFields` as at most 100 `{ key, label }` records each. In both, `key` is a canonical profile-catalog key and `label` is its public schema label. `missingRequired` identifies absent required facts; `availableFields` is the sorted intersection of saved profile fields and the canonical schema. Both intentionally contain no answer value, option value, contact detail, resume identity, or sensitive metadata.
+Each readiness section is independently usable only when its matching `availability` flag is true. Never render an unavailable section as saved state. `queue.pageCount` counts only the returned page; when `queue.hasMore` is true, that count is a lower bound rather than the full approved queue.
 
-Ask the user only for the returned missing facts. Save a fact with `trackly_save_application_answers` only after the user confirms its value and scope, then refetch readiness. Never turn a label, model guess, employer-page value, or one-time truthfulness attestation into a reusable profile answer.
+`trackly_get_apply_readiness` returns `profile.missingRequired` and `profile.availableFields` as at most 100 `{ key, label }` records each. In both, `key` is a canonical profile-catalog key and `label` is its public schema label. `missingRequired` identifies absent required facts; `availableFields` is the sorted intersection of resolved saved profile fields and the canonical schema. Both intentionally contain no answer value, option value, contact detail, resume identity, or sensitive metadata.
 
-After bound work reveals which canonical facts its forms need, intersect those keys with `profile.availableFields`. Request only that minimal intersection through the snapshot `profileKeys` field on `trackly_get_apply_work`. Never request all available fields, and never infer a saved answer from its key or label.
+Ask the user only for the returned missing facts. Save a fact with `trackly_save_application_answers` only after the user confirms its value and scope, then refetch readiness. A standard-only save requires profile write permission; a request containing any sensitive key additionally requires sensitive write permission. Never turn a label, model guess, employer-page value, or one-time truthfulness attestation into a reusable profile answer.
+
+After bound work reveals which canonical facts its forms need, intersect those keys with `profile.availableFields`. Request only that minimal intersection through the snapshot `profileKeys` field on `trackly_get_apply_work`. The facade strictly projects the result to those requested keys and reduces resume data to availability booleans. A request containing any sensitive key additionally requires sensitive read permission. Never request all available fields, and never infer a saved answer from its key or label.
 
 ## Establish bound work
 
@@ -22,7 +24,11 @@ Never call a snapshot with empty `memberIds`. For `nextAction: advance_or_refres
 
 With nonempty `memberIds`, first fetch a value-free packet with `trackly_get_apply_work` using the returned execution ID and a snapshot whose member IDs and browser surface exactly match the returned binding, omitting `profileKeys`. Use its form requirements to choose the minimal necessary saved keys from readiness, then refetch the same bounded snapshot with only those keys in `profileKeys`. These calls atomically renew the facade-owned private lease, so their scope and annotation intentionally treat them as mutations even though the lease stays hidden.
 
+Before the first browser mutation for each member, call `trackly_report_apply_progress` with `operation: bind_surface`, its current value-free member/run/version/epoch binding, the controlled browser surface, adapter code, verified browser-binding hash, and a fresh idempotency key. Continue only when the binding receipt matches the member, run, version, and inspection epoch. Use `initial_binding` normally and `recovery_binding` only when recovering an existing surface. Every bulk observation call also needs its own fresh idempotency key.
+
 Before any private form data, call `trackly_get_job` for every distinct `jobId` in the bound snapshot. Compare the live page with the authoritative employer, exact title, job URL, provider, and authorized origin for that job; do not infer any identity field. A mismatch or an unverified redirect origin is a hard stop.
+
+When an authorized `advance` succeeds, use its returned `batchId`, prepared `memberIds`, and `nextAction` as the authoritative next-wave receipt. Never reconstruct or guess the next wave from earlier state.
 
 ## Atomically certify review readiness
 
