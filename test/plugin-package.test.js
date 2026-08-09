@@ -309,6 +309,34 @@ test('plugin registration proof accepts only unconditional calls in the exported
     'createTracklyPluginMcpServer', 'registerPluginTool', 'wrong registration server fixture'),
     /must forward the exact name, config, and handler bindings/,
   );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      server.registerTool('trackly_submit', { inputSchema: z.object({}) }, submitHandler);
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'direct submit fixture'),
+    /must register tools only through the verified registerPluginTool helper/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      server.tool('trackly_submit', submitHandler);
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'alternate registrar fixture'),
+    /must register tools only through the verified registerPluginTool helper/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      server['registerTool']('trackly_submit', { inputSchema: z.object({}) }, submitHandler);
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'computed registrar fixture'),
+    /must register tools only through the verified registerPluginTool helper/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      server[registrationMethod]('trackly_submit', { inputSchema: z.object({}) }, submitHandler);
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'dynamic registrar fixture'),
+    /must not use dynamic server member access that could bypass the verified registerPluginTool helper/,
+  );
 });
 
 test('hosted schema registration proof uses only direct reachable factory initialization', () => {
@@ -319,9 +347,6 @@ test('hosted schema registration proof uses only direct reachable factory initia
     export function createTracklyMcpServer() {
       const server = new McpServer({ name: 'trackly', version: MCP_VERSION });
       server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);
-      if (disabled) {
-        server.registerTool('trackly_disabled', { inputSchema: disabledSchema }, disabledHandler);
-      }
       return server;
     }
   `;
@@ -357,6 +382,30 @@ test('hosted schema registration proof uses only direct reachable factory initia
       'disabled hosted factory fixture',
     ),
     /must reach every server\.registerTool registration without an earlier branch, return, throw, or disabled path/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        'return server;',
+        "throw new Error('abort startup');\n      return server;",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'post-registration throw hosted factory fixture',
+    ),
+    /must reach its final server return through direct registration calls on the exact server/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        'return server;',
+        'abortStartup();\n      return server;',
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'post-registration abort call hosted factory fixture',
+    ),
+    /must reach its final server return through direct registration calls on the exact server/,
   );
   assert.throws(
     () => directToolRegistrationsInNamedFactory(
@@ -403,7 +452,7 @@ test('hosted schema registration proof uses only direct reachable factory initia
       'server.registerTool',
       'const reassigned hosted factory fixture',
     ),
-    /must never assign to or update the immutable server binding/,
+    /must reach its final server return through direct registration calls on the exact server/,
   );
 });
 
@@ -687,7 +736,7 @@ test('job-brief projection validation binds every active value expression', () =
         companyName: brief.companyName,
         companySignal: { openRoleCount: brief.companySignal?.openRoleCount ?? 0 },
       };
-    }));
+    }, 'Fixture failure'));
   `;
   const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'job brief fixture');
   const properties = wrappedHandlerReturnProperties(registration, 'job brief fixture');
@@ -707,11 +756,71 @@ test('job-brief projection validation binds every active value expression', () =
   );
 });
 
+test('handler inspection accepts only the canonical executable wrapTool call shape', () => {
+  const canonicalWrapper = `function wrapTool(handler, fallback, includeStructuredContent = false) {
+    return async (params) => {
+      try {
+        return resultContent(await handler(params), includeStructuredContent);
+      } catch (error) {
+        return errorContent(error, fallback);
+      }
+    };
+  }`;
+  assert.doesNotThrow(() => assertActiveFunctionDefinitionAst(
+    canonicalWrapper,
+    'wrapTool',
+    canonicalWrapper,
+    'canonical wrapper definition fixture',
+  ));
+  assert.throws(
+    () => assertActiveFunctionDefinitionAst(
+      canonicalWrapper.replace('await handler(params)', 'await decoyHandler(params)'),
+      'wrapTool',
+      canonicalWrapper,
+      'decoy wrapper definition fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
+  const registrationFrom = (handlerSource, sourcePath) => activeToolRegistrations(
+    `registerPluginTool('trackly_wrapped', { inputSchema }, ${handlerSource});`,
+    'registerPluginTool',
+    sourcePath,
+  )[0];
+  assert.doesNotThrow(() => wrappedHandlerReturnProperties(
+    registrationFrom("wrapTool(async () => { return { success: true }; }, 'Fixture failure')", 'canonical wrapper fixture'),
+    'canonical wrapper fixture',
+  ));
+  assert.throws(
+    () => wrappedHandlerReturnProperties(
+      registrationFrom("decoyWrap(async () => ({ success: true }), 'Fixture failure')", 'decoy wrapper fixture'),
+      'decoy wrapper fixture',
+    ),
+    /must use the canonical wrapTool binding/,
+  );
+  assert.throws(
+    () => wrappedHandlerReturnProperties(
+      registrationFrom('wrapTool(async () => ({ success: true }))', 'short wrapper fixture'),
+      'short wrapper fixture',
+    ),
+    /must provide exactly a handler, fallback message, and optional structured-content flag/,
+  );
+  assert.throws(
+    () => wrappedHandlerReturnProperties(
+      registrationFrom(
+        "wrapTool(async () => ({ success: true }), 'Fixture failure', true, async () => ({ decoy: true }))",
+        'extra handler fixture',
+      ),
+      'extra handler fixture',
+    ),
+    /must provide exactly a handler, fallback message, and optional structured-content flag/,
+  );
+});
+
 test('local wrapper handlers must actively parse params with their strict schema', () => {
   const validSource = `
     server.registerTool('trackly_strict', { inputSchema: publicSchema }, wrapTool(async (params) =>
       requestApi('POST', '/strict', strictSchema.parse(params))
-    ));
+    , 'Fixture failure'));
   `;
   const [valid] = activeToolRegistrations(validSource, 'server.registerTool', 'strict handler fixture');
   assert.doesNotThrow(() => assertWrappedHandlerParsesWithSchema(valid, 'strictSchema', 'strict handler fixture'));
@@ -721,7 +830,7 @@ test('local wrapper handlers must actively parse params with their strict schema
       // strictSchema.parse(params)
       const unused = () => strictSchema.parse(params);
       return requestApi('POST', '/permissive', params);
-    }));
+    }, 'Fixture failure'));
   `;
   const [decoy] = activeToolRegistrations(decoySource, 'server.registerTool', 'decoy parse fixture');
   assert.throws(
@@ -734,7 +843,7 @@ test('local wrapper handlers must actively parse params with their strict schema
         const parsed = strictSchema.parse(params);
       }
       return requestApi('POST', '/permissive', params);
-    }));
+    }, 'Fixture failure'));
   `;
   const [conditional] = activeToolRegistrations(
     conditionalSource,
@@ -749,7 +858,7 @@ test('local wrapper handlers must actively parse params with their strict schema
     server.registerTool('trackly_strict', { inputSchema: publicSchema }, wrapTool(async (params) => {
       return requestApi('POST', '/permissive', params);
       const parsed = strictSchema.parse(params);
-    }));
+    }, 'Fixture failure'));
   `;
   const [dead] = activeToolRegistrations(deadSource, 'server.registerTool', 'dead parse fixture');
   assert.throws(
@@ -773,7 +882,7 @@ test('truth-certification handler locks auth, body, idempotency, and bounded pro
         status: safeReviewStatus(response?.outcome?.status ?? response?.status ?? response?.run?.status),
         noSubmit: true as const,
       };
-    }));
+    }, 'Fixture failure'));
   `;
   const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'certification handler fixture');
   assert.throws(
@@ -800,7 +909,7 @@ test('wrapped request endpoint validation requires the reachable returned reques
     'trackly_reconcile', { inputSchema },
     wrapTool(({ runId }) => requestApi(
       'POST', \`/api/jobscout/apply/runs/\${runId}/wrong-endpoint\`, body,
-    )),
+    ), 'Fixture failure'),
   );`;
   const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'endpoint fixture');
   assert.throws(
@@ -820,7 +929,7 @@ test('wrapped request endpoint validation requires the reachable returned reques
         );
       }
       return { success: true };
-    }));
+    }, 'Fixture failure'));
   `;
   const [conditional] = activeToolRegistrations(
     conditionalSource,
@@ -845,7 +954,7 @@ test('wrapped request endpoint validation requires the reachable returned reques
         return response;
       }
       return { success: true };
-    }));
+    }, 'Fixture failure'));
   `;
   const [certification] = activeToolRegistrations(
     certificationSource,
@@ -869,7 +978,7 @@ test('wrapped request endpoint validation requires the reachable returned reques
         'POST', \`/api/jobscout/apply/runs/\${runId}/plugin-review-ready\`, body,
       );
       return response;
-    }));
+    }, 'Fixture failure'));
   `;
   const [earlyReturnCertification] = activeToolRegistrations(
     earlyReturnCertificationSource,
@@ -907,7 +1016,7 @@ test('live work endpoint validation binds the consumed request result', () => {
         ...projectApplyWorkSnapshot(workSnapshot, snapshot.profileKeys ?? []),
         kind: 'snapshot' as const,
       };
-    }));
+    }, 'Fixture failure'));
   `;
   const [valid] = activeToolRegistrations(validSource, 'registerPluginTool', 'live work fixture');
   assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
@@ -965,7 +1074,7 @@ test('live work endpoint validation binds the consumed request result', () => {
         );
         return work;
       }
-    }));
+    }, 'Fixture failure'));
   `;
   const [decoy] = activeToolRegistrations(decoySource, 'registerPluginTool', 'decoy work fixture');
   assert.throws(
@@ -1029,7 +1138,7 @@ test('live work endpoint validation binds the consumed request result', () => {
         'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/unbounded-work\`, authToken, snapshot,
       );
       return { ...workSnapshot, kind: 'snapshot' as const };
-    }));
+    }, 'Fixture failure'));
   `;
   const [snapshotDecoy] = activeToolRegistrations(
     snapshotDecoySource,
@@ -1160,7 +1269,7 @@ test('readiness profile references must originate from canonical keys and public
   const handlerSource = `
     registerPluginTool('trackly_get_apply_readiness', { outputSchema: readinessOutputSchema }, wrapTool(async () => {
       return privateProjection;
-    }));
+    }, 'Fixture failure'));
   `;
   const [registration] = activeToolRegistrations(
     handlerSource,
@@ -1221,6 +1330,7 @@ test('progress and stop contracts reject widened branches and success-only lifec
   const stopSource = `
     registerPluginTool('trackly_stop_apply', { inputSchema }, wrapTool(
       ({ executionId }) => Promise.resolve({ success: true, executionId }),
+      'Fixture failure',
     ));
   `;
   const [stop] = activeToolRegistrations(stopSource, 'registerPluginTool', 'stop handler fixture');
@@ -1245,7 +1355,7 @@ test('start, progress, and reconciliation checks bind active endpoint control fl
         'POST', \`/api/jobscout/apply/batches/\${batchId}/plugin-prepare\`, body,
       );
       return prepared;
-    }));
+    }, 'Fixture failure'));
   `;
   const [start] = activeToolRegistrations(startSource, 'registerPluginTool', 'start endpoint fixture');
   assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
@@ -1295,7 +1405,7 @@ test('start, progress, and reconciliation checks bind active endpoint control fl
         { 'Idempotency-Key': \`\${idempotencyKey}:prepare\` },
       );
       return prepared;
-    }));
+    }, 'Fixture failure'));
   `;
   const [startFlow] = activeToolRegistrations(
     startFlowSource,
@@ -1342,7 +1452,7 @@ test('start, progress, and reconciliation checks bind active endpoint control fl
         'POST', \`/api/jobscout/apply/executions/\${executionId}/plugin-work\`, authToken, {},
       );
       return renewedWork;
-    }));
+    }, 'Fixture failure'));
   `;
   const [progressRegistration] = activeToolRegistrations(
     progressSource,
@@ -1407,7 +1517,7 @@ test('start, progress, and reconciliation checks bind active endpoint control fl
         body,
         { 'Idempotency-Key': wrongKey },
       )
-    ));
+    , 'Fixture failure'));
   `;
   const [reconcile] = activeToolRegistrations(
     reconcileSource,
@@ -1479,7 +1589,7 @@ test('resume handoff projection supports expression handlers and excludes artifa
       requiresLocalAgentOrManualUpload: true,
       automaticEmployerAttachment: false as const,
       noSubmit: true as const,
-    })));
+    }), 'Fixture failure'));
   `;
   const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'resume fixture');
   assert.deepEqual(

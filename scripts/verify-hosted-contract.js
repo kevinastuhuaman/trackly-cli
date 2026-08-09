@@ -134,6 +134,25 @@ function directToolRegistrationsInNamedFactory(source, expectedFunction, expecte
     )),
     `${expectedFunction} in ${sourcePath} must reach every ${expectedCallee} registration without an earlier branch, return, throw, or disabled path`,
   );
+  const allowedTailRegistrationMethods = new Set([
+    'tool',
+    'registerTool',
+    'registerPrompt',
+    'registerResource',
+  ]);
+  assert.ok(
+    factoryStatements.slice(lastRegistrationIndex + 1, -1).every((statement) => {
+      const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+      const callee = call?.type === 'CallExpression' ? call.callee : null;
+      return callee?.type === 'MemberExpression'
+        && !callee.computed
+        && callee.object?.type === 'Identifier'
+        && callee.object.name === expectedServerBinding
+        && callee.property?.type === 'Identifier'
+        && allowedTailRegistrationMethods.has(callee.property.name);
+    }),
+    `${expectedFunction} in ${sourcePath} must reach its final server return through direct registration calls on the exact server, without a branch, return, throw, or other executable statement after ${expectedCallee} registration`,
+  );
   const factoryReturns = [];
   const serverRebindings = [];
   function targetContainsServerBinding(node) {
@@ -366,6 +385,8 @@ function directToolRegistrationsInExportedFunction(
   );
 
   const nestedRegistrations = [];
+  const lowLevelRegistrationReferences = [];
+  const dynamicServerMemberReferences = [];
   function visit(node) {
     if (node === null || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -374,6 +395,18 @@ function directToolRegistrationsInExportedFunction(
     }
     if (node.type === 'CallExpression' && babelCalleeName(node.callee) === expectedCallee) {
       nestedRegistrations.push(node);
+    }
+    if (node.type === 'MemberExpression'
+      && node.object?.type === 'Identifier'
+      && node.object.name === 'server') {
+      const propertyName = node.computed
+        ? (node.property?.type === 'StringLiteral' ? node.property.value : null)
+        : (node.property?.type === 'Identifier' ? node.property.name : null);
+      if (propertyName === 'registerTool' || propertyName === 'tool') {
+        lowLevelRegistrationReferences.push(node);
+      } else if (node.computed && propertyName === null) {
+        dynamicServerMemberReferences.push(node);
+      }
     }
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'extra') continue;
@@ -385,6 +418,16 @@ function directToolRegistrationsInExportedFunction(
     nestedRegistrations.length,
     registrations.length,
     `${expectedFunction} in ${sourcePath} must register every ${expectedCallee} tool unconditionally as a direct function-body statement`,
+  );
+  assert.deepEqual(
+    lowLevelRegistrationReferences,
+    [helperReturnStatements[0].argument.callee],
+    `${expectedFunction} in ${sourcePath} must register tools only through the verified ${expectedCallee} helper`,
+  );
+  assert.equal(
+    dynamicServerMemberReferences.length,
+    0,
+    `${expectedFunction} in ${sourcePath} must not use dynamic server member access that could bypass the verified ${expectedCallee} helper`,
   );
   return registrations;
 }
@@ -948,13 +991,38 @@ function assertDescriptorUsesTopLevelBinding(
 }
 
 function wrappedHandlerFunction(registration, sourcePath) {
+  assert.equal(
+    registration.call.arguments.length,
+    3,
+    `${registration.name} registration in ${sourcePath} must provide exactly name, descriptor, and handler arguments`,
+  );
   const wrapper = registration.call.arguments[2];
   assert.equal(wrapper?.type, 'CallExpression', `${registration.name} handler in ${sourcePath} must use a wrapper call`);
+  assert.equal(
+    wrapper.callee?.type === 'Identifier' ? wrapper.callee.name : null,
+    'wrapTool',
+    `${registration.name} handler in ${sourcePath} must use the canonical wrapTool binding`,
+  );
+  assert.ok(
+    wrapper.arguments.length === 2 || wrapper.arguments.length === 3,
+    `${registration.name} wrapTool call in ${sourcePath} must provide exactly a handler, fallback message, and optional structured-content flag`,
+  );
   const handler = wrapper.arguments[0];
   assert.ok(
     handler?.type === 'ArrowFunctionExpression' || handler?.type === 'FunctionExpression',
     `${registration.name} wrapper in ${sourcePath} must receive a function handler`,
   );
+  assert.equal(
+    wrapper.arguments[1]?.type,
+    'StringLiteral',
+    `${registration.name} wrapTool call in ${sourcePath} must provide a static fallback message after its sole function handler`,
+  );
+  if (wrapper.arguments.length === 3) {
+    assert.ok(
+      wrapper.arguments[2]?.type === 'BooleanLiteral' && wrapper.arguments[2].value === true,
+      `${registration.name} wrapTool call in ${sourcePath} may enable structured content only with literal true`,
+    );
+  }
   return handler;
 }
 
@@ -1909,6 +1977,24 @@ assertExportedFactoryUsedByPluginRouter(
   hostedPluginRouterSource,
   'createTracklyPluginMcpServer',
   hostedPluginRouterPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'wrapTool',
+  `function wrapTool(
+    handler: (params: any) => Promise<unknown>,
+    fallback: string,
+    includeStructuredContent = false,
+  ) {
+    return async (params: any) => {
+      try {
+        return resultContent(await handler(params), includeStructuredContent);
+      } catch (error) {
+        return errorContent(error, fallback);
+      }
+    };
+  }`,
+  hostedPluginSourcePath,
 );
 const executablePluginRegistrations = directToolRegistrationsInExportedFunction(
   hostedPluginSource,
