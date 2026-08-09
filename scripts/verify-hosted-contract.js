@@ -35,6 +35,20 @@ const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
 const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
 const hostedPluginContract = JSON.parse(fs.readFileSync(hostedPluginContractPath, 'utf8'));
 const pluginLock = JSON.parse(fs.readFileSync(pluginLockPath, 'utf8'));
+
+if (
+  hostedPluginContract === null
+  || typeof hostedPluginContract !== 'object'
+  || Array.isArray(hostedPluginContract)
+  || hostedPluginContract.tools === null
+  || typeof hostedPluginContract.tools !== 'object'
+  || Array.isArray(hostedPluginContract.tools)
+) {
+  throw new Error(
+    `Hosted plugin contract at ${hostedPluginContractPath} must contain a top-level "tools" JSON object before tool parity can be verified.`,
+  );
+}
+
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
   'trackly_diagnose_local_path',

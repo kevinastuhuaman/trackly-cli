@@ -528,6 +528,50 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   }
 });
 
+test('hosted parity verifier fails clearly when the plugin contract has no tools object', () => {
+  const { spawnSync } = require('node:child_process');
+  const verifierPath = path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js');
+  const fakeBackendRoot = path.join('/tmp', 'trackly-malformed-hosted-contract');
+  const childScript = `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const originalExistsSync = fs.existsSync;
+    const originalReadFileSync = fs.readFileSync;
+    const backendRoot = ${JSON.stringify(fakeBackendRoot)};
+    const applyContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
+    const pluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
+    const applySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
+
+    fs.existsSync = (filePath) => (
+      filePath === applyContractPath
+      || filePath === pluginContractPath
+      || originalExistsSync(filePath)
+    );
+    fs.readFileSync = (filePath, ...args) => {
+      if (filePath === applyContractPath) return '{}';
+      if (filePath === pluginContractPath) return '{"contractVersion":"1.0.0"}';
+      if (filePath === applySourcePath) return '';
+      return originalReadFileSync(filePath, ...args);
+    };
+
+    require(${JSON.stringify(verifierPath)});
+  `;
+  const result = spawnSync(process.execPath, ['-e', childScript], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      TRACKLY_BACKEND_DIR: fakeBackendRoot,
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /must contain a top-level "tools" JSON object before tool parity can be verified/,
+  );
+  assert.doesNotMatch(result.stderr, /TypeError/);
+});
+
 test('Apply MCP prompt gates resume preparation on the same browser binding', () => {
   const browserGate = source.indexOf('Reclaim semantic browser control');
   const prepare = source.indexOf('prepare the run-bound resume locally', browserGate);
