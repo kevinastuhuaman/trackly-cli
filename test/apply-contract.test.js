@@ -1020,6 +1020,26 @@ test('Apply skill 4.4.2 uses compact snapshots, parked-member controls, local li
   assert.match(upload, /fail closed/i);
 });
 
+test('public Apply skill completes every ready member in a bound wave before handoff', () => {
+  const skill = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  const handoff = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'references', 'review-handoff.md'),
+    'utf8',
+  );
+
+  assert.match(skill, /Before choosing a workflow-completion stop or user-facing handoff, process every ready mutable member in that wave/);
+  assert.match(skill, /If an authoritative blocker requires an immediate stop, obey it and preserve the entire wave for resumption/);
+  assert.match(skill, /never stop after the first review-ready sibling/);
+  assert.match(skill, /After every certification or reconciliation, refetch the current bound wave/);
+  assert.match(skill, /authoritative mutability, blockers, allowed operations, membership, and advance instruction/);
+  assert.match(skill, /Only then hand off all certified review tabs/);
+  assert.match(handoff, /Certification of one member is not permission to stop/);
+  assert.match(handoff, /never abandon ready siblings because one member certified or reconciled/);
+});
+
 test('Apply skill consumes server-owned onboarding screens and consistency rules with a legacy fallback', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
 

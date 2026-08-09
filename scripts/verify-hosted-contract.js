@@ -6,6 +6,142 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+function normalizeJavaScriptTrivia(source) {
+  const tokens = [];
+  let index = 0;
+  let regexMayStart = true;
+
+  const regexPrefixKeywords = new Set([
+    'await', 'case', 'delete', 'in', 'instanceof', 'of', 'return', 'throw',
+    'typeof', 'void', 'yield',
+  ]);
+  const lineTerminatorSensitiveTokens = new Set([
+    'async', 'break', 'continue', 'return', 'throw', 'yield',
+  ]);
+
+  const skipTrivia = (start) => {
+    let cursor = start;
+    while (cursor < source.length) {
+      if (/\s/.test(source[cursor])) {
+        cursor++;
+      } else if (source.startsWith('//', cursor)) {
+        cursor = source.indexOf('\n', cursor + 2);
+        if (cursor === -1) return source.length;
+      } else if (source.startsWith('/*', cursor)) {
+        const close = source.indexOf('*/', cursor + 2);
+        cursor = close === -1 ? source.length : close + 2;
+      } else {
+        break;
+      }
+    }
+    return cursor;
+  };
+
+  while (index < source.length) {
+    const char = source[index];
+
+    if (/\s/.test(char) || source.startsWith('//', index) || source.startsWith('/*', index)) {
+      const triviaStart = index;
+      index = skipTrivia(index);
+      if (
+        /[\n\r\u2028\u2029]/.test(source.slice(triviaStart, index))
+        && lineTerminatorSensitiveTokens.has(tokens.at(-1))
+      ) {
+        tokens.push('<LINE_TERMINATOR>');
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === '`') {
+      const quote = char;
+      const start = index;
+      index++;
+      let escaped = false;
+      while (index < source.length) {
+        const literalChar = source[index++];
+        if (escaped) escaped = false;
+        else if (literalChar === '\\') escaped = true;
+        else if (literalChar === quote) break;
+      }
+      tokens.push(source.slice(start, index));
+      regexMayStart = false;
+      continue;
+    }
+
+    if (char === '/' && regexMayStart) {
+      const start = index;
+      index++;
+      let escaped = false;
+      let inCharacterClass = false;
+      while (index < source.length) {
+        const regexChar = source[index++];
+        if (escaped) {
+          escaped = false;
+        } else if (regexChar === '\\') {
+          escaped = true;
+        } else if (regexChar === '[') {
+          inCharacterClass = true;
+        } else if (regexChar === ']') {
+          inCharacterClass = false;
+        } else if (regexChar === '/' && !inCharacterClass) {
+          while (index < source.length && /[a-z]/i.test(source[index])) {
+            index++;
+          }
+          break;
+        }
+      }
+      tokens.push(source.slice(start, index));
+      regexMayStart = false;
+      continue;
+    }
+
+    if (/[A-Za-z_$]/.test(char)) {
+      const start = index++;
+      while (index < source.length && /[A-Za-z0-9_$]/.test(source[index])) index++;
+      const token = source.slice(start, index);
+      tokens.push(token);
+      regexMayStart = regexPrefixKeywords.has(token);
+      continue;
+    }
+
+    if (/[0-9]/.test(char)) {
+      const start = index++;
+      while (index < source.length && /[A-Za-z0-9_.]/.test(source[index])) index++;
+      tokens.push(source.slice(start, index));
+      regexMayStart = false;
+      continue;
+    }
+
+    if (char === ',') {
+      const next = skipTrivia(index + 1);
+      if (source[next] === '}' || source[next] === ']') {
+        index++;
+        continue;
+      }
+    }
+
+    const operator = [
+      '>>>=', '===', '!==', '>>>', '**=', '&&=', '||=', '??=', '<<=', '>>=',
+      '=>', '==', '!=', '<=', '>=', '++', '--', '&&', '||', '??', '?.', '**',
+      '<<', '>>', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '...',
+    ].find((candidate) => source.startsWith(candidate, index)) || char;
+    tokens.push(operator);
+    index += operator.length;
+    if (operator === ')' || operator === ']' || operator === '}' || operator === '.' || operator === '?.') {
+      regexMayStart = false;
+    } else if (operator === '++' || operator === '--') {
+      regexMayStart = false;
+    } else {
+      regexMayStart = true;
+    }
+  }
+
+  return JSON.stringify(tokens);
+}
+
+const sha256 = (source) => crypto.createHash('sha256').update(normalizeJavaScriptTrivia(source)).digest('hex');
+
+function verifyHostedContract() {
 const cliRoot = path.join(__dirname, '..');
 const backendCandidates = process.env.TRACKLY_BACKEND_DIR
   ? [path.resolve(process.env.TRACKLY_BACKEND_DIR)]
@@ -131,8 +267,6 @@ function schemaDefinition(source, name, sourcePath) {
   assert.fail(`${name} is unterminated in ${sourcePath}`);
 }
 
-const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
-const sha256 = (source) => crypto.createHash('sha256').update(normalizeSchema(source)).digest('hex');
 for (const schemaName of [
   'applyExecutionDispositionSchema',
   'truthCertificationCommon',
@@ -140,8 +274,8 @@ for (const schemaName of [
   'startApplyRunSchema',
 ]) {
   assert.equal(
-    normalizeSchema(schemaDefinition(localApplySource, schemaName, localApplySourcePath)),
-    normalizeSchema(schemaDefinition(hostedApplySource, schemaName, hostedApplySourcePath)),
+    normalizeJavaScriptTrivia(schemaDefinition(localApplySource, schemaName, localApplySourcePath)),
+    normalizeJavaScriptTrivia(schemaDefinition(hostedApplySource, schemaName, hostedApplySourcePath)),
     `${schemaName} executable constraints drifted between hosted and local MCP`,
   );
 }
@@ -411,3 +545,10 @@ assert.doesNotMatch(reconcile, /\bleaseToken\b/);
 console.log(
   `Trackly Apply MCP contracts match at ${local.contractVersion}; the ${hostedPluginTools.length}-tool public plugin facade matches at ${hostedPluginContract.contractVersion}.`,
 );
+}
+
+module.exports = { normalizeJavaScriptTrivia, sha256, verifyHostedContract };
+
+if (require.main === module || process.env.TRACKLY_BACKEND_DIR) {
+  verifyHostedContract();
+}

@@ -9,6 +9,11 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 
+const {
+  normalizeJavaScriptTrivia,
+  sha256: sha256ExecutableSource,
+} = require('../scripts/verify-hosted-contract.js');
+
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
@@ -53,6 +58,46 @@ function referencedTools(directory) {
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
+
+test('executable digest normalization preserves literal contents and removes only syntax trivia', () => {
+  const compact = 'const value={label:"two words",template:`keep this space`,pattern:/a b/};';
+  const formatted = `
+    // formatting-only comment
+    const value = {
+      label: "two words",
+      template: \`keep this space\`,
+      pattern: /a b/,
+    };
+  `;
+
+  assert.equal(normalizeJavaScriptTrivia(formatted), normalizeJavaScriptTrivia(compact));
+  assert.equal(sha256ExecutableSource(formatted), sha256ExecutableSource(compact));
+  assert.notEqual(
+    normalizeJavaScriptTrivia('const result = left + +right;'),
+    normalizeJavaScriptTrivia('const result = left++ + right;'),
+    'removing trivia must not merge adjacent tokens into a different operator',
+  );
+  assert.notEqual(
+    normalizeJavaScriptTrivia('function result() { return\nvalue; }'),
+    normalizeJavaScriptTrivia('function result() { return value; }'),
+    'line terminators in automatic-semicolon-insertion-sensitive positions must affect digests',
+  );
+  assert.notEqual(
+    sha256ExecutableSource(compact),
+    sha256ExecutableSource(compact.replace('two words', 'twowords')),
+    'spaces inside quoted literals must affect executable digests',
+  );
+  assert.notEqual(
+    sha256ExecutableSource(compact),
+    sha256ExecutableSource(compact.replace('keep this space', 'keepthisspace')),
+    'spaces inside template literals must affect executable digests',
+  );
+  assert.notEqual(
+    sha256ExecutableSource(compact),
+    sha256ExecutableSource(compact.replace('/a b/', '/ab/')),
+    'spaces inside regular-expression literals must affect executable digests',
+  );
+});
 
 function validateAppBinding(manifest, appConfig) {
   const hasManifestBinding = Object.hasOwn(manifest, 'apps');
