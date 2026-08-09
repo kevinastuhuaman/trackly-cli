@@ -215,7 +215,15 @@ test('public skills reference only the locked 18-tool facade', () => {
     [...lock.publicToolAllowlist].sort(),
   );
   assert.ok(Object.values(lock.publicExecutableContract.descriptorSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
+  assert.deepEqual(
+    Object.keys(lock.publicExecutableContract.handlerSha256).sort(),
+    [...lock.publicToolAllowlist].sort(),
+  );
+  assert.ok(Object.values(lock.publicExecutableContract.handlerSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
+  assert.match(lock.publicExecutableContract.pluginServerSha256, /^[a-f0-9]{64}$/);
   assert.ok(Object.values(lock.publicExecutableContract.schemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
+  assert.ok(Object.values(lock.publicExecutableContract.transitiveSchemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
+  assert.ok(Object.hasOwn(lock.publicExecutableContract.transitiveSchemaSha256, 'APPLY_BROWSER_SURFACES'));
 });
 
 test('adapted trackly Apply skill is traceable to its source and safety invariants', () => {
@@ -242,6 +250,9 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /atomically records the review checkpoint, truth certification, and review-ready outcome/);
   assert.match(skill, /atomically records typed confirmation evidence and the submitted outcome/);
   assert.match(skill, /keep that browser-local upload explicitly unbound and outside the truth certification/);
+  assert.match(skill, /at least once every 60 seconds during active browser work/);
+  assert.match(skill, /first pass for every mutable member in the current bound wave/);
+  assert.match(skill, /Wait until the advertised retry time or estimated return time before one work refetch/);
   const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
   assert.match(browserSafety, /verify only the filename visibly committed/);
   assert.match(browserSafety, /never claim an artifact identity, preview, or hash exists/);
@@ -265,6 +276,8 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(lifecycle, /Do not send server-owned internals, resume IDs, filenames, paths, contents, download URLs, or answer values/);
   const handoff = read('plugins/trackly/skills/trackly-apply/references/review-handoff.md');
   assert.match(handoff, /filename check does not bind or attest the browser-local bytes/);
+  assert.match(handoff, /verified preservation receipt and user-visible reachability proof/);
+  assert.match(handoff, /Inventory membership alone is not visibility proof/);
 });
 
 test('submission fixtures cover six positive and three negative cases', () => {
@@ -288,10 +301,16 @@ test('submission fixtures cover six positive and three negative cases', () => {
   assert.ok(monitored.expectedResultShape.includes('userChoice.jobIds'));
   assert.ok(fixtures.negative.every((item) => item.fixture));
   assert.ok(fixtures.positive.some((item) => item.id === 'apply-to-review'));
-  assert.ok(fixtures.positive.find((item) => item.id === 'apply-to-review').expected.includes('trackly_prepare_resume_artifact'));
-  assert.ok(fixtures.positive.find((item) => item.id === 'apply-to-review').expected.includes('trackly_get_job'));
+  const applyToReview = fixtures.positive.find((item) => item.id === 'apply-to-review');
+  assert.ok(applyToReview.expected.includes('trackly_prepare_resume_artifact'));
+  assert.ok(applyToReview.expected.includes('trackly_get_job'));
+  assert.deepEqual(applyToReview.turns.map((turn) => turn.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+  assert.match(applyToReview.turns[2].content, /attached the intended resume.*filename/s);
+  assert.match(applyToReview.turns[4].content, /exact complete application.*truthful/s);
+  assert.ok(applyToReview.turns.slice(0, 5).every((turn) => !(turn.expected || []).includes('trackly_certify_review_ready')));
+  assert.deepEqual(applyToReview.turns[5].expected, ['trackly_certify_review_ready']);
   assert.deepEqual(
-    fixtures.positive.find((item) => item.id === 'apply-to-review').expectedResultShape,
+    applyToReview.expectedResultShape,
     [
       'profile.missingRequired[].key',
       'profile.missingRequired[].label',

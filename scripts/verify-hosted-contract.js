@@ -23,6 +23,9 @@ const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
 const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
 const hostedPluginScopesPath = path.join(backendRoot, 'src', 'mcp', 'plugin-scopes.ts');
+const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
+const hostedApplicationProfileServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'service.ts');
+const hostedJobscoutFilterUtilsPath = path.join(backendRoot, 'src', 'routes', 'jobscout-filter-utils.ts');
 const pluginLockPath = path.join(cliRoot, 'plugins', 'trackly', 'skill-lock.json');
 
 if (!fs.existsSync(hostedContractPath)) {
@@ -53,6 +56,9 @@ if (
 }
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
+const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
+const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
+const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
 
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
@@ -157,10 +163,22 @@ for (const [toolName, scopes] of Object.entries(pluginLock.publicScopeContract))
     `${toolName} scopes drifted from the packaged public scope contract`,
   );
 }
-assert.match(
+const executableScopeDefinition = schemaDefinition(
   hostedPluginScopesSource,
-  /trackly_get_apply_work:\s*\['profile:read', 'sensitive:read', 'apply:read', 'apply:write'\]/,
-  'Executable get-work scope enforcement must include apply:write for private lease renewal',
+  'TRACKLY_PLUGIN_TOOL_SCOPES',
+  hostedPluginScopesPath,
+);
+const executableScopeContract = Object.fromEntries(
+  [...executableScopeDefinition.matchAll(/^\s*(trackly_[a-z0-9_]+):\s*\[([^\]]*)\]/gm)]
+    .map((match) => [
+      match[1],
+      [...match[2].matchAll(/['"]([^'"]+)['"]/g)].map((scope) => scope[1]),
+    ]),
+);
+assert.deepEqual(
+  executableScopeContract,
+  pluginLock.publicScopeContract,
+  'All executable hosted plugin scope mappings must match the packaged public scope lock',
 );
 assert.deepEqual(
   hostedPluginTools,
@@ -240,15 +258,31 @@ function topLevelCallArguments(callSource, name) {
   assert.fail(`${name} registration has an unterminated argument list`);
 }
 
-const executableDescriptorDigests = Object.fromEntries(executablePluginTools.map((name) => {
+const executableRegistrationArguments = Object.fromEntries(executablePluginTools.map((name) => {
   const args = topLevelCallArguments(pluginToolDefinition(name), name);
   assert.ok(args.length >= 3, `${name} registration must contain name, descriptor, and handler`);
-  return [name, sha256(args[1])];
+  return [name, args];
 }));
+const executableDescriptorDigests = Object.fromEntries(
+  executablePluginTools.map((name) => [name, sha256(executableRegistrationArguments[name][1])]),
+);
 assert.deepEqual(
   executableDescriptorDigests,
   pluginLock.publicExecutableContract.descriptorSha256,
   'Executable hosted plugin descriptors or inline schemas drifted from the packaged digest lock',
+);
+const executableHandlerDigests = Object.fromEntries(
+  executablePluginTools.map((name) => [name, sha256(executableRegistrationArguments[name][2])]),
+);
+assert.deepEqual(
+  executableHandlerDigests,
+  pluginLock.publicExecutableContract.handlerSha256,
+  'Executable hosted plugin handler implementations drifted from the packaged behavior digest lock',
+);
+assert.equal(
+  sha256(hostedPluginSource),
+  pluginLock.publicExecutableContract.pluginServerSha256,
+  'Hosted plugin server implementation drifted from the packaged whole-source digest lock',
 );
 
 const executableSchemaDigests = Object.fromEntries(
@@ -261,6 +295,27 @@ assert.deepEqual(
   executableSchemaDigests,
   pluginLock.publicExecutableContract.schemaSha256,
   'Executable hosted plugin shared output schemas drifted from the packaged digest lock',
+);
+
+const transitiveSources = {
+  APPLY_EXECUTION_MAX_TARGET: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
+  APPLY_EXECUTION_ACCESS_CLASSIFICATIONS: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
+  APPLY_EXECUTION_STOP_REASON_CODES: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
+  APPLY_BROWSER_SURFACES: [hostedApplyExecutionContractSource, hostedApplyExecutionContractPath],
+  APPLY_SCENARIO_CODES: [hostedApplicationProfileServiceSource, hostedApplicationProfileServicePath],
+  ALL_JOB_FUNCTIONS: [hostedJobscoutFilterUtilsSource, hostedJobscoutFilterUtilsPath],
+};
+const executableTransitiveDigests = Object.fromEntries(
+  Object.keys(pluginLock.publicExecutableContract.transitiveSchemaSha256).map((constantName) => {
+    const sourceEntry = transitiveSources[constantName];
+    assert.ok(sourceEntry, `Unknown transitive public schema constant ${constantName}`);
+    return [constantName, sha256(schemaDefinition(sourceEntry[0], constantName, sourceEntry[1]))];
+  }),
+);
+assert.deepEqual(
+  executableTransitiveDigests,
+  pluginLock.publicExecutableContract.transitiveSchemaSha256,
+  'Executable hosted plugin transitive schema constants drifted from the packaged digest lock',
 );
 
 const readinessSchema = schemaDefinition(

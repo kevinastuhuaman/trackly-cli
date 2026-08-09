@@ -36,8 +36,9 @@ Use trackly as the source of truth for approved work, reusable application answe
 5. Ask once for genuinely missing facts. Save a reusable answer only when the user confirms both the value and its scope.
 6. If the form exposes a resume control, call `trackly_prepare_resume_artifact`. When it returns `requiresLocalAgentOrManualUpload`, ask the user to attach the resume manually and verify only the filename visibly committed on the employer page; do not invent an artifact identity, preview, or attestation. Hosted trackly treats every manual resume upload as unbound and cannot certify its contents. If no resume control exists, do not prepare or upload a resume.
 7. For free-text answers, draft only from supported user and role facts, then call `trackly_lint_application_text`. Do not enter text that fails lint or contains an unsupported claim.
-8. After each durable milestone, call `trackly_report_apply_progress` with only the current execution binding, typed status, exercised safety checks, and redacted blocker codes.
+8. After each durable milestone and at least once every 60 seconds during active browser work, call `trackly_report_apply_progress` with only the current execution binding, typed status, exercised safety checks, and redacted blocker codes. Use an authorized value-free progress operation for the heartbeat; never fabricate a milestone or answer value.
 9. Recheck every visible field and error. Confirm the form is complete, the final Submit control is present or its equivalent is clearly identified, and it has not been activated.
+10. Complete the first pass for every mutable member in the current bound wave before stopping or handing off. Follow each member's authoritative allowed operations and blocker state; preserve blocked or immutable members without replacing them, and do not stop merely because one sibling reached review. After every mutable member has a first-pass result, report progress, request authoritative advance or refresh, and obey the returned blocker, next action, terminal state, or next bound wave.
 
 ## Review and reconciliation
 
@@ -50,6 +51,6 @@ Use trackly as the source of truth for approved work, reusable application answe
 
 ## Failure behavior
 
-- On maintenance or an ambiguous mutation response, do not retry blindly. Refetch current work and follow the returned recovery instruction.
+- On canonical maintenance, preserve every bound tab and stop all mutations. Wait until the advertised retry time or estimated return time before one work refetch; never tight-poll or refetch early. If no retry time is advertised, stop and ask the user to resume later. For a non-maintenance ambiguous mutation response, refetch current work once and follow the returned recovery instruction rather than replaying blindly.
 - On a stale revision or binding conflict, preserve the browser tab, refetch once, and continue only if the fresh packet authorizes it.
 - On an unsupported or manual-only surface, preserve the user's work and hand off clearly without claiming completion.

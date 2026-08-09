@@ -45,3 +45,7 @@ After the user—not the agent—activates Submit, call `trackly_reconcile_manua
 Use `confirmation: success_page` only when the bound browser surface visibly shows the submission success state. Use `confirmation: user_confirmation` with `explicitUserConfirmed: true` only when the user explicitly confirms that they submitted. The backend atomically records typed confirmation evidence and the submitted outcome. Keep the confirmation surface open and refetch the bound work until trackly returns its durable submitted state.
 
 Never reconcile from an intent to submit, a click attempt, navigation alone, an email draft, or model inference. Never activate Submit, add referral behavior, or claim submission from a partial mutation.
+
+## Maintenance pacing
+
+On a canonical maintenance response, preserve every bound browser tab and stop mutations. Wait until the server's advertised retry time or estimated return time before a single `trackly_get_apply_work` refetch; never tight-poll, refetch early, create replacement work, or replay an uncertain mutation. When no retry time is advertised, stop and ask the user to resume later.

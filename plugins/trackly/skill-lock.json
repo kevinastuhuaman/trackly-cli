@@ -8,7 +8,7 @@
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "44c45722bab87d7291875ee3b6da9d55f918b7e5934215b624c6918cfb50b612"
+    "treeSha256": "c7908983063ea1d333a1f70de59cf27f9d725ee708f48cf70fbbe2843519a686"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -79,6 +79,27 @@
       "trackly_reconcile_manual_submission": "0733c0fb224f951a9d246b5aedf4ec826124d221e87436adf267889ca9deed92",
       "trackly_stop_apply": "61423ec9a566ba42f0f826a2001d4da5c8bef20f04ad3a748ecc23396be7b072"
     },
+    "handlerSha256": {
+      "trackly_search_jobs": "acec94af47deefb02b7bc80eeb1a4edc9eb296186980bb0093bd5e738959b705",
+      "trackly_get_job": "23f3cc6642e060078eaed84272179cc7cf431a6082ae0fabc040a0419f6ef262",
+      "trackly_search_companies": "028ba1cc0773575aa5fc37aafa47765b073f99ac5f61d4148cf0c59b53ab4ba3",
+      "trackly_get_job_brief": "ca3a6a1493dfa4a4d8cd030c4c57e6654eeb2eef7d7cee0805573a345e2e3189",
+      "trackly_get_preferences": "7747fb21f1572ab12e319ccfafbba5a4cfc2a54c51a0399868f47f66c673c3eb",
+      "trackly_get_apply_readiness": "b5592e35c4ef362867d215a64887c02861a919042b1eff8102b36ebcc0a814e7",
+      "trackly_lint_application_text": "acc5bb31b74c36a4d2a5e76122de586123944dcff08d92ddad18eca8884258af",
+      "trackly_update_status": "8ec7cf2010d27649ef8b8f0301ff5930ddb29138176d4e8e4ec089a894edfd8f",
+      "trackly_save_application_answers": "afce4a7fa048eba2bba4a22ebf56d1564384044e34c447e4d38cf37d04e02783",
+      "trackly_grant_sensitive_storage_consent": "61fe9569609af3eb1a7e082f3594b6ff8a8d97dfa695281957a788ef15dee31d",
+      "trackly_revoke_sensitive_storage_consent": "43fea2cddde2aca4bb9e66dd066625fbe40672fd1e21a0d20ff690ee1fa5d7a3",
+      "trackly_start_or_resume_apply": "ccc21784d32bc171ab2c8bcd8994e66b3437e63b9e848643f9abc5cfe61df17c",
+      "trackly_get_apply_work": "4c22059e3fd84e38199975a86fd32051ecfb7275f528af94e451ee08f28de9cf",
+      "trackly_report_apply_progress": "4da1da2499ad4d2e2c980f36737e75b89549178af8db3f14dc074095314fc292",
+      "trackly_prepare_resume_artifact": "3823e856634db4524efc94d8c21ade6d2a3643f1893c17aef10cae6a956f0890",
+      "trackly_certify_review_ready": "3e92f31f178cd7177a71537b386e49dfa884499a200473349e05a11c60861135",
+      "trackly_reconcile_manual_submission": "2fd712a5cd95fca1e419fc73813729dc13e0cf5e3502354e02b9461dda6f3ae1",
+      "trackly_stop_apply": "1900997b02b4d0431a943871801d651af26e18fe0f63394294c3343696b8af7d"
+    },
+    "pluginServerSha256": "a3737957c41ad6acbf51beb3a4c88c6e5420d511c56376cda79f7e2688884a55",
     "schemaSha256": {
       "SAFE_IDEMPOTENCY_KEY": "046859665306e5aeaf57032c76268934e1b98c95d4c17a88434062c9b6a4547a",
       "SAFE_CODE": "a35176c6c3f6ee563d4b6f6f68e4c546d8b03b03915d37bf55dd5a7011927574",
@@ -93,6 +114,14 @@
       "progressOutputSchema": "b10e2ea774ee2318845010e551ddb793b9ec38b529bd7fa41ca5cef3be13afa7",
       "reviewOutputSchema": "8ca327b7397fd3e2cfffc87806cdc534e4bafda1f8671292b46ca4bd82bb8459",
       "resumeOutputSchema": "347bf3e50e6f03511cced2cff7fbd3c48e8ed8648f53a35f4a03d7b5a9143e3c"
+    },
+    "transitiveSchemaSha256": {
+      "APPLY_EXECUTION_MAX_TARGET": "f5ca38f748a1d6eaf726b8a42fb575c3c71f1864a8143301782de13da2d9202b",
+      "APPLY_EXECUTION_ACCESS_CLASSIFICATIONS": "be3b6b6290d96d8126d7402103d914084bbb86c82771d425dfde238042488a49",
+      "APPLY_EXECUTION_STOP_REASON_CODES": "a02ec9bdc1b1f439659ced02115ece76dc3541d13c970bae5115a5cf29aa41bc",
+      "APPLY_BROWSER_SURFACES": "2b54cfd931c2f9f0ea1a413d93c62ec9507b01d7feec347cf166b9c2d397f2ee",
+      "APPLY_SCENARIO_CODES": "941bc1ec2fd6691176b27961007e142867989686865b84fc84c951e3c5b4bee8",
+      "ALL_JOB_FUNCTIONS": "cd360ba5d428be8cf89e226a07d4b8a85bf42b24a59a8d0219052cf2aaf20d27"
     }
   },
   "publicToolAllowlist": [
