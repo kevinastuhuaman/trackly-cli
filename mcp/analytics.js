@@ -393,7 +393,6 @@ function createBackendRelay(options = {}) {
   const saveConfigImpl = options.saveConfig || saveConfig;
   const pending = new Set();
   let cachedOptOut = readCachedAnalyticsOptOut();
-  let authenticatedPreferenceResolved = false;
   let preferenceLookup = null;
 
   function readCachedAnalyticsOptOut() {
@@ -421,7 +420,6 @@ function createBackendRelay(options = {}) {
   }
 
   async function resolveAuthenticatedPreference() {
-    if (authenticatedPreferenceResolved) return !cachedOptOut;
     if (preferenceLookup) return preferenceLookup;
 
     preferenceLookup = (async () => {
@@ -433,6 +431,9 @@ function createBackendRelay(options = {}) {
         signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
       });
       if (!response?.ok || typeof response.json !== 'function') {
+        if (response?.body && typeof response.body.cancel === 'function') {
+          await response.body.cancel().catch(() => {});
+        }
         throw new Error('analytics_preference_unavailable');
       }
       const preference = await response.json();
@@ -440,7 +441,6 @@ function createBackendRelay(options = {}) {
         throw new Error('analytics_preference_invalid');
       }
       persistCachedAnalyticsOptOut(!preference.shareUsageAnalytics);
-      authenticatedPreferenceResolved = true;
       return preference.shareUsageAnalytics;
     })().catch(() => false).finally(() => {
       preferenceLookup = null;

@@ -204,6 +204,81 @@ test('authenticated preference lookup fails closed and caches only the opt-out b
   }
 });
 
+test('authenticated deliveries recheck preference so opt-in resumes without restart', async () => {
+  const previousApiKey = process.env.TRACKLY_API_KEY;
+  const requests = [];
+  let config = {};
+  let preferenceReads = 0;
+  const relay = createBackendRelay({
+    fetch: async (url) => {
+      const path = String(url);
+      requests.push(path);
+      if (path.endsWith('/api/jobscout/analytics-preference')) {
+        preferenceReads += 1;
+        return {
+          ok: true,
+          async json() { return { shareUsageAnalytics: preferenceReads > 1 }; },
+        };
+      }
+      return { ok: true };
+    },
+    loadConfig: () => ({ ...config }),
+    saveConfig: (next) => { config = { ...next }; },
+  });
+
+  try {
+    process.env.TRACKLY_API_KEY = 'trk_test_preference_refresh';
+    relay.capture({
+      event: '$mcp_tool_call',
+      properties: { $mcp_tool_name: 'trackly_search_jobs' },
+    });
+    await relay.flush();
+    assert.deepEqual(config, { mcpAnalyticsOptOut: true });
+
+    relay.capture({
+      event: '$mcp_tool_call',
+      properties: { $mcp_tool_name: 'trackly_search_jobs' },
+    });
+    await relay.flush();
+
+    assert.deepEqual(requests, [
+      'https://closeai.mba/api/jobscout/analytics-preference',
+      'https://closeai.mba/api/jobscout/analytics-preference',
+      'https://closeai.mba/api/jobscout/mcp-analytics',
+    ]);
+    assert.deepEqual(config, {});
+  } finally {
+    if (previousApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previousApiKey;
+  }
+});
+
+test('failed preference lookups cancel unread response bodies', async () => {
+  const previousApiKey = process.env.TRACKLY_API_KEY;
+  let cancellations = 0;
+  const relay = createBackendRelay({
+    fetch: async () => ({
+      ok: false,
+      body: { async cancel() { cancellations += 1; } },
+    }),
+    loadConfig: () => ({}),
+    saveConfig() {},
+  });
+
+  try {
+    process.env.TRACKLY_API_KEY = 'trk_test_failed_preference_body';
+    relay.capture({
+      event: '$mcp_tool_call',
+      properties: { $mcp_tool_name: 'trackly_search_jobs' },
+    });
+    await relay.flush();
+    assert.equal(cancellations, 1);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previousApiKey;
+  }
+});
+
 test('disabled analytics never loads the SDK or mutates the server', () => {
   let loads = 0;
   const server = {};

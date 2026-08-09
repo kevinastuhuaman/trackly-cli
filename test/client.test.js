@@ -416,6 +416,32 @@ test('clearOAuthTokens removes file when no non-auth keys remain', async (t) => 
   });
 });
 
+test('logout clearing preserves only the anonymous analytics opt-out', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    client.saveConfig({
+      token: 'jwt',
+      refreshToken: 'rt',
+      apiKey: 'trk_secret',
+      baseUrl: 'https://custom.usetrackly.app',
+      mcpAnalyticsOptOut: true,
+    });
+
+    client.clearConfig();
+
+    assert.deepEqual(client.loadConfig(), { mcpAnalyticsOptOut: true });
+    assert.equal(client.getToken(), null);
+    assert.equal(client.getRefreshToken(), null);
+    assert.equal(client.getApiKey(), null);
+  });
+});
+
 test('refreshAccessToken preserves config on network error (transient)', async (t) => {
   const configDir = createTempConfigDir();
   t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
