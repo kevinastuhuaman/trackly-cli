@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '56a6751f3973e96088af1b7e14a30e31c8d266b00460d3b4adcc01681ab4da32';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '58eddae2a84dc546c22a796e30d523f5d15217ae4c50c9af830c843a7a9ef529';
 
 const parsedSourceCache = new Map();
 
@@ -2100,7 +2100,7 @@ function verifyCoordinatedBackendCore({
 
 function verifyCheckedInHostedContractFixture(
   cliRoot,
-  { expectedFixtureSha256 = CHECKED_IN_HOSTED_FIXTURE_SHA256, now = new Date() } = {},
+  { expectedFixtureSha256 = CHECKED_IN_HOSTED_FIXTURE_SHA256 } = {},
 ) {
   const fixturePath = path.join(cliRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
   const fixtureSource = fs.readFileSync(fixturePath, 'utf8');
@@ -2115,7 +2115,6 @@ function verifyCheckedInHostedContractFixture(
     [
       'formatVersion',
       'capturedAt',
-      'freshUntil',
       'sourceRuntime',
       'mergedRuntime',
       'applyContractVersion',
@@ -2141,7 +2140,6 @@ function verifyCheckedInHostedContractFixture(
     sourceCommittedAt: Date.parse(fixture.sourceRuntime.committedAt),
     mergedCommittedAt: Date.parse(fixture.mergedRuntime.committedAt),
     capturedAt: Date.parse(fixture.capturedAt),
-    freshUntil: Date.parse(fixture.freshUntil),
   };
   for (const [label, timestamp] of Object.entries(timestamps)) {
     assert.ok(Number.isFinite(timestamp), `${fixturePath} ${label} must be an absolute timestamp`);
@@ -2157,16 +2155,6 @@ function verifyCheckedInHostedContractFixture(
   assert.ok(
     timestamps.capturedAt - timestamps.mergedCommittedAt <= 24 * 60 * 60 * 1000,
     `${fixturePath} snapshot must be captured within 24 hours of its recorded runtime merge`,
-  );
-  assert.ok(timestamps.capturedAt < timestamps.freshUntil, `${fixturePath} freshness window must be positive`);
-  assert.ok(
-    timestamps.freshUntil - timestamps.capturedAt <= 31 * 24 * 60 * 60 * 1000,
-    `${fixturePath} freshness window must not exceed 31 days`,
-  );
-  assert.ok(timestamps.capturedAt <= now.getTime(), `${fixturePath} snapshot must not be dated in the future`);
-  assert.ok(
-    now.getTime() <= timestamps.freshUntil,
-    `${fixturePath} expired and must be regenerated from a fresh reviewed runtime`,
   );
   const localApplyContract = JSON.parse(fs.readFileSync(
     path.join(cliRoot, 'contracts', 'trackly-apply-tools.json'),

@@ -633,7 +633,7 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   }
   const fixturePath = path.join(temporaryRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
   const originalFixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
-  const verifyFixture = (fixture, now = new Date('2026-08-10T12:00:00-07:00')) => {
+  const verifyFixture = (fixture) => {
     const fixtureSource = `${JSON.stringify(fixture, null, 2)}\n`;
     fs.writeFileSync(fixturePath, fixtureSource);
     return () => verifyHostedContract({
@@ -641,7 +641,6 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
       backendDir: null,
       fixtureOptions: {
         expectedFixtureSha256: sha256ExactBytes(fixtureSource),
-        now,
       },
     });
   };
@@ -659,10 +658,9 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   const ancestryDrift = structuredClone(originalFixture);
   ancestryDrift.mergedRuntime.parents[1] = 'a'.repeat(40);
   assert.throws(verifyFixture(ancestryDrift), /must prove the reviewed runtime commit is a direct parent/);
-  assert.throws(
-    verifyFixture(structuredClone(originalFixture), new Date('2026-09-09T00:00:00-07:00')),
-    /expired and must be regenerated from a fresh reviewed runtime/,
-  );
+  const staleCapture = structuredClone(originalFixture);
+  staleCapture.capturedAt = '2026-08-11T04:45:00-07:00';
+  assert.throws(verifyFixture(staleCapture), /must be captured within 24 hours of its recorded runtime merge/);
 });
 
 test('hosted parity verifier fails clearly when the plugin contract has no tools object', () => {

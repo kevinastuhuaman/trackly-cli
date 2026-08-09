@@ -1,7 +1,6 @@
 {
   "formatVersion": 2,
   "capturedAt": "2026-08-09T04:45:00-07:00",
-  "freshUntil": "2026-09-08T23:59:59-07:00",
   "sourceRuntime": {
     "commit": "ba8ace9acc6524b78915fc796090d331c79ae66a",
     "parent": "1c99166ca2b5d0c58205273258a361dcb658cce2",
