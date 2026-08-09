@@ -12,10 +12,12 @@ const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 const {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertActiveFunctionDefinitionAst,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
   assertWrappedHandlerParsesWithSchema,
+  assertWrappedHandlerAssignedRequestEndpoint,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
@@ -31,6 +33,7 @@ const {
   sha256ExactBytes,
   staticStringArrayMap,
   wrappedHandlerReturnProperties,
+  wrappedHandlerReturnedObjectProperties,
 } = require('../scripts/verify-hosted-contract.js');
 
 function read(relativePath) {
@@ -259,66 +262,110 @@ test('plugin registration proof accepts only unconditional calls in the exported
 });
 
 test('plugin registration proof binds the exported factory to the live POST route', () => {
-  const routerSource = `
+  const routerFixture = (
+    handlerBody,
+    authInfoExpression = '(req as Request & { auth: HostedOAuthAuthInfo }).auth',
+    authTokenExpression = 'generateHostedOAuthInternalToken(authInfo)',
+  ) => `
     import { createTracklyPluginMcpServer } from './plugin-server.js';
-    router.post('/', middleware, async (req, res) => {
-      const authToken = generateToken(req.auth);
-      const server = createTracklyPluginMcpServer(authToken);
-      const transport = new StreamableHTTPServerTransport({});
-      try {
-        await server.connect(transport);
-        await transport.handleRequest(req, res, req.body);
-      } finally {
-        await server.close();
-      }
+    import { generateHostedOAuthInternalToken } from './server.js';
+    const bearerAuth = requireBearerAuth({
+      verifier: tracklyOAuthProvider,
+      resourceMetadataUrl: RESOURCE_METADATA_URL,
     });
+    router.post(
+      '/',
+      requirePluginEnabled,
+      validateOrigin,
+      ipLimiter,
+      bearerAuth,
+      enforcePluginResource,
+      requireTracklyAccess,
+      enforceTracklyPluginScope,
+      identityLimiter,
+      async (req: Request, res: Response) => {
+        const authInfo = ${authInfoExpression};
+        const authToken = ${authTokenExpression};
+        ${handlerBody}
+      },
+    );
   `;
+  const routerSource = routerFixture(`
+    const server = createTracklyPluginMcpServer(authToken);
+    const transport = new StreamableHTTPServerTransport({});
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } finally {
+      await server.close();
+    }
+  `);
   assert.doesNotThrow(() => assertExportedFactoryUsedByPluginRouter(
     routerSource,
     'createTracklyPluginMcpServer',
     'router fixture',
   ));
   assert.throws(
-    () => assertExportedFactoryUsedByPluginRouter(`
-      import { createTracklyPluginMcpServer } from './plugin-server.js';
-      router.post('/', middleware, async () => {
-        if (false) {
-          const server = createTracklyPluginMcpServer(authToken);
-        }
-      });
-    `, 'createTracklyPluginMcpServer', 'nested factory fixture'),
+    () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
+      if (false) {
+        const server = createTracklyPluginMcpServer(authToken);
+      }
+    `), 'createTracklyPluginMcpServer', 'nested factory fixture'),
     /must directly instantiate createTracklyPluginMcpServer exactly once/,
   );
   assert.throws(
-    () => assertExportedFactoryUsedByPluginRouter(`
-      import { createTracklyPluginMcpServer } from './plugin-server.js';
-      router.post('/', middleware, async () => {
-        const server = createTracklyPluginMcpServer(authToken);
-        const transport = new StreamableHTTPServerTransport({});
-        try {
-          await decoyServer.connect(transport);
-        } finally {
-          await server.close();
-        }
-      });
-    `, 'createTracklyPluginMcpServer', 'wrong server fixture'),
+    () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
+      const server = createTracklyPluginMcpServer(authToken);
+      const transport = new StreamableHTTPServerTransport({});
+      try {
+        await decoyServer.connect(transport);
+      } finally {
+        await server.close();
+      }
+    `), 'createTracklyPluginMcpServer', 'wrong server fixture'),
     /must directly connect its exact factory-result server to its live transport/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
+      const server = createTracklyPluginMcpServer(authToken);
+      const transport = new StreamableHTTPServerTransport({});
+      try {
+        await server.connect(transport);
+        await decoyTransport.handleRequest(req, res, req.body);
+      } finally {
+        await server.close();
+      }
+    `), 'createTracklyPluginMcpServer', 'wrong dispatch fixture'),
+    /must directly dispatch req, res, and req\.body through its connected transport/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
+      const server = createTracklyPluginMcpServer(authToken);
+      const transport = new StreamableHTTPServerTransport({});
+    `, '(req as Request & { auth: HostedOAuthAuthInfo }).auth', 'req.body.authToken'),
+    'createTracklyPluginMcpServer', 'shadow token fixture'),
+    /must mint authToken only from authenticated authInfo/,
   );
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(`
       import { createTracklyPluginMcpServer } from './plugin-server.js';
-      router.post('/', middleware, async (req, res) => {
-        const server = createTracklyPluginMcpServer(authToken);
-        const transport = new StreamableHTTPServerTransport({});
-        try {
-          await server.connect(transport);
-          await decoyTransport.handleRequest(req, res, req.body);
-        } finally {
-          await server.close();
-        }
+      import { generateHostedOAuthInternalToken } from './server.js';
+      const bearerAuth = requireBearerAuth({
+        verifier: tracklyOAuthProvider,
+        resourceMetadataUrl: RESOURCE_METADATA_URL,
       });
-    `, 'createTracklyPluginMcpServer', 'wrong dispatch fixture'),
-    /must directly dispatch req, res, and req\.body through its connected transport/,
+      router.post(
+        '/', requirePluginEnabled, validateOrigin, ipLimiter, bearerAuth,
+        enforcePluginResource, requireTracklyAccess, enforceTracklyPluginScope, identityLimiter,
+        async (req: Request, res: Response) => {
+          const authInfo = req.body.auth;
+          const authToken = generateHostedOAuthInternalToken(authInfo);
+          const server = createTracklyPluginMcpServer(authToken);
+          const transport = new StreamableHTTPServerTransport({});
+        },
+      );
+    `, 'createTracklyPluginMcpServer', 'raw auth context fixture'),
+    /must derive authInfo from the authenticated request context/,
   );
 });
 
@@ -421,6 +468,129 @@ test('wrapped request endpoint validation ignores comments and unrelated strings
       'endpoint fixture',
     ),
     /must target `\/api\/jobscout\/apply\/runs\/\$\{runId\}\/plugin-review-ready`/,
+  );
+});
+
+test('live work endpoint validation binds the consumed request result', () => {
+  const validSource = `
+    registerPluginTool('trackly_get_apply_work', { inputSchema }, wrapTool(async () => {
+      if (!snapshot) {
+        const work = await requestApi(
+          'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/plugin-work\`, authToken, {},
+        );
+        return work;
+      }
+    }));
+  `;
+  const [valid] = activeToolRegistrations(validSource, 'registerPluginTool', 'live work fixture');
+  assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
+    valid,
+    'work',
+    'POST',
+    '`/api/jobscout/apply/executions/${resolvedExecutionId}/plugin-work`',
+    'live work fixture',
+    '!snapshot',
+  ));
+
+  const decoySource = `
+    registerPluginTool('trackly_get_apply_work', { inputSchema }, wrapTool(async () => {
+      // /plugin-work
+      const stale = '/plugin-work';
+      if (!snapshot) {
+        const work = await requestApi(
+          'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/wrong-work\`, authToken, {},
+        );
+        return work;
+      }
+    }));
+  `;
+  const [decoy] = activeToolRegistrations(decoySource, 'registerPluginTool', 'decoy work fixture');
+  assert.throws(
+    () => assertWrappedHandlerAssignedRequestEndpoint(
+      decoy,
+      'work',
+      'POST',
+      '`/api/jobscout/apply/executions/${resolvedExecutionId}/plugin-work`',
+      'decoy work fixture',
+      '!snapshot',
+    ),
+    /live work request.*must target/s,
+  );
+});
+
+test('conditional scope verification compares active function branch semantics', () => {
+  const expected = `
+    function requiredScopesForPluginToolCall(toolName, input) {
+      const required = requiredScopesForPluginTool(toolName);
+      if (toolName === 'trackly_update_status' && input.action === 'applied') {
+        required.push('apply:write');
+      }
+      return required;
+    }
+  `;
+  const valid = expected.replace('function requiredScopesForPluginToolCall', 'export function requiredScopesForPluginToolCall');
+  assert.doesNotThrow(() => assertActiveFunctionDefinitionAst(
+    valid,
+    'requiredScopesForPluginToolCall',
+    expected,
+    'scope fixture',
+  ));
+  const decoy = `
+    export function requiredScopesForPluginToolCall(toolName, input) {
+      // required.push('apply:write');
+      const required = requiredScopesForPluginTool(toolName);
+      if (toolName === 'trackly_update_status' && input.action === 'applied') {
+        required.push('tracking:write');
+      }
+      return required;
+    }
+  `;
+  assert.throws(
+    () => assertActiveFunctionDefinitionAst(
+      decoy,
+      'requiredScopesForPluginToolCall',
+      expected,
+      'decoy scope fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
+});
+
+test('resume handoff projection supports expression handlers and excludes artifact identity', () => {
+  const source = `
+    registerPluginTool('trackly_prepare_resume_artifact', { outputSchema: resumeOutputSchema }, wrapTool(async () => ({
+      view: 'resume' as const,
+      success: true,
+      requiresLocalAgentOrManualUpload: true,
+      automaticEmployerAttachment: false as const,
+      noSubmit: true as const,
+    })));
+  `;
+  const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'resume fixture');
+  const properties = wrappedHandlerReturnedObjectProperties(registration, 'resume fixture');
+  assert.deepEqual(Object.keys(properties), [
+    'view',
+    'success',
+    'requiresLocalAgentOrManualUpload',
+    'automaticEmployerAttachment',
+    'noSubmit',
+  ]);
+  assertBabelPropertyExpression(
+    properties,
+    'requiresLocalAgentOrManualUpload',
+    'true',
+    'resume fixture',
+  );
+  assert.throws(
+    () => assertExactSchemaProperties(properties, {
+      view: "'resume' as const",
+      success: 'true',
+      requiresLocalAgentOrManualUpload: 'true',
+      automaticEmployerAttachment: 'false as const',
+      noSubmit: 'true as const',
+      resumeUrl: 'resume.url',
+    }, 'resume fixture'),
+    /must publish only its locked fields/,
   );
 });
 

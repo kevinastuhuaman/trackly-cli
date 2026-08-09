@@ -144,6 +144,20 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     1,
     `${sourcePath} must import ${expectedFactory} exactly once from ./plugin-server.js`,
   );
+  const tokenGeneratorImports = ast.program.body.filter((statement) => (
+    statement.type === 'ImportDeclaration'
+    && statement.source.value === './server.js'
+    && statement.specifiers.some((specifier) => (
+      specifier.type === 'ImportSpecifier'
+      && specifier.imported?.name === 'generateHostedOAuthInternalToken'
+      && specifier.local?.name === 'generateHostedOAuthInternalToken'
+    ))
+  ));
+  assert.equal(
+    tokenGeneratorImports.length,
+    1,
+    `${sourcePath} must import generateHostedOAuthInternalToken exactly once from ./server.js`,
+  );
   const postRoutes = [];
   function visit(node) {
     if (node === null || typeof node !== 'object') return;
@@ -171,7 +185,63 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     handler?.type === 'ArrowFunctionExpression' || handler?.type === 'FunctionExpression',
     `POST / in ${sourcePath} must end with a function handler`,
   );
+  assert.deepEqual(
+    handler.params.map((parameter) => parameter.type === 'Identifier' ? parameter.name : null),
+    ['req', 'res'],
+    `POST / handler in ${sourcePath} must bind its authenticated request and response directly`,
+  );
   assert.equal(handler.body?.type, 'BlockStatement', `POST / handler in ${sourcePath} must use a block body`);
+  assert.deepEqual(
+    postRoutes[0].arguments.slice(1, -1).map((middleware) => (
+      middleware.type === 'Identifier' ? middleware.name : null
+    )),
+    [
+      'requirePluginEnabled',
+      'validateOrigin',
+      'ipLimiter',
+      'bearerAuth',
+      'enforcePluginResource',
+      'requireTracklyAccess',
+      'enforceTracklyPluginScope',
+      'identityLimiter',
+    ],
+    `POST / in ${sourcePath} must authenticate and authorize the request before its handler`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(activeVariableDeclarator(source, 'bearerAuth', sourcePath).declarator.init),
+    canonicalSchemaAst(babelParser.parseExpression(
+      'requireBearerAuth({ verifier: tracklyOAuthProvider, resourceMetadataUrl: RESOURCE_METADATA_URL })',
+      { plugins: ['typescript'] },
+    )),
+    `bearerAuth in ${sourcePath} must be the SDK bearer authentication middleware`,
+  );
+  const directHandlerDeclarators = handler.body.body.flatMap((statement) => (
+    statement.type === 'VariableDeclaration' ? statement.declarations : []
+  ));
+  const handlerInitializer = (name) => {
+    const matches = directHandlerDeclarators.filter((declarator) => (
+      declarator.id?.type === 'Identifier' && declarator.id.name === name
+    ));
+    assert.equal(matches.length, 1, `POST / handler in ${sourcePath} must directly bind ${name} exactly once`);
+    assert.ok(matches[0].init, `${name} in POST / handler in ${sourcePath} must have an initializer`);
+    return matches[0].init;
+  };
+  assert.deepEqual(
+    canonicalSchemaAst(handlerInitializer('authInfo')),
+    canonicalSchemaAst(babelParser.parseExpression(
+      '(req as Request & { auth: HostedOAuthAuthInfo }).auth',
+      { plugins: ['typescript'] },
+    )),
+    `POST / handler in ${sourcePath} must derive authInfo from the authenticated request context`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(handlerInitializer('authToken')),
+    canonicalSchemaAst(babelParser.parseExpression(
+      'generateHostedOAuthInternalToken(authInfo)',
+      { plugins: ['typescript'] },
+    )),
+    `POST / handler in ${sourcePath} must mint authToken only from authenticated authInfo`,
+  );
   const factoryCalls = handler.body.body.flatMap((statement) => {
     if (statement.type !== 'VariableDeclaration') return [];
     return statement.declarations.filter((declarator) => (
@@ -351,6 +421,16 @@ function assertBabelPropertyExpression(properties, property, expression, label) 
   );
 }
 
+function assertActiveFunctionDefinitionAst(source, name, expectedSource, sourcePath) {
+  const expectedProgram = parseFullSource(expectedSource, `${name} expected contract`).program.body;
+  assert.equal(expectedProgram.length, 1, `${name} expected contract must contain exactly one declaration`);
+  assert.deepEqual(
+    canonicalSchemaAst(activeNamedDefinitionAst(source, name, sourcePath)),
+    canonicalSchemaAst(expectedProgram[0]),
+    `${name} in ${sourcePath} must preserve its locked executable branch semantics`,
+  );
+}
+
 function wrappedHandlerFunction(registration, sourcePath) {
   const wrapper = registration.call.arguments[2];
   assert.equal(wrapper?.type, 'CallExpression', `${registration.name} handler in ${sourcePath} must use a wrapper call`);
@@ -368,6 +448,14 @@ function wrappedHandlerReturnProperties(registration, sourcePath) {
   const returns = handler.body.body.filter((statement) => statement.type === 'ReturnStatement');
   assert.equal(returns.length, 1, `${registration.name} handler in ${sourcePath} must directly return one projection`);
   return staticBabelObjectProperties(returns[0].argument, `${registration.name} output projection`);
+}
+
+function wrappedHandlerReturnedObjectProperties(registration, sourcePath) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  if (handler.body?.type === 'ObjectExpression') {
+    return staticBabelObjectProperties(handler.body, `${registration.name} output projection`);
+  }
+  return wrappedHandlerReturnProperties(registration, sourcePath);
 }
 
 function directCallsInWrappedHandler(registration, expectedCallee, sourcePath) {
@@ -424,6 +512,87 @@ function assertWrappedHandlerRequestEndpoint(registration, method, pathExpressio
     canonicalSchemaAst(babelParser.parseExpression(pathExpression, { plugins: ['typescript'] })),
     `${registration.name} handler in ${sourcePath} must target ${pathExpression}`,
   );
+}
+
+function assertWrappedHandlerAssignedRequestEndpoint(
+  registration,
+  bindingName,
+  method,
+  pathExpression,
+  sourcePath,
+  guardExpression = null,
+) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  const matches = [];
+  function visit(node, parentBlock = null, activeGuard = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, parentBlock, activeGuard);
+      return;
+    }
+    if (
+      node !== handler
+      && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
+    ) return;
+    const block = node.type === 'BlockStatement' ? node : parentBlock;
+    if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.id.name === bindingName) {
+      matches.push({ declarator: node, block, guard: activeGuard });
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      const childGuard = node.type === 'IfStatement' && key === 'consequent'
+        ? node.test
+        : activeGuard;
+      visit(child, block, childGuard);
+    }
+  }
+  visit(handler);
+  assert.equal(
+    matches.length,
+    1,
+    `${registration.name} handler in ${sourcePath} must bind its live ${bindingName} request exactly once`,
+  );
+  const [{ declarator, block, guard }] = matches;
+  if (guardExpression !== null) {
+    assert.deepEqual(
+      canonicalSchemaAst(guard),
+      canonicalSchemaAst(babelParser.parseExpression(guardExpression, { plugins: ['typescript'] })),
+      `${registration.name} live ${bindingName} request in ${sourcePath} must execute under ${guardExpression}`,
+    );
+  }
+  assert.equal(declarator.init?.type, 'AwaitExpression');
+  const requestCall = declarator.init.argument;
+  assert.equal(requestCall?.type, 'CallExpression');
+  assert.equal(babelCalleeName(requestCall.callee), 'requestApi');
+  const [methodArgument, pathArgument] = requestCall.arguments;
+  assert.equal(methodArgument?.type, 'StringLiteral');
+  assert.equal(methodArgument.value, method);
+  assert.deepEqual(
+    canonicalSchemaAst(pathArgument),
+    canonicalSchemaAst(babelParser.parseExpression(pathExpression, { plugins: ['typescript'] })),
+    `${registration.name} live ${bindingName} request in ${sourcePath} must target ${pathExpression}`,
+  );
+  assert.equal(block?.type, 'BlockStatement');
+  const declarationStatementIndex = block.body.findIndex((statement) => (
+    statement.type === 'VariableDeclaration' && statement.declarations.includes(declarator)
+  ));
+  assert.ok(declarationStatementIndex >= 0);
+  const laterSource = block.body.slice(declarationStatementIndex + 1);
+  let referenced = false;
+  function findReference(node) {
+    if (node === null || typeof node !== 'object' || referenced) return;
+    if (Array.isArray(node)) {
+      for (const child of node) findReference(child);
+      return;
+    }
+    if (node.type === 'Identifier' && node.name === bindingName) referenced = true;
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      findReference(child);
+    }
+  }
+  findReference(laterSource);
+  assert.ok(referenced, `${registration.name} handler in ${sourcePath} must consume its live ${bindingName} response`);
 }
 
 function contractDeclarationStatements(source, sourcePath) {
@@ -1022,6 +1191,44 @@ assert.equal(
   pluginLock.publicExecutableContract.pluginScopesSha256,
   'Hosted plugin conditional scope enforcement drifted from the packaged whole-source digest lock',
 );
+assertActiveFunctionDefinitionAst(
+  hostedPluginScopesSource,
+  'requiredScopesForPluginToolCall',
+  `function requiredScopesForPluginToolCall(
+    toolName: string,
+    args: unknown,
+  ): McpScope[] | null {
+    const required = requiredScopesForPluginTool(toolName);
+    if (required === null) return null;
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return required;
+    const input = args as Record<string, unknown>;
+    if (toolName === 'trackly_update_status' && input.action === 'applied') {
+      required.push('apply:write');
+    }
+    if (toolName === 'trackly_save_application_answers' && Array.isArray(input.changes)) {
+      const requestsSensitiveWrite = input.changes.some((candidate) => {
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return false;
+        const key = (candidate as Record<string, unknown>).key;
+        return typeof key === 'string'
+          && APPLICATION_FIELD_BY_KEY.get(key)?.sensitivity !== 'standard';
+      });
+      if (requestsSensitiveWrite) required.push('sensitive:write');
+    }
+    if (toolName === 'trackly_get_apply_work') {
+      const snapshot = input.snapshot;
+      if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+        const profileKeys = (snapshot as Record<string, unknown>).profileKeys;
+        const requestsSensitiveRead = Array.isArray(profileKeys) && profileKeys.some((key) => (
+          typeof key === 'string'
+          && APPLICATION_FIELD_BY_KEY.get(key)?.sensitivity !== 'standard'
+        ));
+        if (requestsSensitiveRead) required.push('sensitive:read');
+      }
+    }
+    return required;
+  }`,
+  hostedPluginScopesPath,
+);
 assert.deepEqual(
   hostedPluginTools,
   [...pluginLock.publicToolAllowlist].sort(),
@@ -1517,8 +1724,16 @@ for (const marker of ['browserSurface', 'plugin-prepare']) {
 assert.match(startOrResume, /browserSurface: z\.enum\(APPLY_BROWSER_SURFACES\)/);
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
+const getWorkRegistration = pluginToolRegistration('trackly_get_apply_work');
 const getWork = pluginToolDefinition('trackly_get_apply_work');
-assert.match(getWork, /plugin-work/);
+assertWrappedHandlerAssignedRequestEndpoint(
+  getWorkRegistration,
+  'work',
+  'POST',
+  '`/api/jobscout/apply/executions/${resolvedExecutionId}/plugin-work`',
+  hostedPluginSourcePath,
+  '!snapshot',
+);
 assert.match(getWork, /memberIds: z\.array\(z\.number\(\)\.int\(\)\.min\(1\)\)\.min\(1\)/);
 assert.match(getWork, /profileKeys: z\.array\(z\.string\(\)\.min\(1\)\.max\(200\)\)\.max\(100\)\.optional\(\)/);
 
@@ -1566,6 +1781,59 @@ for (const [field, expression] of Object.entries(progressOutputContract)) {
   assertSchemaPropertyExpression(progressOutputProperties, field, expression, 'progressOutputSchema');
 }
 assert.match(progress, /plugin-work/);
+
+const resumeRegistration = pluginToolRegistration('trackly_prepare_resume_artifact');
+const resumeDescriptorProperties = staticBabelObjectProperties(
+  resumeRegistration.call.arguments[1],
+  'trackly_prepare_resume_artifact descriptor',
+);
+assertBabelPropertyExpression(
+  resumeDescriptorProperties,
+  'outputSchema',
+  'resumeOutputSchema',
+  'trackly_prepare_resume_artifact descriptor',
+);
+const resumeOutputProperties = schemaObjectPropertyAsts(
+  hostedPluginSource,
+  'resumeOutputSchema',
+  hostedPluginSourcePath,
+);
+const resumeOutputContract = {
+  view: "z.literal('resume')",
+  success: 'z.boolean()',
+  requiresLocalAgentOrManualUpload: 'z.literal(true)',
+  automaticEmployerAttachment: 'z.literal(false)',
+  noSubmit: 'z.literal(true)',
+  nextAction: "z.literal('Choose or upload the resume manually, attach it to the visible Resume or CV field, then verify the visible filename before continuing.')",
+  privacy: "z.literal('No resume bytes, file identifiers, filenames, download URLs, tokens, or local paths were returned or stored.')",
+};
+assertExactSchemaProperties(resumeOutputProperties, resumeOutputContract, 'resumeOutputSchema');
+const resumeProjectionProperties = wrappedHandlerReturnedObjectProperties(
+  resumeRegistration,
+  hostedPluginSourcePath,
+);
+const resumeProjectionContract = {
+  view: "'resume' as const",
+  success: 'true',
+  requiresLocalAgentOrManualUpload: 'true',
+  automaticEmployerAttachment: 'false as const',
+  noSubmit: 'true as const',
+  nextAction: "'Choose or upload the resume manually, attach it to the visible Resume or CV field, then verify the visible filename before continuing.' as const",
+  privacy: "'No resume bytes, file identifiers, filenames, download URLs, tokens, or local paths were returned or stored.' as const",
+};
+assert.deepEqual(
+  Object.keys(resumeProjectionProperties),
+  Object.keys(resumeProjectionContract),
+  'trackly_prepare_resume_artifact handler must return only its locked manual-handoff fields',
+);
+for (const [field, expression] of Object.entries(resumeProjectionContract)) {
+  assertBabelPropertyExpression(
+    resumeProjectionProperties,
+    field,
+    expression,
+    'trackly_prepare_resume_artifact output projection',
+  );
+}
 
 const certifyRegistration = pluginToolRegistration('trackly_certify_review_ready');
 const certifyInputProperties = namedProperties(objectSchemaProperties(
@@ -1690,11 +1958,13 @@ console.log(
 module.exports = {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertActiveFunctionDefinitionAst,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
   assertSchemaPropertyExpression,
   assertWrappedHandlerParsesWithSchema,
+  assertWrappedHandlerAssignedRequestEndpoint,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
@@ -1713,6 +1983,7 @@ module.exports = {
   typescriptConstArrayValues,
   verifyHostedContract,
   wrappedHandlerReturnProperties,
+  wrappedHandlerReturnedObjectProperties,
 };
 
 if (require.main === module) {
