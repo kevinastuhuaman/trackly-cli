@@ -746,6 +746,33 @@ test('instrumentation failure and shutdown failure are fail-open', async () => {
   await assert.doesNotReject(shutdownMcpAnalytics(server));
 });
 
+test('concurrent shutdown calls share the in-flight analytics flush', async () => {
+  const server = { _registeredTools: {} };
+  let finish;
+  const pending = new Promise((resolve) => { finish = resolve; });
+  const relay = { _shutdown: test.mock.fn(async () => pending) };
+  const configured = configureMcpAnalytics(server, {
+    env: ENABLED_ENV,
+    createRelay: () => relay,
+    loadSdk: () => ({ instrument() { return {}; } }),
+  });
+  assert.equal(configured.enabled, true);
+
+  let firstSettled = false;
+  let secondSettled = false;
+  const first = shutdownMcpAnalytics(server).then(() => { firstSettled = true; });
+  const second = shutdownMcpAnalytics(server).then(() => { secondSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(relay._shutdown.mock.callCount(), 1);
+  assert.equal(firstSettled, false);
+  assert.equal(secondSettled, false);
+
+  finish();
+  await Promise.all([first, second]);
+  assert.equal(firstSettled, true);
+  assert.equal(secondSettled, true);
+});
+
 test('SDK private-tool registry drift disables analytics visibly without breaking tools', () => {
   let instrumentCalls = 0;
   const warnings = [];
@@ -872,6 +899,7 @@ test('SIGTERM flushes analytics before exiting the MCP process', async () => {
     exit: (code) => exits.push(code),
   });
 
+  signalTarget.emit('SIGTERM');
   signalTarget.emit('SIGTERM');
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(shutdownAnalytics.mock.callCount(), 1);

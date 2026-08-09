@@ -561,7 +561,7 @@ function installMcpSignalHandlers(server, options = {}) {
         });
     };
     handlers.set(signal, handler);
-    signalTarget.once(signal, handler);
+    signalTarget.on(signal, handler);
   }
   return cleanup;
 }

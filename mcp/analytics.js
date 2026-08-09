@@ -592,20 +592,24 @@ async function withTimeout(promise, timeoutMs) {
 
 async function shutdownMcpAnalytics(server, timeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS) {
   const state = analyticsState.get(server);
-  analyticsState.delete(server);
   if (!state?.relay) return;
+  if (state.shutdownPromise) return state.shutdownPromise;
 
-  try {
-    if (typeof state.relay._shutdown === 'function') {
-      await withTimeout(Promise.resolve(state.relay._shutdown()), timeoutMs);
-      return;
+  state.shutdownPromise = (async () => {
+    try {
+      if (typeof state.relay._shutdown === 'function') {
+        await withTimeout(Promise.resolve(state.relay._shutdown()), timeoutMs);
+        return;
+      }
+      if (typeof state.relay.flush === 'function') {
+        await withTimeout(Promise.resolve(state.relay.flush()), timeoutMs);
+      }
+    } catch {
+      // Fail open on shutdown too; stdio clients must not hang on telemetry.
     }
-    if (typeof state.relay.flush === 'function') {
-      await withTimeout(Promise.resolve(state.relay.flush()), timeoutMs);
-    }
-  } catch {
-    // Fail open on shutdown too; stdio clients must not hang on telemetry.
-  }
+  })();
+  await state.shutdownPromise;
+  if (analyticsState.get(server) === state) analyticsState.delete(server);
 }
 
 module.exports = {
