@@ -1,6 +1,6 @@
 'use strict';
 
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { z } = require('zod');
 const { version: PACKAGE_VERSION } = require('../package.json');
 const {
@@ -407,6 +407,7 @@ function createBackendRelay(options = {}) {
     cachedOptOut = optedOut;
     try {
       const config = loadConfigImpl();
+      if (optedOut && config[ANALYTICS_OPT_OUT_CONFIG_KEY] === true) return;
       if (optedOut) config[ANALYTICS_OPT_OUT_CONFIG_KEY] = true;
       else if (Object.hasOwn(config, ANALYTICS_OPT_OUT_CONFIG_KEY)) {
         delete config[ANALYTICS_OPT_OUT_CONFIG_KEY];
@@ -419,15 +420,34 @@ function createBackendRelay(options = {}) {
     }
   }
 
-  async function resolveAuthenticatedPreference() {
-    if (preferenceLookup) return preferenceLookup;
+  function authenticatedRequestContext() {
+    const headers = getRequestHeaders(false, MCP_ANALYTICS_USER_AGENT);
+    const authorization = headers.Authorization;
+    if (typeof authorization !== 'string' || authorization.length === 0) return null;
+    return {
+      headers,
+      key: createHash('sha256').update(authorization).digest('hex'),
+    };
+  }
 
-    preferenceLookup = (async () => {
+  function isCurrentAuthenticatedContext(expectedKey) {
+    try {
+      return authenticatedRequestContext()?.key === expectedKey;
+    } catch {
+      return false;
+    }
+  }
+
+  async function resolveAuthenticatedPreference(authContext) {
+    if (preferenceLookup?.key === authContext.key) return preferenceLookup.promise;
+
+    const lookup = { key: authContext.key, promise: null };
+    lookup.promise = (async () => {
       const url = normalizeEndpoint(ANALYTICS_PREFERENCE_PATH);
       ensureSecureUrl(url, 'MCP analytics preference');
       const response = await fetchImpl(url, {
         method: 'GET',
-        headers: getRequestHeaders(false, MCP_ANALYTICS_USER_AGENT),
+        headers: authContext.headers,
         signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
       });
       if (!response?.ok || typeof response.json !== 'function') {
@@ -440,29 +460,35 @@ function createBackendRelay(options = {}) {
       if (!preference || typeof preference.shareUsageAnalytics !== 'boolean') {
         throw new Error('analytics_preference_invalid');
       }
+      if (!isCurrentAuthenticatedContext(authContext.key)) return false;
       persistCachedAnalyticsOptOut(!preference.shareUsageAnalytics);
       return preference.shareUsageAnalytics;
     })().catch(() => false).finally(() => {
-      preferenceLookup = null;
+      if (preferenceLookup === lookup) preferenceLookup = null;
     });
-    return preferenceLookup;
+    preferenceLookup = lookup;
+    return lookup.promise;
   }
 
   function capture(event) {
     try {
       if (!event || typeof event !== 'object' || event.event === '$identify') return;
       const authenticated = hasAuth();
+      const authContext = authenticated ? authenticatedRequestContext() : null;
+      if (authenticated && !authContext) return;
       if (!authenticated && !ANONYMOUS_RELAY_EVENTS.has(event.event)) return;
       if (!authenticated && cachedOptOut) return;
 
       const endpoint = authenticated ? AUTHENTICATED_RELAY_PATH : ANONYMOUS_RELAY_PATH;
       const delivery = (async () => {
-        if (authenticated && !(await resolveAuthenticatedPreference())) return;
+        if (authContext && !(await resolveAuthenticatedPreference(authContext))) return;
+        if (authContext && !isCurrentAuthenticatedContext(authContext.key)) return;
         const url = normalizeEndpoint(endpoint);
         ensureSecureUrl(url, 'MCP analytics');
         const response = await fetchImpl(url, {
           method: 'POST',
-          headers: getRequestHeaders(!authenticated, MCP_ANALYTICS_USER_AGENT),
+          headers: authContext?.headers
+            || getRequestHeaders(true, MCP_ANALYTICS_USER_AGENT),
           body: JSON.stringify(event),
           signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
         });

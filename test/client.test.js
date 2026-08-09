@@ -442,6 +442,21 @@ test('logout clearing preserves only the anonymous analytics opt-out', async (t)
   });
 });
 
+test('logout clearing removes malformed or non-object config', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({ TRACKLY_CONFIG_DIR: configDir }, async () => {
+    fs.mkdirSync(configDir, { recursive: true });
+    const configFile = path.join(configDir, 'config.json');
+    for (const raw of ['{invalid', 'null']) {
+      fs.writeFileSync(configFile, raw);
+      assert.doesNotThrow(() => client.clearConfig());
+      assert.equal(fs.existsSync(configFile), false);
+    }
+  });
+});
+
 test('refreshAccessToken preserves config on network error (transient)', async (t) => {
   const configDir = createTempConfigDir();
   t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));

@@ -204,6 +204,75 @@ test('authenticated preference lookup fails closed and caches only the opt-out b
   }
 });
 
+test('authenticated preference singleflight is isolated by credential identity', async () => {
+  const previousApiKey = process.env.TRACKLY_API_KEY;
+  const requests = [];
+  const savedConfigs = [];
+  let releaseFirstPreference;
+  const firstPreference = new Promise((resolve) => { releaseFirstPreference = resolve; });
+  const relay = createBackendRelay({
+    fetch: async (url, options) => {
+      const authorization = options.headers.Authorization;
+      requests.push({ path: String(url), authorization });
+      if (authorization === 'Bearer trk_account_a') {
+        await firstPreference;
+        return { ok: true, async json() { return { shareUsageAnalytics: true }; } };
+      }
+      return { ok: true, async json() { return { shareUsageAnalytics: false }; } };
+    },
+    loadConfig: () => ({}),
+    saveConfig: (config) => savedConfigs.push(config),
+  });
+
+  try {
+    process.env.TRACKLY_API_KEY = 'trk_account_a';
+    relay.capture({ event: '$mcp_tool_call', properties: { $mcp_tool_name: 'trackly_search_jobs' } });
+    process.env.TRACKLY_API_KEY = 'trk_account_b';
+    relay.capture({ event: '$mcp_tool_call', properties: { $mcp_tool_name: 'trackly_search_jobs' } });
+    releaseFirstPreference();
+    await relay.flush();
+
+    assert.deepEqual(requests.map(({ authorization }) => authorization).sort(), [
+      'Bearer trk_account_a',
+      'Bearer trk_account_b',
+    ]);
+    assert.equal(requests.some(({ path }) => path.endsWith('/mcp-analytics')), false);
+    assert.deepEqual(savedConfigs, [{ mcpAnalyticsOptOut: true }]);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previousApiKey;
+  }
+});
+
+test('unchanged opt-out does not rewrite config on every event', async () => {
+  const previousApiKey = process.env.TRACKLY_API_KEY;
+  let config = {};
+  const savedConfigs = [];
+  const relay = createBackendRelay({
+    fetch: async () => ({
+      ok: true,
+      async json() { return { shareUsageAnalytics: false }; },
+    }),
+    loadConfig: () => ({ ...config }),
+    saveConfig: (next) => {
+      config = { ...next };
+      savedConfigs.push(next);
+    },
+  });
+
+  try {
+    process.env.TRACKLY_API_KEY = 'trk_stable_opt_out';
+    relay.capture({ event: '$mcp_tool_call', properties: { $mcp_tool_name: 'trackly_search_jobs' } });
+    await relay.flush();
+    relay.capture({ event: '$mcp_tool_call', properties: { $mcp_tool_name: 'trackly_search_jobs' } });
+    await relay.flush();
+    assert.deepEqual(savedConfigs, [{ mcpAnalyticsOptOut: true }]);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previousApiKey;
+  }
+});
+
 test('authenticated deliveries recheck preference so opt-in resumes without restart', async () => {
   const previousApiKey = process.env.TRACKLY_API_KEY;
   const requests = [];
