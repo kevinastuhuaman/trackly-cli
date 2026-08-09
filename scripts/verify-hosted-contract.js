@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -125,6 +126,7 @@ function schemaDefinition(source, name, sourcePath) {
 }
 
 const normalizeSchema = (schema) => schema.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
+const sha256 = (source) => crypto.createHash('sha256').update(normalizeSchema(source)).digest('hex');
 for (const schemaName of [
   'applyExecutionDispositionSchema',
   'truthCertificationCommon',
@@ -180,6 +182,11 @@ assert.deepEqual(
   hostedPluginTools,
   'Executable hosted plugin registrations drifted from the hosted plugin contract',
 );
+assert.deepEqual(
+  Object.keys(pluginLock.publicScopeContract).sort(),
+  hostedPluginTools,
+  'Packaged public scope lock must cover every hosted plugin tool',
+);
 assert.ok(
   executablePluginTools.every((name) => !/referral|contact|outreach|trackly_chat|(?:^|_)submit(?:_|$)/.test(name)),
   'Hosted plugin must not expose referral, contact, outreach, or agent-in-agent tools',
@@ -196,6 +203,65 @@ function pluginToolDefinition(name) {
   const next = hostedPluginSource.indexOf("registerPluginTool('", start + marker.length);
   return hostedPluginSource.slice(start, next === -1 ? hostedPluginSource.length : next);
 }
+
+function topLevelCallArguments(callSource, name) {
+  const open = callSource.indexOf('(');
+  assert.notEqual(open, -1, `${name} registration has no argument list`);
+  const argumentsList = [];
+  let start = open + 1;
+  let parens = 0;
+  let braces = 0;
+  let brackets = 0;
+  let quote = '';
+  let escaped = false;
+  for (let index = start; index < callSource.length; index++) {
+    const char = callSource[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
+    if (char === '(') parens++;
+    else if (char === ')' && parens > 0) parens--;
+    else if (char === '{') braces++;
+    else if (char === '}') braces--;
+    else if (char === '[') brackets++;
+    else if (char === ']') brackets--;
+    else if (char === ',' && parens === 0 && braces === 0 && brackets === 0) {
+      argumentsList.push(callSource.slice(start, index).trim());
+      start = index + 1;
+    } else if (char === ')' && parens === 0 && braces === 0 && brackets === 0) {
+      argumentsList.push(callSource.slice(start, index).trim());
+      return argumentsList;
+    }
+  }
+  assert.fail(`${name} registration has an unterminated argument list`);
+}
+
+const executableDescriptorDigests = Object.fromEntries(executablePluginTools.map((name) => {
+  const args = topLevelCallArguments(pluginToolDefinition(name), name);
+  assert.ok(args.length >= 3, `${name} registration must contain name, descriptor, and handler`);
+  return [name, sha256(args[1])];
+}));
+assert.deepEqual(
+  executableDescriptorDigests,
+  pluginLock.publicExecutableContract.descriptorSha256,
+  'Executable hosted plugin descriptors or inline schemas drifted from the packaged digest lock',
+);
+
+const executableSchemaDigests = Object.fromEntries(
+  Object.keys(pluginLock.publicExecutableContract.schemaSha256).map((schemaName) => [
+    schemaName,
+    sha256(schemaDefinition(hostedPluginSource, schemaName, hostedPluginSourcePath)),
+  ]),
+);
+assert.deepEqual(
+  executableSchemaDigests,
+  pluginLock.publicExecutableContract.schemaSha256,
+  'Executable hosted plugin shared output schemas drifted from the packaged digest lock',
+);
 
 const readinessSchema = schemaDefinition(
   hostedPluginSource,

@@ -16,9 +16,13 @@
     {
       "id": "search-monitored-remote",
       "fixture": "synthetic-monitored-companies",
-      "prompt": "Show the newest remote roles from companies trackly monitors and save only the ones I choose.",
+      "turns": [
+        {"role": "user", "content": "Show the newest remote roles from companies trackly monitors and save only the ones I choose."},
+        {"role": "assistant", "expected": ["trackly_search_jobs"], "content": "Present the matching jobs without saving any of them."},
+        {"role": "user", "content": "Save fixture job IDs 4101 and 4103 with status Saved; leave every other result unchanged."}
+      ],
       "expected": ["trackly_search_jobs", "trackly_update_status"],
-      "expectedResultShape": ["jobs", "userChosenStatus"],
+      "expectedResultShape": ["jobs", "userChoice.jobIds", "userChosenStatus"],
       "mustNot": ["save a job before the user chooses it"]
     },
     {
@@ -35,7 +39,7 @@
       "prompt": "Use trackly Apply to fill my next approved application, ask me to attach the required resume, and stop for review.",
       "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_get_job", "trackly_get_apply_work", "trackly_prepare_resume_artifact", "trackly_certify_review_ready"],
       "expectedResultShape": ["profile.missingRequired[].key", "profile.missingRequired[].label", "profile.availableFields[].key", "profile.availableFields[].label", "executionId", "batchId", "memberIds", "nextAction", "requiresLocalAgentOrManualUpload", "visibleFilenameConfirmation", "durableReviewReady", "manualSubmitRequired"],
-      "mustNot": ["activate Submit", "infer employer, title, job URL, provider, or origin", "request all saved profile fields"]
+      "mustNot": ["activate Submit", "infer employer, title, job URL, provider, or origin", "request all saved profile fields", "bind truth certification to a manual resume upload"]
     },
     {
       "id": "resume-apply",

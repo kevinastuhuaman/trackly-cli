@@ -8,7 +8,7 @@
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "ad10032649a227a133adcac804be13c2fdbe83dc66da70b4d48408d9ec8b4a7a"
+    "treeSha256": "44c45722bab87d7291875ee3b6da9d55f918b7e5934215b624c6918cfb50b612"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -34,12 +34,66 @@
     "submissionBoundary": "manual_only_no_submit_tool"
   },
   "publicScopeContract": {
+    "trackly_search_jobs": ["jobs:read", "tracking:read"],
+    "trackly_get_job": ["jobs:read", "tracking:read"],
+    "trackly_search_companies": ["jobs:read"],
+    "trackly_get_job_brief": ["jobs:read"],
+    "trackly_get_preferences": ["jobs:read"],
+    "trackly_get_apply_readiness": ["profile:read", "apply:read"],
+    "trackly_lint_application_text": ["profile:read"],
+    "trackly_update_status": ["tracking:write"],
+    "trackly_save_application_answers": ["profile:write", "sensitive:write"],
+    "trackly_grant_sensitive_storage_consent": ["profile:write", "sensitive:write"],
+    "trackly_revoke_sensitive_storage_consent": ["profile:write", "sensitive:write"],
+    "trackly_start_or_resume_apply": ["apply:read", "apply:write"],
     "trackly_get_apply_work": [
       "profile:read",
       "sensitive:read",
       "apply:read",
       "apply:write"
-    ]
+    ],
+    "trackly_report_apply_progress": ["apply:write"],
+    "trackly_prepare_resume_artifact": ["apply:read"],
+    "trackly_certify_review_ready": ["apply:write"],
+    "trackly_reconcile_manual_submission": ["apply:write"],
+    "trackly_stop_apply": ["apply:write"]
+  },
+  "publicExecutableContract": {
+    "descriptorSha256": {
+      "trackly_search_jobs": "d69e019358e6e265d4181f409cfd7806cedc808a30ef4f4054298e53e6d319ed",
+      "trackly_get_job": "1990069850a029ec8d83c61a4d9934d4c55c387ce4f7650befe4eae671c5d491",
+      "trackly_search_companies": "69be9d1fb0f8af776843693dd1b36fae7603ea1e9fba820c89bf90a121f05172",
+      "trackly_get_job_brief": "2d9a66e3cd1169a21c7bdc50fbef5452ece64fdde2e87c943e1dadabdad068f4",
+      "trackly_get_preferences": "4bbf032c24e7026d3d702559ab7353a07ea25d853545330d32c44e1c5a6eab0c",
+      "trackly_get_apply_readiness": "9194926969697cf77f79e36107b486549073e3f5cbe08c3382c77388e58b60a6",
+      "trackly_lint_application_text": "1f429cee9e45ed846c0beb519e6bfe929905be178c4a83caf80c2bcfda481c7c",
+      "trackly_update_status": "02e9ba3e0f35e4f96163905b0e641c2b946f7a028653ff7dd154d6d4945a7408",
+      "trackly_save_application_answers": "c2ccbdada666e196f2bfbfc5faed60cd19cea0a51654e32da42ff1f6179cd750",
+      "trackly_grant_sensitive_storage_consent": "75dbe755caa46bce108c434ef090816f22d8aa00965b04b69bb211288b43fbb6",
+      "trackly_revoke_sensitive_storage_consent": "d1378f4ba7fc6fd8511081cb7378638f3daf3f306b0e464545f3635e7274666f",
+      "trackly_start_or_resume_apply": "ab5d4784c8454c21f70ceca66807e32059e308570e4ff906c7200411cb1a8c7b",
+      "trackly_get_apply_work": "32588fd017879c45bc2c057f282bfded8bd237025a0da6466c9928e33cefd093",
+      "trackly_report_apply_progress": "35479bc6aed31dd3e1887a1897fb7275079c9f222c0131c8b2e362789bdd36aa",
+      "trackly_prepare_resume_artifact": "1a82f1a183c3b587cc95ee7388316aa87b55f4cc63eb1fd51e77f18760a595b4",
+      "trackly_certify_review_ready": "e51cb5b2620d1d88e16226cc087c1c00fe227f7d5d51c4a841737c480d1ede68",
+      "trackly_reconcile_manual_submission": "0733c0fb224f951a9d246b5aedf4ec826124d221e87436adf267889ca9deed92",
+      "trackly_stop_apply": "61423ec9a566ba42f0f826a2001d4da5c8bef20f04ad3a748ecc23396be7b072"
+    },
+    "schemaSha256": {
+      "SAFE_IDEMPOTENCY_KEY": "046859665306e5aeaf57032c76268934e1b98c95d4c17a88434062c9b6a4547a",
+      "SAFE_CODE": "a35176c6c3f6ee563d4b6f6f68e4c546d8b03b03915d37bf55dd5a7011927574",
+      "SHA256": "fdc746c11d0f847ecedfa602b46087fc0c9467acd812ffacc45a2e48167c67fc",
+      "APPLY_EXECUTION_STATUS_VALUES": "cdd88e48dd11d7eeba933f361b9d0f4d1daf154f10708465ec4f6f0289a39cc8",
+      "READINESS_NEXT_ACTION_VALUES": "63d201064317b1959940b403ae8f88531a1af459510a657eeb92a8ebc3914e7c",
+      "APPLY_REVIEW_STATUS_VALUES": "38b7515ff009fda8d7eb04a5ca64505278e9a910780884b31759ae9374ef78e1",
+      "nullableCountSchema": "5ab8b408c3388ddab2fffb55c82c85a963553e6da82201f61e5fe4aa9d1f04a0",
+      "profileFieldReferenceSchema": "70d8fc2dd55da5a1bb0ebf0aa31295b65a4dc5c4ac7141a9a9106a22d5e81a50",
+      "readinessOutputSchema": "667e3e4f91363b99912c0712956af2933ee1043eea914b1e8d21c217df884af9",
+      "applyOutputSchema": "7a82d49b1806ec3e786f67b4b3a66a3070dc8633118bddb7a4efb06dec8f797d",
+      "progressOutputSchema": "b10e2ea774ee2318845010e551ddb793b9ec38b529bd7fa41ca5cef3be13afa7",
+      "reviewOutputSchema": "8ca327b7397fd3e2cfffc87806cdc534e4bafda1f8671292b46ca4bd82bb8459",
+      "resumeOutputSchema": "347bf3e50e6f03511cced2cff7fbd3c48e8ed8648f53a35f4a03d7b5a9143e3c"
+    }
   },
   "publicToolAllowlist": [
     "trackly_search_jobs",

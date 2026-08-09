@@ -15,7 +15,7 @@ The handoff is valid only when the live application is visibly complete and the 
 
 ## User-facing handoff
 
-Show the employer and role, the exact browser tab or surface, unresolved items if any, the resume filename when attached, and the checks that passed. Ask for truthfulness confirmation only for the exact complete application currently shown.
+Show the employer and role, the exact browser tab or surface, unresolved items if any, the resume filename when attached, and the checks that passed. Ask for truthfulness confirmation only for the exact complete application currently shown. For a manual resume upload, separately ask the user to confirm that the visible filename is their intended attachment; the filename check does not bind or attest the browser-local bytes.
 
 Call `trackly_certify_review_ready` with the exact current binding and value-free fingerprints described in [lifecycle-contract.md](lifecycle-contract.md). It atomically persists the review checkpoint, truth certification, and review-ready outcome. Any manual resume upload remains unbound and unattested. After certification succeeds, leave the tab at review and tell the user that they—not trackly—must submit. Do not describe review-ready as submitted.
 

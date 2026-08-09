@@ -50,6 +50,52 @@ function referencedTools(directory) {
   return [...names].sort();
 }
 
+function sha256(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function validateAppBinding(manifest, appConfig) {
+  const hasManifestBinding = Object.hasOwn(manifest, 'apps');
+  assert.equal(hasManifestBinding, appConfig !== null, 'manifest and .app.json binding must appear together');
+  if (appConfig === null) return;
+  assert.equal(manifest.apps, './.app.json');
+  assert.deepEqual(Object.keys(appConfig), ['apps']);
+  assert.deepEqual(Object.keys(appConfig.apps), ['trackly']);
+  assert.deepEqual(Object.keys(appConfig.apps.trackly), ['id']);
+  assert.match(appConfig.apps.trackly.id, /^[A-Za-z0-9][A-Za-z0-9._:-]{2,199}$/);
+  assert.doesNotMatch(appConfig.apps.trackly.id, /\.\.\.|replace|placeholder|todo/i);
+}
+
+function validateBrandAsset(manifest, provenance, packagedBytes) {
+  const manifestPath = `./${provenance.packagedAsset}`;
+  assert.equal(manifest.interface.composerIcon, manifestPath);
+  assert.equal(manifest.interface.logo, manifestPath);
+  assert.equal(manifest.interface.logoDark, manifestPath);
+  assert.match(provenance.sourceSha256, /^[a-f0-9]{64}$/);
+  assert.match(provenance.forbiddenReplacement, /Purple Orb/);
+
+  if (provenance.packagedAsset.endsWith('.png')) {
+    assert.deepEqual(packagedBytes.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    assert.equal(sha256(packagedBytes), provenance.sourceSha256);
+    assert.equal(provenance.byteIdenticalToSource, true);
+    assert.equal(provenance.pixelIdenticalToSource, true);
+    assert.equal(provenance.visualApprovalRequired, false);
+    assert.match(provenance.treatment, /exact approved PNG/i);
+    return;
+  }
+
+  assert.match(provenance.packagedAsset, /\.svg$/);
+  assert.equal(provenance.byteIdenticalToSource, false);
+  assert.equal(provenance.pixelIdenticalToSource, false);
+  assert.equal(provenance.visualApprovalRequired, true);
+  assert.match(provenance.treatment, /vector approximation/);
+  assert.match(provenance.approvalRequirement, /Kevin must compare/);
+  const svg = packagedBytes.toString('utf8');
+  assert.match(svg, /<rect[^>]+fill="#000"/);
+  assert.match(svg, /<path[^>]+fill="#fff"/);
+  assert.doesNotMatch(svg, /purple|#[a-f0-9]{0,2}(?:7c3aed|8b5cf6|a855f7)/i);
+}
+
 test('plugin manifest is complete, lowercase, and uses the official trackly brand', () => {
   const manifest = json('plugins/trackly/.codex-plugin/plugin.json');
   const metadata = json('plugins/trackly/listing/metadata.json');
@@ -61,12 +107,10 @@ test('plugin manifest is complete, lowercase, and uses the official trackly bran
   assert.equal(manifest.interface.privacyPolicyURL, metadata.privacyPolicyURL);
   assert.equal(manifest.interface.termsOfServiceURL, metadata.termsOfServiceURL);
   assert.equal(manifest.interface.brandColor, '#000000');
-  assert.equal(manifest.interface.composerIcon, './assets/trackly-appicon.svg');
-  assert.equal(manifest.interface.logo, './assets/trackly-appicon.svg');
-  assert.equal(manifest.interface.logoDark, './assets/trackly-appicon.svg');
   assert.equal(manifest.skills, './skills/');
   assert.equal(manifest.mcpServers, './.mcp.json');
-  assert.ok(!Object.hasOwn(manifest, 'apps'), 'apps must wait for a real registered MCP technical ID');
+  const appPath = path.join(PLUGIN, '.app.json');
+  validateAppBinding(manifest, fs.existsSync(appPath) ? JSON.parse(fs.readFileSync(appPath, 'utf8')) : null);
   assert.equal(manifest.interface.defaultPrompt.length, 3);
   assert.ok(manifest.interface.defaultPrompt.every((prompt) => prompt.length <= 128));
   for (const key of ['websiteURL', 'privacyPolicyURL', 'termsOfServiceURL']) {
@@ -106,23 +150,42 @@ test('repo marketplace exposes the canonical plugin with explicit install policy
 });
 
 test('derived brand asset is traceable without claiming source identity', () => {
+  const manifest = json('plugins/trackly/.codex-plugin/plugin.json');
   const provenance = json('plugins/trackly/assets/brand-source.json');
   assert.equal(provenance.brand, 'trackly');
   assert.equal(
     provenance.sourceSha256,
     '8aa1b351cbc1ab62c8a178838403b706954c3b73109871c054c5b286bbf73ff2',
   );
-  assert.equal(provenance.packagedAsset, 'assets/trackly-appicon.svg');
-  assert.equal(provenance.byteIdenticalToSource, false);
-  assert.equal(provenance.pixelIdenticalToSource, false);
-  assert.equal(provenance.visualApprovalRequired, true);
-  assert.match(provenance.treatment, /vector approximation/);
-  assert.match(provenance.approvalRequirement, /Kevin must compare/);
-  const svg = read('plugins/trackly/assets/trackly-appicon.svg');
-  assert.match(svg, /<rect[^>]+fill="#000"/);
-  assert.match(svg, /<path[^>]+fill="#fff"/);
-  assert.doesNotMatch(svg, /purple|#[a-f0-9]{0,2}(?:7c3aed|8b5cf6|a855f7)/i);
-  assert.match(provenance.forbiddenReplacement, /Purple Orb/);
+  const packagedPath = path.join(PLUGIN, provenance.packagedAsset);
+  assert.ok(fs.existsSync(packagedPath));
+  validateBrandAsset(manifest, provenance, fs.readFileSync(packagedPath));
+});
+
+test('brand validation accepts the exact approved PNG replacement state', () => {
+  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from('approved-trackly-fixture')]);
+  const packagedAsset = 'assets/trackly-appicon.png';
+  validateBrandAsset({
+    interface: {
+      composerIcon: `./${packagedAsset}`,
+      logo: `./${packagedAsset}`,
+      logoDark: `./${packagedAsset}`,
+    },
+  }, {
+    packagedAsset,
+    sourceSha256: sha256(png),
+    treatment: 'Exact approved PNG source bytes.',
+    byteIdenticalToSource: true,
+    pixelIdenticalToSource: true,
+    visualApprovalRequired: false,
+    forbiddenReplacement: 'Purple Orb composer icon',
+  }, png);
+});
+
+test('app binding validation accepts a real future registered state', () => {
+  validateAppBinding({ apps: './.app.json' }, {
+    apps: { trackly: { id: 'app_trackly_prod_7H3K9' } },
+  });
 });
 
 test('public skills reference only the locked 18-tool facade', () => {
@@ -142,9 +205,17 @@ test('public skills reference only the locked 18-tool facade', () => {
     reconcileManualSubmission: 'atomic_current_epoch_evidence_outcome',
     submissionBoundary: 'manual_only_no_submit_tool',
   });
-  assert.deepEqual(lock.publicScopeContract, {
-    trackly_get_apply_work: ['profile:read', 'sensitive:read', 'apply:read', 'apply:write'],
-  });
+  assert.deepEqual(Object.keys(lock.publicScopeContract).sort(), [...lock.publicToolAllowlist].sort());
+  assert.deepEqual(
+    lock.publicScopeContract.trackly_get_apply_work,
+    ['profile:read', 'sensitive:read', 'apply:read', 'apply:write'],
+  );
+  assert.deepEqual(
+    Object.keys(lock.publicExecutableContract.descriptorSha256).sort(),
+    [...lock.publicToolAllowlist].sort(),
+  );
+  assert.ok(Object.values(lock.publicExecutableContract.descriptorSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
+  assert.ok(Object.values(lock.publicExecutableContract.schemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
 });
 
 test('adapted trackly Apply skill is traceable to its source and safety invariants', () => {
@@ -170,6 +241,7 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /For every distinct `jobId` in the bound snapshot, call `trackly_get_job`/);
   assert.match(skill, /atomically records the review checkpoint, truth certification, and review-ready outcome/);
   assert.match(skill, /atomically records typed confirmation evidence and the submitted outcome/);
+  assert.match(skill, /keep that browser-local upload explicitly unbound and outside the truth certification/);
   const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
   assert.match(browserSafety, /verify only the filename visibly committed/);
   assert.match(browserSafety, /never claim an artifact identity, preview, or hash exists/);
@@ -191,6 +263,8 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(lifecycle, /`browserBindingHash`/);
   assert.match(lifecycle, /`evidenceFingerprint`/);
   assert.match(lifecycle, /Do not send server-owned internals, resume IDs, filenames, paths, contents, download URLs, or answer values/);
+  const handoff = read('plugins/trackly/skills/trackly-apply/references/review-handoff.md');
+  assert.match(handoff, /filename check does not bind or attest the browser-local bytes/);
 });
 
 test('submission fixtures cover six positive and three negative cases', () => {
@@ -207,6 +281,11 @@ test('submission fixtures cover six positive and three negative cases', () => {
     assert.ok(item.expectedResultShape.length > 0);
     assert.ok(item.expected.every((tool) => allowedTools.has(tool)), `${item.id} references an unlisted tool`);
   }
+  const monitored = fixtures.positive.find((item) => item.id === 'search-monitored-remote');
+  assert.deepEqual(monitored.turns.map((turn) => turn.role), ['user', 'assistant', 'user']);
+  assert.deepEqual(monitored.turns[1].expected, ['trackly_search_jobs']);
+  assert.match(monitored.turns[2].content, /4101 and 4103/);
+  assert.ok(monitored.expectedResultShape.includes('userChoice.jobIds'));
   assert.ok(fixtures.negative.every((item) => item.fixture));
   assert.ok(fixtures.positive.some((item) => item.id === 'apply-to-review'));
   assert.ok(fixtures.positive.find((item) => item.id === 'apply-to-review').expected.includes('trackly_prepare_resume_artifact'));
@@ -250,12 +329,10 @@ test('submission fixtures cover six positive and three negative cases', () => {
 });
 
 test('registered app binding and public submission remain explicit release gates', () => {
-  assert.ok(!fs.existsSync(path.join(PLUGIN, '.app.json')));
   const gates = read('plugins/trackly/RELEASE-GATES.md');
   assert.match(gates, /Do not invent or pre-allocate an ID/);
   assert.match(gates, /HTTP 200 response from `https:\/\/usetrackly\.app\/plugins\/trackly`/);
-  assert.match(gates, /derived approximation, not a byte- or pixel-identical copy/);
-  assert.match(gates, /Kevin must explicitly approve the exact packaged SVG/);
+  assert.match(gates, /approved PNG/);
   assert.match(gates, /Kevin must approve/);
   assert.match(gates, /ask Kevin again before selecting Publish/);
 });
