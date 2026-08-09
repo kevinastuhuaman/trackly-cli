@@ -221,6 +221,35 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     1,
     `POST / handler in ${sourcePath} must directly connect its exact factory-result server to its live transport`,
   );
+  const requestDispatches = handler.body.body.flatMap((statement) => {
+    if (statement.type !== 'TryStatement') return [];
+    return statement.block.body.filter((candidate) => {
+      const expression = candidate.type === 'ExpressionStatement' ? candidate.expression : null;
+      const call = expression?.type === 'AwaitExpression' ? expression.argument : null;
+      return call?.type === 'CallExpression'
+        && babelCalleeName(call.callee) === 'transport.handleRequest'
+        && call.arguments.length === 3
+        && call.arguments[0]?.type === 'Identifier'
+        && call.arguments[0].name === 'req'
+        && call.arguments[1]?.type === 'Identifier'
+        && call.arguments[1].name === 'res'
+        && call.arguments[2]?.type === 'MemberExpression'
+        && !call.arguments[2].computed
+        && call.arguments[2].object?.type === 'Identifier'
+        && call.arguments[2].object.name === 'req'
+        && call.arguments[2].property?.type === 'Identifier'
+        && call.arguments[2].property.name === 'body';
+    });
+  });
+  assert.equal(
+    requestDispatches.length,
+    1,
+    `POST / handler in ${sourcePath} must directly dispatch req, res, and req.body through its connected transport`,
+  );
+  assert.ok(
+    directConnects[0].start < requestDispatches[0].start,
+    `POST / handler in ${sourcePath} must connect the server before dispatching the live request`,
+  );
 }
 
 function registrationArgumentSources(source, registration, sourcePath) {
@@ -312,7 +341,17 @@ function staticBabelObjectProperties(node, label) {
   return Object.fromEntries(entries);
 }
 
-function wrappedHandlerReturnProperties(registration, sourcePath) {
+function assertBabelPropertyExpression(properties, property, expression, label) {
+  assert.ok(properties[property], `${label} is missing ${property}`);
+  const expected = babelParser.parseExpression(expression, { plugins: ['typescript'] });
+  assert.deepEqual(
+    canonicalSchemaAst(properties[property]),
+    canonicalSchemaAst(expected),
+    `${label}.${property} must equal ${expression}`,
+  );
+}
+
+function wrappedHandlerFunction(registration, sourcePath) {
   const wrapper = registration.call.arguments[2];
   assert.equal(wrapper?.type, 'CallExpression', `${registration.name} handler in ${sourcePath} must use a wrapper call`);
   const handler = wrapper.arguments[0];
@@ -320,34 +359,95 @@ function wrappedHandlerReturnProperties(registration, sourcePath) {
     handler?.type === 'ArrowFunctionExpression' || handler?.type === 'FunctionExpression',
     `${registration.name} wrapper in ${sourcePath} must receive a function handler`,
   );
+  return handler;
+}
+
+function wrappedHandlerReturnProperties(registration, sourcePath) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
   assert.equal(handler.body?.type, 'BlockStatement', `${registration.name} handler in ${sourcePath} must use a block body`);
   const returns = handler.body.body.filter((statement) => statement.type === 'ReturnStatement');
   assert.equal(returns.length, 1, `${registration.name} handler in ${sourcePath} must directly return one projection`);
   return staticBabelObjectProperties(returns[0].argument, `${registration.name} output projection`);
 }
 
-function activeVariableDeclarator(source, name, sourcePath) {
-  const matches = [];
-  function visit(node, parent = null) {
+function directCallsInWrappedHandler(registration, expectedCallee, sourcePath) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  const calls = [];
+  function visit(node) {
     if (node === null || typeof node !== 'object') return;
     if (Array.isArray(node)) {
-      for (const child of node) visit(child, parent);
+      for (const child of node) visit(child);
       return;
     }
     if (
-      node.type === 'VariableDeclarator'
-      && node.id?.type === 'Identifier'
-      && node.id.name === name
-    ) {
-      matches.push({ declarator: node, declaration: parent });
-    }
+      node !== handler
+      && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
+    ) return;
+    if (node.type === 'CallExpression' && babelCalleeName(node.callee) === expectedCallee) calls.push(node);
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'extra') continue;
-      visit(child, node);
+      visit(child);
     }
   }
-  visit(parseFullSource(source, sourcePath));
-  assert.equal(matches.length, 1, `${name} must have exactly one active variable declaration in ${sourcePath}`);
+  visit(handler);
+  return calls;
+}
+
+function assertWrappedHandlerParsesWithSchema(registration, schemaName, sourcePath) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  assert.equal(handler.params.length, 1, `${registration.name} handler in ${sourcePath} must receive exactly params`);
+  assert.equal(handler.params[0]?.type, 'Identifier', `${registration.name} handler in ${sourcePath} must receive params by identifier`);
+  const parameterName = handler.params[0].name;
+  const parseCalls = directCallsInWrappedHandler(registration, `${schemaName}.parse`, sourcePath);
+  assert.equal(
+    parseCalls.length,
+    1,
+    `${registration.name} handler in ${sourcePath} must execute exactly one ${schemaName}.parse(params) call`,
+  );
+  assert.equal(parseCalls[0].arguments.length, 1);
+  assert.equal(parseCalls[0].arguments[0]?.type, 'Identifier');
+  assert.equal(parseCalls[0].arguments[0].name, parameterName);
+}
+
+function assertWrappedHandlerRequestEndpoint(registration, method, pathExpression, sourcePath) {
+  const requestCalls = directCallsInWrappedHandler(registration, 'requestApi', sourcePath);
+  assert.equal(
+    requestCalls.length,
+    1,
+    `${registration.name} handler in ${sourcePath} must execute exactly one active requestApi call`,
+  );
+  const [methodArgument, pathArgument] = requestCalls[0].arguments;
+  assert.equal(methodArgument?.type, 'StringLiteral');
+  assert.equal(methodArgument.value, method);
+  assert.deepEqual(
+    canonicalSchemaAst(pathArgument),
+    canonicalSchemaAst(babelParser.parseExpression(pathExpression, { plugins: ['typescript'] })),
+    `${registration.name} handler in ${sourcePath} must target ${pathExpression}`,
+  );
+}
+
+function contractDeclarationStatements(source, sourcePath) {
+  const programBody = parseFullSource(source, sourcePath).program.body;
+  const factoryBodies = programBody.flatMap((statement) => {
+    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : null;
+    if (
+      declaration?.type !== 'FunctionDeclaration'
+      || declaration.id?.name !== 'createTracklyMcpServer'
+    ) return [];
+    return declaration.body.body;
+  });
+  return [...programBody, ...factoryBodies];
+}
+
+function activeVariableDeclarator(source, name, sourcePath) {
+  const matches = contractDeclarationStatements(source, sourcePath).flatMap((statement) => {
+    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+    if (declaration?.type !== 'VariableDeclaration') return [];
+    return declaration.declarations
+      .filter((declarator) => declarator.id?.type === 'Identifier' && declarator.id.name === name)
+      .map((declarator) => ({ declarator, declaration }));
+  });
+  assert.equal(matches.length, 1, `${name} must have exactly one active top-level variable declaration in ${sourcePath}`);
   const [{ declarator, declaration }] = matches;
   assert.equal(
     declaration?.type,
@@ -432,12 +532,32 @@ function assertSchemaPropertyExpression(properties, property, expression, label)
   );
 }
 
+function assertExactSchemaProperties(properties, contract, label) {
+  assert.deepEqual(
+    Object.keys(properties),
+    Object.keys(contract),
+    `${label} must publish only its locked fields`,
+  );
+  for (const [field, expression] of Object.entries(contract)) {
+    assertSchemaPropertyExpression(properties, field, expression, label);
+  }
+}
+
 function exactSchemaDefinition(source, name, sourcePath) {
   const bounds = schemaDefinitionBounds(source, name, sourcePath);
   return source.slice(bounds.declarationStart, bounds.declarationEnd);
 }
 
-const AST_METADATA_FIELDS = new Set(['start', 'end', 'loc', 'range', 'raw', 'extra']);
+const AST_METADATA_FIELDS = new Set([
+  'start',
+  'end',
+  'loc',
+  'range',
+  'raw',
+  'extra',
+  'comments',
+  'errors',
+]);
 
 function canonicalSchemaAst(value) {
   if (value instanceof RegExp) {
@@ -598,29 +718,20 @@ function classifyFreeIdentifiers(identifiers, categories, label) {
 }
 
 function activeNamedDefinitionAst(source, name, sourcePath) {
-  const matches = [];
-  function visit(node) {
-    if (node === null || typeof node !== 'object') return;
-    if (Array.isArray(node)) {
-      for (const child of node) visit(child);
-      return;
-    }
-    if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && node.id.name === name) {
-      assert.ok(node.init, `${name} in ${sourcePath} must have an initializer`);
-      matches.push(node.init);
-    } else if (node.type === 'FunctionDeclaration' && node.id?.name === name) {
-      matches.push(node);
-    }
-    for (const [key, child] of Object.entries(node)) {
-      if (key === 'loc' || key === 'extra') continue;
-      visit(child);
-    }
-  }
-  visit(parseFullSource(source, sourcePath));
+  const matches = contractDeclarationStatements(source, sourcePath).flatMap((statement) => {
+    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+    if (declaration?.type === 'FunctionDeclaration' && declaration.id?.name === name) return [declaration];
+    if (declaration?.type !== 'VariableDeclaration') return [];
+    return declaration.declarations.flatMap((declarator) => {
+      if (declarator.id?.type !== 'Identifier' || declarator.id.name !== name) return [];
+      assert.ok(declarator.init, `${name} in ${sourcePath} must have an initializer`);
+      return [declarator.init];
+    });
+  });
   assert.equal(
     matches.length,
     1,
-    `${name} must have exactly one active variable or function definition in ${sourcePath}`,
+    `${name} must have exactly one active top-level variable or function definition in ${sourcePath}`,
   );
   return matches[0];
 }
@@ -960,6 +1071,18 @@ const executableRegistrationArguments = Object.fromEntries(executablePluginTools
   const registration = pluginToolRegistration(name);
   return [name, registrationArgumentSources(hostedPluginSource, registration, hostedPluginSourcePath)];
 }));
+const mutationAnnotationContract = {
+  trackly_update_status: 'mutationAnnotations(false, false)',
+  trackly_save_application_answers: 'mutationAnnotations(true, false)',
+  trackly_grant_sensitive_storage_consent: 'mutationAnnotations(false, true)',
+  trackly_revoke_sensitive_storage_consent: 'mutationAnnotations(true, false)',
+  trackly_start_or_resume_apply: 'mutationAnnotations(false, true)',
+  trackly_get_apply_work: 'mutationAnnotations()',
+  trackly_report_apply_progress: 'mutationAnnotations()',
+  trackly_certify_review_ready: 'mutationAnnotations(false, true)',
+  trackly_reconcile_manual_submission: 'mutationAnnotations(false, true)',
+  trackly_stop_apply: 'mutationAnnotations(true, true)',
+};
 for (const toolName of executablePluginTools) {
   const annotations = registrationDescriptorPropertyAst(
     hostedPluginSource,
@@ -970,10 +1093,14 @@ for (const toolName of executablePluginTools) {
   const scopes = pluginLock.publicScopeContract[toolName];
   const isMutation = scopes.some((scope) => scope.endsWith(':write'));
   if (isMutation) {
-    assert.equal(
-      calleeName(annotations.callee),
-      'mutationAnnotations',
-      `${toolName} has a write scope and must publish mutationAnnotations(...)`,
+    assert.ok(mutationAnnotationContract[toolName], `${toolName} mutation annotations must be explicitly locked`);
+    assert.deepEqual(
+      canonicalSchemaAst(annotations),
+      canonicalSchemaAst(parseExpectedExpression(
+        mutationAnnotationContract[toolName],
+        `${toolName}.annotations contract`,
+      )),
+      `${toolName} has a write scope and must publish its complete locked mutationAnnotations(...) expression`,
     );
   } else {
     assert.deepEqual(
@@ -983,6 +1110,14 @@ for (const toolName of executablePluginTools) {
     );
   }
 }
+assert.deepEqual(
+  Object.keys(mutationAnnotationContract).sort(),
+  Object.entries(pluginLock.publicScopeContract)
+    .filter(([, scopes]) => scopes.some((scope) => scope.endsWith(':write')))
+    .map(([toolName]) => toolName)
+    .sort(),
+  'Mutation annotation contract must cover every write-scoped public tool exactly once',
+);
 const executableDescriptorDigests = Object.fromEntries(
   executablePluginTools.map((name) => [name, sha256ExactBytes(executableRegistrationArguments[name][1])]),
 );
@@ -1211,10 +1346,12 @@ for (const [constantName, contractProperty] of Object.entries(contractBackedSche
 const publishedSchemaCompatibility = {
   trackly_certify_apply_batch_truth: {
     localPublished: 'truthCertificationInputSchema',
+    localParse: 'truthCertificationSchema',
     hostedPublishedAndParse: 'truthCertificationSchema',
   },
   trackly_start_apply_run: {
     localPublished: 'startApplyRunInputSchema',
+    localParse: 'startApplyRunSchema',
     hostedPublishedAndParse: 'startApplyRunSchema',
   },
 };
@@ -1235,6 +1372,9 @@ for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) 
       schemaName,
       `${toolName} ${side} tools/list schema must use ${schemaName}`,
     );
+    if (side === 'local') {
+      assertWrappedHandlerParsesWithSchema(registrations[0], mapping.localParse, sourcePath);
+    }
   }
 }
 assertTruthWrapperCompatibility(
@@ -1266,10 +1406,34 @@ assert.deepEqual(
   ['jobId', 'companyName', 'companySignal'],
   'trackly_get_job_brief output must exclude contacts, employees, referrals, actions, and raw backend fields',
 );
+for (const [field, expression] of Object.entries({
+  jobId: 'brief.jobId',
+  companyName: 'brief.companyName',
+})) {
+  assertBabelPropertyExpression(
+    jobBriefOutputProperties,
+    field,
+    expression,
+    'trackly_get_job_brief output projection',
+  );
+}
 const jobBriefCompanySignalProperties = staticBabelObjectProperties(
   jobBriefOutputProperties.companySignal,
   'trackly_get_job_brief companySignal projection',
 );
+for (const [field, expression] of Object.entries({
+  openRoleCount: 'brief.companySignal?.openRoleCount ?? 0',
+  pmRoleCount: 'brief.companySignal?.pmRoleCount ?? 0',
+  postedLast7d: 'brief.companySignal?.postedLast7d ?? 0',
+  latestPostedAt: 'brief.companySignal?.latestPostedAt ?? null',
+})) {
+  assertBabelPropertyExpression(
+    jobBriefCompanySignalProperties,
+    field,
+    expression,
+    'trackly_get_job_brief companySignal projection',
+  );
+}
 assert.deepEqual(
   Object.keys(jobBriefCompanySignalProperties),
   ['openRoleCount', 'pmRoleCount', 'postedLast7d', 'latestPostedAt'],
@@ -1291,28 +1455,27 @@ const profileFieldReferenceProperties = schemaObjectPropertyAsts(
   'profileFieldReferenceSchema',
   hostedPluginSourcePath,
 );
-assertSchemaPropertyExpression(
+const readinessProfileContract = {
+  revision: 'nullableCountSchema',
+  confirmed: 'z.boolean()',
+  sensitiveStorageConsent: 'z.boolean()',
+  defaultResumeAvailable: 'z.boolean()',
+  completeness: 'z.object({ completed: nullableCountSchema, total: nullableCountSchema, percent: nullableCountSchema }).strict()',
+  missingRequired: 'z.array(profileFieldReferenceSchema).max(100)',
+  availableFields: 'z.array(profileFieldReferenceSchema).max(100)',
+};
+assertExactSchemaProperties(
   readinessProperties,
-  'missingRequired',
-  'z.array(profileFieldReferenceSchema).max(100)',
-  'readinessOutputSchema',
+  readinessProfileContract,
+  'readinessOutputSchema.profile',
 );
-assertSchemaPropertyExpression(
-  readinessProperties,
-  'availableFields',
-  'z.array(profileFieldReferenceSchema).max(100)',
-  'readinessOutputSchema',
-);
-assertSchemaPropertyExpression(
+const profileFieldReferenceContract = {
+  key: 'z.string().min(1).max(200)',
+  label: 'z.string().min(1).max(1000)',
+};
+assertExactSchemaProperties(
   profileFieldReferenceProperties,
-  'key',
-  'z.string().min(1).max(200)',
-  'profileFieldReferenceSchema',
-);
-assertSchemaPropertyExpression(
-  profileFieldReferenceProperties,
-  'label',
-  'z.string().min(1).max(1000)',
+  profileFieldReferenceContract,
   'profileFieldReferenceSchema',
 );
 
@@ -1404,11 +1567,11 @@ for (const [field, expression] of Object.entries(progressOutputContract)) {
 }
 assert.match(progress, /plugin-work/);
 
-const certify = pluginToolDefinition('trackly_certify_review_ready');
+const certifyRegistration = pluginToolRegistration('trackly_certify_review_ready');
 const certifyInputProperties = namedProperties(objectSchemaProperties(
   registrationDescriptorPropertyAst(
     hostedPluginSource,
-    pluginToolRegistration('trackly_certify_review_ready'),
+    certifyRegistration,
     'inputSchema',
     hostedPluginSourcePath,
   ),
@@ -1440,7 +1603,12 @@ for (const [field, expression] of Object.entries(certifyInputContract)) {
     'trackly_certify_review_ready.inputSchema',
   );
 }
-assert.match(certify, /plugin-review-ready/);
+assertWrappedHandlerRequestEndpoint(
+  certifyRegistration,
+  'POST',
+  '`/api/jobscout/apply/runs/${runId}/plugin-review-ready`',
+  hostedPluginSourcePath,
+);
 
 const reconcile = pluginToolDefinition('trackly_reconcile_manual_submission');
 const reconcileInputSchema = registrationDescriptorPropertyAst(
@@ -1522,8 +1690,12 @@ console.log(
 module.exports = {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertBabelPropertyExpression,
+  assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
   assertSchemaPropertyExpression,
+  assertWrappedHandlerParsesWithSchema,
+  assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
@@ -1540,6 +1712,7 @@ module.exports = {
   staticStringArrayMap,
   typescriptConstArrayValues,
   verifyHostedContract,
+  wrappedHandlerReturnProperties,
 };
 
 if (require.main === module) {

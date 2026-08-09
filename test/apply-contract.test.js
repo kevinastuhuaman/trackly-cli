@@ -528,10 +528,11 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   }
   assert.match(verifier, /require\('acorn'\)/);
   assert.match(verifier, /require\('@babel\/parser'\)/);
+  assert.match(verifier, /contractDeclarationStatements/);
   assert.match(verifier, /babelParser\.parse\(source/);
   assert.match(verifier, /plugins: \['typescript'\]/);
   assert.match(verifier, /node\.type === 'VariableDeclarator'/);
-  assert.match(verifier, /must have exactly one active variable declaration/);
+  assert.match(verifier, /must have exactly one active top-level variable declaration/);
   assert.match(verifier, /acorn\.parseExpressionAt\(expression, 0, \{ ecmaVersion: 'latest' \}\)/);
   assert.match(verifier, /ast\.end,\s*expression\.length/);
   assert.match(verifier, /canonicalSchemaAst\(localApplySchemaAsts\[schemaName\]\)/);
@@ -672,7 +673,7 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /registrationDescriptorPropertyAst/);
   assert.match(verifier, /certifyInputContract/);
   assert.match(verifier, /must publish only the locked truth-certification fields/);
-  assert.match(verifier, /has a write scope and must publish mutationAnnotations/);
+  assert.match(verifier, /has a write scope and must publish its complete locked mutationAnnotations/);
   assert.match(verifier, /referencedFreeIdentifiers/);
   assert.match(verifier, /classifyFreeIdentifiers/);
   assert.match(verifier, /explicitly lock it as a runtime global, shared definition, or contract constant/);

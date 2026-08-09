@@ -12,7 +12,11 @@ const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 const {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertBabelPropertyExpression,
+  assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
+  assertWrappedHandlerParsesWithSchema,
+  assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
@@ -26,6 +30,7 @@ const {
   schemaObjectPropertyAsts,
   sha256ExactBytes,
   staticStringArrayMap,
+  wrappedHandlerReturnProperties,
 } = require('../scripts/verify-hosted-contract.js');
 
 function read(relativePath) {
@@ -112,7 +117,7 @@ test('executable digest hashing is exact-byte and fail-closed on formatting chan
   );
 });
 
-test('schema extraction ignores commented shadows and locates unique active JS and TS declarations', () => {
+test('schema extraction ignores commented and nested decoys and resolves top-level bindings', () => {
   const localLikeSource = `
     // const targetSchema = z.never();
     /* const targetSchema = z.any(); */
@@ -124,9 +129,10 @@ test('schema extraction ignores commented shadows and locates unique active JS a
   );
 
   const hostedLikeSource = `
+    const targetSchema: z.ZodString = z.string();
     export function register(): void {
       // const targetSchema = z.never();
-      const targetSchema: z.ZodString = z.string();
+      const targetSchema = z.any();
     }
   `;
   assert.equal(
@@ -137,13 +143,23 @@ test('schema extraction ignores commented shadows and locates unique active JS a
     parseSchemaExpression(hostedLikeSource, 'targetSchema', 'hosted-like fixture').type,
     'CallExpression',
   );
+  const hostedFactorySource = `
+    export function createTracklyMcpServer(): void {
+      const targetSchema = z.string();
+      if (false) { const targetSchema = z.never(); }
+    }
+  `;
+  assert.equal(
+    exactSchemaDefinition(hostedFactorySource, 'targetSchema', 'hosted factory fixture'),
+    'const targetSchema = z.string();',
+  );
   assert.throws(
     () => exactSchemaDefinition(
-      'const duplicate = z.string(); function nested() { const duplicate = z.number(); }',
-      'duplicate',
-      'duplicate fixture',
+      'function nested() { const decoy = z.number(); }',
+      'decoy',
+      'nested-only fixture',
     ),
-    /must have exactly one active variable declaration/,
+    /must have exactly one active top-level variable declaration/,
   );
 });
 
@@ -251,6 +267,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
       const transport = new StreamableHTTPServerTransport({});
       try {
         await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
       } finally {
         await server.close();
       }
@@ -287,6 +304,22 @@ test('plugin registration proof binds the exported factory to the live POST rout
     `, 'createTracklyPluginMcpServer', 'wrong server fixture'),
     /must directly connect its exact factory-result server to its live transport/,
   );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(`
+      import { createTracklyPluginMcpServer } from './plugin-server.js';
+      router.post('/', middleware, async (req, res) => {
+        const server = createTracklyPluginMcpServer(authToken);
+        const transport = new StreamableHTTPServerTransport({});
+        try {
+          await server.connect(transport);
+          await decoyTransport.handleRequest(req, res, req.body);
+        } finally {
+          await server.close();
+        }
+      });
+    `, 'createTracklyPluginMcpServer', 'wrong dispatch fixture'),
+    /must directly dispatch req, res, and req\.body through its connected transport/,
+  );
 });
 
 test('descriptor extraction binds active annotation and input-schema expressions instead of comments', () => {
@@ -314,6 +347,81 @@ test('descriptor extraction binds active annotation and input-schema expressions
   );
   assert.equal(inputSchema.type, 'CallExpression');
   assert.equal(inputSchema.callee.property.name, 'strict');
+  assert.notDeepEqual(
+    canonicalSchemaAst(registrationDescriptorPropertyAst(
+      source, registration, 'annotations', 'descriptor fixture',
+    )),
+    canonicalSchemaAst(parseSchemaExpression(
+      'const annotation = mutationAnnotations(false, false);',
+      'annotation',
+      'different annotation fixture',
+    )),
+    'mutation annotation argument tuples must remain semantically distinct',
+  );
+});
+
+test('job-brief projection validation binds every active value expression', () => {
+  const source = `
+    registerPluginTool('trackly_get_job_brief', { inputSchema }, wrapTool(async () => {
+      const brief = response.brief;
+      return {
+        jobId: brief.jobId,
+        companyName: brief.companyName,
+        companySignal: { openRoleCount: brief.companySignal?.openRoleCount ?? 0 },
+      };
+    }));
+  `;
+  const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'job brief fixture');
+  const properties = wrappedHandlerReturnProperties(registration, 'job brief fixture');
+  assertBabelPropertyExpression(properties, 'jobId', 'brief.jobId', 'job brief fixture');
+  assertBabelPropertyExpression(properties, 'companyName', 'brief.companyName', 'job brief fixture');
+  assert.throws(
+    () => assertBabelPropertyExpression(properties, 'companyName', 'brief.contacts', 'job brief fixture'),
+    /companyName must equal brief\.contacts/,
+  );
+});
+
+test('local wrapper handlers must actively parse params with their strict schema', () => {
+  const validSource = `
+    server.registerTool('trackly_strict', { inputSchema: publicSchema }, wrapTool(async (params) =>
+      requestApi('POST', '/strict', strictSchema.parse(params))
+    ));
+  `;
+  const [valid] = activeToolRegistrations(validSource, 'server.registerTool', 'strict handler fixture');
+  assert.doesNotThrow(() => assertWrappedHandlerParsesWithSchema(valid, 'strictSchema', 'strict handler fixture'));
+
+  const decoySource = `
+    server.registerTool('trackly_strict', { inputSchema: publicSchema }, wrapTool(async (params) => {
+      // strictSchema.parse(params)
+      const unused = () => strictSchema.parse(params);
+      return requestApi('POST', '/permissive', params);
+    }));
+  `;
+  const [decoy] = activeToolRegistrations(decoySource, 'server.registerTool', 'decoy parse fixture');
+  assert.throws(
+    () => assertWrappedHandlerParsesWithSchema(decoy, 'strictSchema', 'decoy parse fixture'),
+    /must execute exactly one strictSchema\.parse\(params\) call/,
+  );
+});
+
+test('wrapped request endpoint validation ignores comments and unrelated strings', () => {
+  const source = `
+    registerPluginTool('trackly_certify', { inputSchema }, wrapTool(async ({ runId }) => {
+      // /plugin-review-ready
+      const stale = '/plugin-review-ready';
+      return requestApi('POST', \`/api/jobscout/apply/runs/\${runId}/wrong-endpoint\`, body);
+    }));
+  `;
+  const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'endpoint fixture');
+  assert.throws(
+    () => assertWrappedHandlerRequestEndpoint(
+      registration,
+      'POST',
+      '`/api/jobscout/apply/runs/${runId}/plugin-review-ready`',
+      'endpoint fixture',
+    ),
+    /must target `\/api\/jobscout\/apply\/runs\/\$\{runId\}\/plugin-review-ready`/,
+  );
 });
 
 test('schema property extraction ignores stale property text in comments', () => {
@@ -330,6 +438,21 @@ test('schema property extraction ignores stale property text in comments', () =>
 
   assert.deepEqual(Object.keys(properties), ['profile']);
   assert.equal(properties.profile.type, 'CallExpression');
+
+  const referenceProperties = schemaObjectPropertyAsts(`
+    const profileFieldReferenceSchema = z.object({
+      key: z.string().min(1).max(200),
+      label: z.string().min(1).max(1000),
+      value: z.string(),
+    }).strict();
+  `, 'profileFieldReferenceSchema', 'extra profile field fixture');
+  assert.throws(
+    () => assertExactSchemaProperties(referenceProperties, {
+      key: 'z.string().min(1).max(200)',
+      label: 'z.string().min(1).max(1000)',
+    }, 'profileFieldReferenceSchema'),
+    /must publish only its locked fields/,
+  );
 });
 
 test('importing executable digest helpers never runs hosted verification as a side effect', () => {
@@ -856,6 +979,7 @@ test('submission fixtures cover six positive and three negative cases', () => {
         'trackly_get_apply_work',
         'trackly_get_job',
         'trackly_get_apply_work',
+        'trackly_report_apply_progress',
         'trackly_prepare_resume_artifact',
         'trackly_report_apply_progress',
       ],
@@ -873,12 +997,15 @@ test('submission fixtures cover six positive and three negative cases', () => {
       'trackly_get_apply_work',
       'trackly_get_job',
       'trackly_get_apply_work',
+      'trackly_report_apply_progress',
       'trackly_prepare_resume_artifact',
       'trackly_report_apply_progress',
       'trackly_certify_review_ready',
       'trackly_get_apply_work',
     ],
   );
+  assert.match(applyToReview.turns[1].content, /Before filling, bind each verified browser surface with operation bind_surface/);
+  assert.match(applyToReview.turns[1].content, /after the first pass report value-free progress with a separate fresh idempotency key/);
   assert.match(applyToReview.turns[2].content, /attached the intended resume.*filename/s);
   assert.match(applyToReview.turns[2].content, /Synthetic-Reviewer-0001-Resume\.pdf/);
   assert.match(applyToReview.turns[4].content, /exact complete application.*truthful/s);
