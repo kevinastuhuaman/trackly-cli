@@ -16,6 +16,7 @@ Use trackly as the source of truth for approved work, reusable application answe
 5. Stop for the user on CAPTCHA, OTP, login credentials, account creation, unexpected origin, or an unobservable committed form state.
 6. Never claim an application was submitted without a visible success state or the user's explicit confirmation after manual submission.
 7. Send only redacted operational state to trackly. Do not place answer values, page text, local paths, resume contents, or contact details in progress reports.
+8. Preserve every application tab and unsaved draft. Before any form mutation, require a verified end-to-end preservation path: either the documented session finalizer plus complete current controller-owned and user-owned tab inventories for its explicit keep list, or a documented per-tab durable-handoff primitive with an exact verifiable persistence receipt for every target tab. Otherwise fail browser readiness. Before ending every browser turn, put every live bound application tab in the finalizer's explicit keep list with `status: handoff`, or durably hand off every live tab and verify every receipt. Never end a browser turn after omitted, empty, partial, inferred, stale, or unverified preservation.
 
 ## Start or resume
 

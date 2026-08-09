@@ -632,6 +632,11 @@ test('hosted parity verifier binds the public lifecycle promise to executable pl
   assert.match(verifier, /pluginServerSha256/);
   assert.match(verifier, /APPLY_BROWSER_SURFACES/);
   assert.match(verifier, /All executable hosted plugin scope mappings must match the packaged public scope lock/);
+  assert.match(verifier, /staticStringArrayMap/);
+  assert.match(verifier, /TSSatisfiesExpression/);
+  assert.match(verifier, /TSAsExpression/);
+  assert.match(verifier, /must contain only static properties \(no spreads or methods\)/);
+  assert.match(verifier, /must contain only string literals/);
   assert.match(verifier, /descriptors or inline schemas drifted from the packaged exact-byte digest lock/);
   assert.match(verifier, /availableFields/);
   assert.match(verifier, /hostedPluginContract\.lifecycle/);

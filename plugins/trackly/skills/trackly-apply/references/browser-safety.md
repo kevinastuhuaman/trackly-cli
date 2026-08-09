@@ -9,8 +9,13 @@ Before entering private data, require all of the following:
 - The visible employer and role match the approved job.
 - The current origin and ATS tenant match the packet's allowed origin policy.
 - Browser and accessibility state agree on the committed controls.
+- A verified end-to-end tab and unsaved-draft preservation path exists before any mutation: either the documented session finalizer plus complete current controller-owned and user-owned inventories for an explicit keep list, or a documented per-tab durable-handoff primitive with an exact verifiable persistence receipt for every target tab.
 
-Stop when any identity or origin check is ambiguous. A logo, page title, substring match, or familiar visual design is not sufficient authorization.
+Stop when any identity, origin, or preservation check is ambiguous. A logo, page title, substring match, familiar visual design, stale tab inventory, or unverified handoff claim is not sufficient authorization.
+
+## Browser-turn preservation
+
+Before ending every browser turn, reconcile the complete current inventory of live bound application tabs. Pass every one to the documented session finalizer in an explicit keep entry with `status: handoff`, or invoke the documented per-tab durable handoff for every live tab and verify each exact persistence receipt. Never end a browser turn after an omitted, empty, partial, inferred, stale, or unverified keep/handoff operation. Preserve every tab and draft until the user submits or explicitly asks to close it.
 
 ## Field integrity
 

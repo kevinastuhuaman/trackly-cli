@@ -15,6 +15,7 @@ const {
   parseSchemaExpression,
   referencedConstantIdentifiers,
   sha256ExactBytes,
+  staticStringArrayMap,
 } = require('../scripts/verify-hosted-contract.js');
 
 function read(relativePath) {
@@ -133,6 +134,28 @@ test('schema extraction ignores commented shadows and locates unique active JS a
       'duplicate fixture',
     ),
     /must have exactly one active variable declaration/,
+  );
+});
+
+test('scope extraction ignores stale commented mappings and rejects dynamic object members', () => {
+  const source = `
+    const TRACKLY_PLUGIN_TOOL_SCOPES = {
+      // trackly_stale: ['admin:write'],
+      trackly_active: ['jobs:read', 'tracking:read'],
+      /* trackly_old: ['sensitive:write'], */
+    } as const satisfies Record<string, readonly string[]>;
+  `;
+  assert.deepEqual(
+    staticStringArrayMap(source, 'TRACKLY_PLUGIN_TOOL_SCOPES', 'scope fixture'),
+    { trackly_active: ['jobs:read', 'tracking:read'] },
+  );
+  assert.throws(
+    () => staticStringArrayMap(
+      'const TRACKLY_PLUGIN_TOOL_SCOPES = { ...dynamicScopes };',
+      'TRACKLY_PLUGIN_TOOL_SCOPES',
+      'spread scope fixture',
+    ),
+    /only static properties \(no spreads or methods\)/,
   );
 });
 
@@ -463,6 +486,17 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /profile\.missingRequired/);
   assert.match(skill, /profile\.availableFields/);
   assert.match(skill, /never send a snapshot/);
+  assert.match(skill, /Before any form mutation, require a verified end-to-end preservation path/);
+  assert.match(skill, /complete current controller-owned and user-owned tab inventories/);
+  assert.match(skill, /Before ending every browser turn/);
+  assert.match(skill, /explicit keep list with `status: handoff`/);
+  assert.match(skill, /durably hand off every live tab and verify every receipt/);
+
+  const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
+  assert.match(browserSafety, /tab and unsaved-draft preservation path exists before any mutation/);
+  assert.match(browserSafety, /Before ending every browser turn/);
+  assert.match(browserSafety, /reconcile the complete current inventory/);
+  assert.match(browserSafety, /verify each exact persistence receipt/);
   assert.match(skill, /`nextAction: use_active_target`/);
   assert.match(skill, /`nextAction: advance_or_refresh`/);
   assert.match(skill, /only that minimal intersection as `profileKeys`/);
@@ -473,7 +507,6 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /at least once every 60 seconds during active browser work/);
   assert.match(skill, /first pass for every mutable member in the current bound wave/);
   assert.match(skill, /Wait until the advertised retry time or estimated return time before one work refetch/);
-  const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
   assert.match(browserSafety, /verify only the filename visibly committed/);
   assert.match(browserSafety, /never claim an artifact identity, preview, or hash exists/);
   const lifecycle = read('plugins/trackly/skills/trackly-apply/references/lifecycle-contract.md');

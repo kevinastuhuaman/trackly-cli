@@ -27,7 +27,7 @@ function parseFullSource(source, sourcePath) {
   return ast;
 }
 
-function schemaDefinitionBounds(source, name, sourcePath) {
+function activeVariableDeclarator(source, name, sourcePath) {
   const matches = [];
   function visit(node, parent = null) {
     if (node === null || typeof node !== 'object') return;
@@ -56,12 +56,56 @@ function schemaDefinitionBounds(source, name, sourcePath) {
     `${name} in ${sourcePath} must belong to a variable declaration`,
   );
   assert.ok(declarator.init, `${name} in ${sourcePath} must have an initializer`);
+  return { declarator, declaration };
+}
+
+function schemaDefinitionBounds(source, name, sourcePath) {
+  const { declarator, declaration } = activeVariableDeclarator(source, name, sourcePath);
   return {
     declarationStart: declaration.start,
     declarationEnd: declaration.end,
     expressionStart: declarator.init.start,
     expressionEnd: declarator.init.end,
   };
+}
+
+function staticStringArrayMap(source, name, sourcePath) {
+  let initializer = activeVariableDeclarator(source, name, sourcePath).declarator.init;
+  while (initializer.type === 'TSSatisfiesExpression' || initializer.type === 'TSAsExpression') {
+    initializer = initializer.expression;
+  }
+  assert.equal(initializer.type, 'ObjectExpression', `${name} in ${sourcePath} must initialize an object`);
+  const entries = initializer.properties.map((property) => {
+    assert.equal(
+      property.type,
+      'ObjectProperty',
+      `${name} in ${sourcePath} must contain only static properties (no spreads or methods)`,
+    );
+    assert.equal(property.computed, false, `${name} in ${sourcePath} must not contain computed properties`);
+    assert.equal(property.shorthand, false, `${name} in ${sourcePath} must not contain shorthand properties`);
+    const propertyName = property.key.type === 'Identifier'
+      ? property.key.name
+      : property.key.type === 'StringLiteral'
+        ? property.key.value
+        : null;
+    assert.equal(typeof propertyName, 'string', `${name} in ${sourcePath} must use static string keys`);
+    assert.equal(
+      property.value.type,
+      'ArrayExpression',
+      `${name}.${propertyName} in ${sourcePath} must be an array literal`,
+    );
+    assert.ok(
+      property.value.elements.every((element) => element?.type === 'StringLiteral'),
+      `${name}.${propertyName} in ${sourcePath} must contain only string literals`,
+    );
+    return [propertyName, property.value.elements.map((element) => element.value)];
+  });
+  assert.equal(
+    new Set(entries.map(([propertyName]) => propertyName)).size,
+    entries.length,
+    `${name} in ${sourcePath} must not contain duplicate properties`,
+  );
+  return Object.fromEntries(entries);
 }
 
 function schemaDefinition(source, name, sourcePath) {
@@ -379,17 +423,10 @@ for (const [toolName, scopes] of Object.entries(pluginLock.publicScopeContract))
     `${toolName} scopes drifted from the packaged public scope contract`,
   );
 }
-const executableScopeDefinition = schemaDefinition(
+const executableScopeContract = staticStringArrayMap(
   hostedPluginScopesSource,
   'TRACKLY_PLUGIN_TOOL_SCOPES',
   hostedPluginScopesPath,
-);
-const executableScopeContract = Object.fromEntries(
-  [...executableScopeDefinition.matchAll(/^\s*(trackly_[a-z0-9_]+):\s*\[([^\]]*)\]/gm)]
-    .map((match) => [
-      match[1],
-      [...match[2].matchAll(/['"]([^'"]+)['"]/g)].map((scope) => scope[1]),
-    ]),
 );
 assert.deepEqual(
   executableScopeContract,
@@ -799,6 +836,7 @@ module.exports = {
   referencedConstantIdentifiers,
   schemaDefinition,
   sha256ExactBytes,
+  staticStringArrayMap,
   typescriptConstArrayValues,
   verifyHostedContract,
 };
