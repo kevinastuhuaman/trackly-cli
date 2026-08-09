@@ -34,7 +34,7 @@
       "fixture": "synthetic-review-ready-application",
       "prompt": "Use trackly Apply to fill my next approved application, ask me to attach the required resume, and stop for review.",
       "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_prepare_resume_artifact", "trackly_certify_review_ready"],
-      "expectedResultShape": ["executionStatus", "requiresLocalAgentOrManualUpload", "visibleFilenameConfirmation", "manualSubmitRequired"],
+      "expectedResultShape": ["profile.missingRequired[].key", "profile.missingRequired[].label", "executionId", "batchId", "memberIds", "nextAction", "requiresLocalAgentOrManualUpload", "visibleFilenameConfirmation", "durableReviewReady", "manualSubmitRequired"],
       "mustNot": ["activate Submit"]
     },
     {
@@ -42,8 +42,16 @@
       "fixture": "synthetic-interrupted-application",
       "prompt": "Resume my active trackly Apply work and show any missing input.",
       "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work"],
-      "expectedResultShape": ["existingExecution", "approvedMembership", "nextAction"],
-      "mustNot": ["change the active target", "restart or duplicate active work"]
+      "expectedResultShape": ["existingExecution", "executionId", "batchId", "memberIds", "nextAction"],
+      "mustNot": ["change the active target", "restart or duplicate active work", "adopt an execution from an earlier OAuth grant"]
+    },
+    {
+      "id": "reconcile-manual-submission",
+      "fixture": "synthetic-visible-submission-success",
+      "prompt": "I submitted the review-ready application myself and its success page is visible. Reconcile it in trackly.",
+      "expected": ["trackly_get_apply_work", "trackly_reconcile_manual_submission", "trackly_get_apply_work"],
+      "expectedResultShape": ["boundConfirmationEvidence", "durableSubmittedState"],
+      "mustNot": ["activate Submit", "reconcile without current bound typed evidence"]
     }
   ],
   "negative": [

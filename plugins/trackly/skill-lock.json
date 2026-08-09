@@ -8,7 +8,7 @@
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "6b65b0610e29628fb09dee88da8efbd8a4c9a826f8fbfdce4bfb9a7b41efa6f2"
+    "treeSha256": "ea983757e28583f69bcb0d0029b5b8f60776099b4902fe4672c212df7cc62004"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -20,6 +20,24 @@
       "verify HTTPS employer and job identity before private data",
       "stop on CAPTCHA OTP credentials account creation or unobservable state",
       "reconcile submission only after success evidence or explicit user confirmation"
+    ]
+  },
+  "publicLifecycleContract": {
+    "readinessMissingProfileFields": "canonical_key_and_public_label_only",
+    "startOrResume": "returns_claimed_batch_bound_runs",
+    "leaseHandling": "facade_owned_never_model_visible",
+    "leaseRenewal": "facade_owned_on_every_work_and_mutation_path",
+    "resumeHandling": "manual_unbound_not_attested",
+    "certifyReviewReady": "atomic_checkpoint_truth_outcome_manual_resume_unbound",
+    "reconcileManualSubmission": "atomic_current_epoch_evidence_outcome",
+    "submissionBoundary": "manual_only_no_submit_tool"
+  },
+  "publicScopeContract": {
+    "trackly_get_apply_work": [
+      "profile:read",
+      "sensitive:read",
+      "apply:read",
+      "apply:write"
     ]
   },
   "publicToolAllowlist": [

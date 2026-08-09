@@ -131,6 +131,19 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.equal(lock.publicToolAllowlist.length, 18);
   assert.deepEqual(actual, [...lock.publicToolAllowlist].sort());
   assert.ok(!actual.some((name) => name.includes('referral')));
+  assert.deepEqual(lock.publicLifecycleContract, {
+    readinessMissingProfileFields: 'canonical_key_and_public_label_only',
+    startOrResume: 'returns_claimed_batch_bound_runs',
+    leaseHandling: 'facade_owned_never_model_visible',
+    leaseRenewal: 'facade_owned_on_every_work_and_mutation_path',
+    resumeHandling: 'manual_unbound_not_attested',
+    certifyReviewReady: 'atomic_checkpoint_truth_outcome_manual_resume_unbound',
+    reconcileManualSubmission: 'atomic_current_epoch_evidence_outcome',
+    submissionBoundary: 'manual_only_no_submit_tool',
+  });
+  assert.deepEqual(lock.publicScopeContract, {
+    trackly_get_apply_work: ['profile:read', 'sensitive:read', 'apply:read', 'apply:write'],
+  });
 });
 
 test('adapted trackly Apply skill is traceable to its source and safety invariants', () => {
@@ -147,18 +160,36 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /CAPTCHA, OTP, login credentials, account creation/);
   assert.match(skill, /visible success state or the user's explicit confirmation/);
   assert.match(skill, /requiresLocalAgentOrManualUpload/);
+  assert.match(skill, /profile\.missingRequired/);
+  assert.match(skill, /returned execution ID and a snapshot bounded to the returned member IDs/);
+  assert.match(skill, /atomically records the review checkpoint, truth certification, and review-ready outcome/);
+  assert.match(skill, /atomically records typed confirmation evidence and the submitted outcome/);
   const browserSafety = read('plugins/trackly/skills/trackly-apply/references/browser-safety.md');
   assert.match(browserSafety, /verify only the filename visibly committed/);
   assert.match(browserSafety, /never claim an artifact identity, preview, or hash exists/);
+  const lifecycle = read('plugins/trackly/skills/trackly-apply/references/lifecycle-contract.md');
+  assert.match(lifecycle, /at most 100 `\{ key, label \}` records/);
+  assert.match(lifecycle, /`executionId`, `revision`, `batchId`, `memberIds`, and `nextAction`/);
+  assert.match(lifecycle, /No public tool accepts or returns a lease token/);
+  assert.match(lifecycle, /`knownFieldsCommitted: true`/);
+  assert.match(lifecycle, /`explicitUserTruthConfirmed: true`/);
+  assert.match(lifecycle, /`answerSnapshotHash`/);
+  assert.match(lifecycle, /`wordingFingerprint`/);
+  assert.match(lifecycle, /literal `resumeDependency: not_applicable`/);
+  assert.match(lifecycle, /manually uploaded resume is browser-local, unbound, and not attested/);
+  assert.doesNotMatch(lifecycle, /explicitUserResumeApproved/);
+  assert.match(lifecycle, /`browserBindingHash`/);
+  assert.match(lifecycle, /`evidenceFingerprint`/);
+  assert.match(lifecycle, /Do not send server-owned internals, resume IDs, filenames, paths, contents, download URLs, or answer values/);
 });
 
-test('submission fixtures cover five positive and three negative cases', () => {
+test('submission fixtures cover six positive and three negative cases', () => {
   const fixtures = json('plugins/trackly/listing/submission-tests.json');
   const lock = json('plugins/trackly/skill-lock.json');
   const allowedTools = new Set(lock.publicToolAllowlist);
-  assert.equal(fixtures.positive.length, 5);
+  assert.equal(fixtures.positive.length, 6);
   assert.equal(fixtures.negative.length, 3);
-  assert.equal(new Set([...fixtures.positive, ...fixtures.negative].map((item) => item.id)).size, 8);
+  assert.equal(new Set([...fixtures.positive, ...fixtures.negative].map((item) => item.id)).size, 9);
   assert.match(fixtures.reviewEnvironment.account, /synthetic reviewer account/i);
   assert.match(fixtures.reviewEnvironment.submissionPolicy, /No fixture may submit/);
   for (const item of fixtures.positive) {
@@ -169,6 +200,21 @@ test('submission fixtures cover five positive and three negative cases', () => {
   assert.ok(fixtures.negative.every((item) => item.fixture));
   assert.ok(fixtures.positive.some((item) => item.id === 'apply-to-review'));
   assert.ok(fixtures.positive.find((item) => item.id === 'apply-to-review').expected.includes('trackly_prepare_resume_artifact'));
+  assert.deepEqual(
+    fixtures.positive.find((item) => item.id === 'apply-to-review').expectedResultShape,
+    [
+      'profile.missingRequired[].key',
+      'profile.missingRequired[].label',
+      'executionId',
+      'batchId',
+      'memberIds',
+      'nextAction',
+      'requiresLocalAgentOrManualUpload',
+      'visibleFilenameConfirmation',
+      'durableReviewReady',
+      'manualSubmitRequired',
+    ],
+  );
   assert.deepEqual(
     fixtures.positive.find((item) => item.id === 'job-brief').expectedResultShape,
     ['jobId', 'companyName', 'companySignal.openRoleCount', 'companySignal.postedLast7d'],
@@ -184,6 +230,10 @@ test('submission fixtures cover five positive and three negative cases', () => {
   assert.ok(fixtures.negative.some((item) => item.id === 'no-autosubmit'));
   assert.ok(fixtures.negative.some((item) => item.id === 'no-referral-intelligence'));
   assert.ok(fixtures.negative.some((item) => item.id === 'no-fabricated-answer'));
+  assert.deepEqual(
+    fixtures.positive.find((item) => item.id === 'reconcile-manual-submission').expected,
+    ['trackly_get_apply_work', 'trackly_reconcile_manual_submission', 'trackly_get_apply_work'],
+  );
 });
 
 test('registered app binding and public submission remain explicit release gates', () => {

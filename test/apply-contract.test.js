@@ -572,6 +572,24 @@ test('hosted parity verifier fails clearly when the plugin contract has no tools
   assert.doesNotMatch(result.stderr, /TypeError/);
 });
 
+test('hosted parity verifier binds the public lifecycle promise to executable plugin schemas and handlers', () => {
+  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
+  assert.match(verifier, /hostedPluginContract\.lifecycle/);
+  assert.match(verifier, /pluginLock\.publicLifecycleContract/);
+  assert.match(verifier, /pluginLock\.publicScopeContract/);
+  assert.match(verifier, /readinessOutputSchema/);
+  assert.match(verifier, /applyOutputSchema/);
+  assert.match(verifier, /progressOutputSchema/);
+  assert.match(verifier, /restart_after_reauthorization/);
+  assert.match(verifier, /trackly_start_or_resume_apply/);
+  assert.match(verifier, /trackly_certify_review_ready/);
+  assert.match(verifier, /plugin-review-ready/);
+  assert.match(verifier, /trackly_reconcile_manual_submission/);
+  assert.match(verifier, /plugin-manual-submission/);
+  assert.match(verifier, /resumeDependency: z\\\.literal/);
+  assert.match(verifier, /assert\.doesNotMatch\(\s*certify/);
+});
+
 test('Apply MCP prompt gates resume preparation on the same browser binding', () => {
   const browserGate = source.indexOf('Reclaim semantic browser control');
   const prepare = source.indexOf('prepare the run-bound resume locally', browserGate);

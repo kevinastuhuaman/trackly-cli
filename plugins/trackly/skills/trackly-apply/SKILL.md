@@ -5,7 +5,7 @@ description: Use trackly Apply to fill a user-approved job application in a cont
 
 # trackly Apply
 
-Use trackly as the source of truth for approved work, reusable application answers, resume artifacts, and durable application progress. Read [references/browser-safety.md](references/browser-safety.md) and [references/review-handoff.md](references/review-handoff.md) before changing an employer form. Read [references/application-writing.md](references/application-writing.md) before drafting free text.
+Use trackly as the source of truth for approved work, reusable application answers, resume artifacts, and durable application progress. Read [references/lifecycle-contract.md](references/lifecycle-contract.md), [references/browser-safety.md](references/browser-safety.md), and [references/review-handoff.md](references/review-handoff.md) before changing an employer form. Read [references/application-writing.md](references/application-writing.md) before drafting free text.
 
 ## Non-negotiable rules
 
@@ -19,11 +19,12 @@ Use trackly as the source of truth for approved work, reusable application answe
 
 ## Start or resume
 
-1. Call `trackly_get_apply_readiness` and obey its authoritative blockers and next action.
+1. Call `trackly_get_apply_readiness` and obey its authoritative blockers and next action. Its `profile.missingRequired` entries contain only canonical keys and public labels; obtain values from the user, never from inference.
 2. If restricted information must be stored and consent is absent, explain what would be stored and why. Call `trackly_grant_sensitive_storage_consent` only after the user explicitly agrees. If the user declines, continue only where the response says run-only use is supported. Use `trackly_revoke_sensitive_storage_consent` only on an explicit revocation request.
 3. Collect missing reusable answers from the user. Call `trackly_save_application_answers` only for confirmed facts and the scope the user chose. Refetch readiness after saving.
-4. Call `trackly_start_or_resume_apply` once. Treat the returned execution identity, revision, approved membership, and next action as authoritative. Do not create replacement work when active work exists.
-5. Call `trackly_get_apply_work` for the current bounded work packet. Continue only while its status and allowed operations authorize browser work.
+4. Call `trackly_start_or_resume_apply` once with the controlled `browserSurface`. Treat its returned execution identity, revision, `batchId`, `memberIds`, and `nextAction` as authoritative. A successful non-mismatch response has already prepared and claimed the current batch-bound wave. The facade owns its private lease; never request, infer, store, or send a lease token. Do not create replacement work when active work exists.
+5. If `nextAction` is `restart_after_reauthorization`, do not inspect or mutate the old execution. Explain that it belongs to an earlier authorization. After the user explicitly confirms the restart, call `trackly_stop_apply` with the returned execution ID and revision and reason `execution_restarted`, verify it stopped, then call `trackly_start_or_resume_apply` with a fresh idempotency key. Never adopt work across OAuth grants.
+6. Otherwise call `trackly_get_apply_work` with the returned execution ID and a snapshot bounded to the returned member IDs and browser surface. This authenticated work read atomically renews the facade-owned private lease and therefore requires Apply write permission, even though it never exposes or accepts the lease. Continue only while its status and allowed operations authorize browser work.
 
 ## Fill the approved form
 
@@ -32,7 +33,7 @@ Use trackly as the source of truth for approved work, reusable application answe
 3. Inspect the full form before filling. Identify required fields, conditional sections, consent controls, document inputs, and the final manual-submit boundary.
 4. Preserve user-edited values. Fill only fields whose canonical answer is known and verify the committed value after each interaction.
 5. Ask once for genuinely missing facts. Save a reusable answer only when the user confirms both the value and its scope.
-6. If the form exposes a resume control, call `trackly_prepare_resume_artifact`. When it returns `requiresLocalAgentOrManualUpload`, ask the user to attach the resume manually and verify only the filename visibly committed on the employer page; do not invent an artifact identity or preview. If a future response supplies a verifiable artifact identity and safe preview, show that proof, obtain approval for that exact artifact, verify it immediately before attaching, and confirm the employer-facing filename. If no resume control exists, do not prepare or upload a resume.
+6. If the form exposes a resume control, call `trackly_prepare_resume_artifact`. When it returns `requiresLocalAgentOrManualUpload`, ask the user to attach the resume manually and verify only the filename visibly committed on the employer page; do not invent an artifact identity, preview, or attestation. Hosted trackly treats every manual resume upload as unbound and cannot certify its contents. If no resume control exists, do not prepare or upload a resume.
 7. For free-text answers, draft only from supported user and role facts, then call `trackly_lint_application_text`. Do not enter text that fails lint or contains an unsupported claim.
 8. After each durable milestone, call `trackly_report_apply_progress` with only the current execution binding, typed status, exercised safety checks, and redacted blocker codes.
 9. Recheck every visible field and error. Confirm the form is complete, the final Submit control is present or its equivalent is clearly identified, and it has not been activated.
@@ -41,9 +42,9 @@ Use trackly as the source of truth for approved work, reusable application answe
 
 1. Follow [references/review-handoff.md](references/review-handoff.md).
 2. Ask the user for a final truthfulness confirmation bound to the exact ready application and resume artifact, when present.
-3. Call `trackly_certify_review_ready` only after all visible checks pass and the user confirms the exact application is truthful and ready for their review.
+3. Call `trackly_certify_review_ready` only after all visible checks pass and the user confirms the exact application is truthful and ready for their review. Supply the current run/batch/member/version/epoch binding returned by trackly, a fresh idempotency key, the value-free answer snapshot hash, certification wording fingerprint, and literal `resumeDependency: not_applicable`. The backend reads the current batch membership, profile revision, run set, expiry, and private lease inside the same transaction; never send those internals. Set `knownFieldsCommitted` and `explicitUserTruthConfirmed` to true only when those statements are true. Manual resume uploads remain unbound and are never part of this attestation. This one mutation atomically records the review checkpoint, truth certification, and review-ready outcome; do not emulate it with partial calls.
 4. Leave the browser on the final review state and stop. Never activate Submit.
-5. After the user submits manually, call `trackly_reconcile_manual_submission` only when a success state is visible or the user explicitly confirms submission. Refetch work and require the durable submitted state before saying trackly recorded it.
+5. After the user submits manually, call `trackly_reconcile_manual_submission` only when a success state is visible or the user explicitly confirms submission. Supply the current run/batch/member/version/epoch binding, browser-binding hash, value-free evidence fingerprint, and idempotency key. Use the matching confirmation branch and set `explicitUserConfirmed` only for an actual user confirmation. The facade resolves its private lease. This one mutation atomically records typed confirmation evidence and the submitted outcome. Refetch work and require the durable submitted state before saying trackly recorded it.
 6. When the user asks to stop active work, call `trackly_stop_apply`, verify the returned terminal or stopped state, and do not continue filling.
 
 ## Failure behavior

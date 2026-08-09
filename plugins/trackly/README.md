@@ -10,6 +10,9 @@ trackly finds openings as they appear. You decide what to pursue. trackly Apply 
 
 - Real-time job and company search through the authenticated trackly MCP facade.
 - A public, safety-preserving `trackly-apply` skill for filling user-approved applications.
+- A resumable lifecycle contract: minimal missing-profile labels, batch-bound work, atomic review certification, and evidence-bound manual-submission reconciliation.
+- Facade-owned private batch leases that are never exposed to the model.
+- Manual resume uploads remain browser-local, unbound, and unattested.
 - A derived vector of the approved white trackly arrow mark on black. It is not claimed to be byte- or pixel-identical to the source PNG and requires Kevin's visual approval before submission.
 - Submission fixtures covering expected and out-of-scope behavior.
 
