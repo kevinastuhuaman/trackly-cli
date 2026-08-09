@@ -379,6 +379,32 @@ test('hosted schema registration proof uses only direct reachable factory initia
     ),
     /must return the exact server that received the verified registrations/,
   );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source
+        .replace('const server = new McpServer', 'let server = new McpServer')
+        .replace(
+          "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+          "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);\n      server = decoyServer;",
+        ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'mutable reassigned hosted factory fixture',
+    ),
+    /must declare the server McpServer binding as immutable const/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);\n      server = decoyServer;",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'const reassigned hosted factory fixture',
+    ),
+    /must never assign to or update the immutable server binding/,
+  );
 });
 
 test('plugin registration proof binds the exported factory to the live POST route', () => {

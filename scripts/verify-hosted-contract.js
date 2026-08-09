@@ -84,13 +84,18 @@ function directToolRegistrationsInNamedFactory(source, expectedFunction, expecte
         && declarator.id.name === expectedServerBinding
         && declarator.init?.type === 'NewExpression'
         && babelCalleeName(declarator.init.callee) === 'McpServer'
-      ))
+      )).map((declarator) => ({ declaration: statement, declarator }))
       : []
   ));
   assert.equal(
     serverBindings.length,
     1,
     `${expectedFunction} in ${sourcePath} must directly create exactly one ${expectedServerBinding} McpServer binding`,
+  );
+  assert.equal(
+    serverBindings[0].declaration.kind,
+    'const',
+    `${expectedFunction} in ${sourcePath} must declare the ${expectedServerBinding} McpServer binding as immutable const`,
   );
   const registrationIndexes = [];
   const registrations = factoryStatements.flatMap((statement, index) => {
@@ -130,6 +135,20 @@ function directToolRegistrationsInNamedFactory(source, expectedFunction, expecte
     `${expectedFunction} in ${sourcePath} must reach every ${expectedCallee} registration without an earlier branch, return, throw, or disabled path`,
   );
   const factoryReturns = [];
+  const serverRebindings = [];
+  function targetContainsServerBinding(node) {
+    if (node === null || typeof node !== 'object') return false;
+    if (node.type === 'Identifier') return node.name === expectedServerBinding;
+    if (node.type === 'RestElement') return targetContainsServerBinding(node.argument);
+    if (node.type === 'AssignmentPattern') return targetContainsServerBinding(node.left);
+    if (node.type === 'ArrayPattern') return node.elements.some(targetContainsServerBinding);
+    if (node.type === 'ObjectPattern') return node.properties.some((property) => (
+      property.type === 'RestElement'
+        ? targetContainsServerBinding(property.argument)
+        : targetContainsServerBinding(property.value)
+    ));
+    return false;
+  }
   function visitReturns(node) {
     if (node === null || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -141,12 +160,23 @@ function directToolRegistrationsInNamedFactory(source, expectedFunction, expecte
       && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
     ) return;
     if (node.type === 'ReturnStatement') factoryReturns.push(node);
+    if (node.type === 'AssignmentExpression' && targetContainsServerBinding(node.left)) {
+      serverRebindings.push(node);
+    }
+    if (node.type === 'UpdateExpression' && targetContainsServerBinding(node.argument)) {
+      serverRebindings.push(node);
+    }
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'extra') continue;
       visitReturns(child);
     }
   }
   visitReturns(factory);
+  assert.equal(
+    serverRebindings.length,
+    0,
+    `${expectedFunction} in ${sourcePath} must never assign to or update the immutable ${expectedServerBinding} binding`,
+  );
   assert.equal(
     factoryReturns.length,
     1,
