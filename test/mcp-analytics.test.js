@@ -843,6 +843,23 @@ test('transport close starts bounded analytics shutdown', async () => {
   await server.close().catch(() => {});
 });
 
+test('transport connection failure uses the injected analytics shutdown hook', async () => {
+  const failure = new Error('transport failed');
+  const shutdownAnalytics = test.mock.fn(async () => {});
+  const transport = {
+    async start() { throw failure; },
+    async send() {},
+    async close() {},
+  };
+
+  await assert.rejects(startMcpServer({
+    transport,
+    configureAnalytics() {},
+    shutdownAnalytics,
+  }), failure);
+  assert.equal(shutdownAnalytics.mock.callCount(), 1);
+});
+
 test('SIGTERM flushes analytics before exiting the MCP process', async () => {
   const signalTarget = new EventEmitter();
   let finishShutdown;

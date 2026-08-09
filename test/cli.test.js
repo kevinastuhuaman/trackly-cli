@@ -36,6 +36,32 @@ test('parseArgs marks missing value flags as null', () => {
   assert.equal(parsed['api-key'], null);
 });
 
+test('documented MCP command installs bounded-shutdown signal handlers', async () => {
+  const server = {};
+  const cleanup = () => {};
+  const starts = [];
+  const installs = [];
+
+  const result = await cli.cmdMcp({
+    startOptions: { marker: 'start' },
+    signalOptions: { marker: 'signals' },
+    mcpServer: {
+      async startMcpServer(options) {
+        starts.push(options);
+        return server;
+      },
+      installMcpSignalHandlers(value, options) {
+        installs.push([value, options]);
+        return cleanup;
+      },
+    },
+  });
+
+  assert.deepEqual(starts, [{ marker: 'start' }]);
+  assert.deepEqual(installs, [[server, { marker: 'signals' }]]);
+  assert.equal(result, cleanup);
+});
+
 test('parseJobId validates positive integer identifiers', () => {
   assert.equal(cli.parseJobId('123'), 123);
   assert.equal(cli.parseJobId('00123'), 123);

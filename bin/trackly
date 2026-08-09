@@ -1123,8 +1123,10 @@ async function cmdVersion() {
   console.log(VERSION);
 }
 
-async function cmdMcp() {
-  await require('../mcp/server').startMcpServer();
+async function cmdMcp(options = {}) {
+  const mcpServer = options.mcpServer || require('../mcp/server');
+  const server = await mcpServer.startMcpServer(options.startOptions);
+  return mcpServer.installMcpSignalHandlers(server, options.signalOptions);
 }
 
 async function cmdAgent(args) {
@@ -1504,6 +1506,7 @@ if (require.main === module) {
 module.exports = {
   COMMAND_FLAGS,
   UNIVERSAL_FLAGS,
+  cmdMcp,
   cmdLogin,
   formatMaintenanceForHuman,
   getPublicConfig,
