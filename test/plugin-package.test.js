@@ -101,6 +101,41 @@ test('executable digest hashing is exact-byte and fail-closed on formatting chan
   );
 });
 
+test('schema extraction ignores commented shadows and locates unique active JS and TS declarations', () => {
+  const localLikeSource = `
+    // const targetSchema = z.never();
+    /* const targetSchema = z.any(); */
+    const targetSchema = z.string();
+  `;
+  assert.equal(
+    exactSchemaDefinition(localLikeSource, 'targetSchema', 'local-like fixture'),
+    'const targetSchema = z.string();',
+  );
+
+  const hostedLikeSource = `
+    export function register(): void {
+      // const targetSchema = z.never();
+      const targetSchema: z.ZodString = z.string();
+    }
+  `;
+  assert.equal(
+    exactSchemaDefinition(hostedLikeSource, 'targetSchema', 'hosted-like fixture'),
+    'const targetSchema: z.ZodString = z.string();',
+  );
+  assert.equal(
+    parseSchemaExpression(hostedLikeSource, 'targetSchema', 'hosted-like fixture').type,
+    'CallExpression',
+  );
+  assert.throws(
+    () => exactSchemaDefinition(
+      'const duplicate = z.string(); function nested() { const duplicate = z.number(); }',
+      'duplicate',
+      'duplicate fixture',
+    ),
+    /must have exactly one active variable declaration/,
+  );
+});
+
 test('importing executable digest helpers never runs hosted verification as a side effect', () => {
   const { spawnSync } = require('node:child_process');
   const verifierPath = path.join(ROOT, 'scripts', 'verify-hosted-contract.js');
@@ -166,7 +201,7 @@ test('schema AST canonicalization ignores parser positions but preserves literal
       'example',
       'trailing-bytes fixture',
     ),
-    /must contain exactly one complete schema expression/,
+    /Could not parse trailing-bytes fixture as executable JavaScript\/TypeScript/,
   );
 });
 

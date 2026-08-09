@@ -527,6 +527,11 @@ test('hosted parity verifier compares execution disposition body, alias, and con
     assert.match(verifier, new RegExp(`'${constantName}'`));
   }
   assert.match(verifier, /require\('acorn'\)/);
+  assert.match(verifier, /require\('@babel\/parser'\)/);
+  assert.match(verifier, /babelParser\.parse\(source/);
+  assert.match(verifier, /plugins: \['typescript'\]/);
+  assert.match(verifier, /node\.type === 'VariableDeclarator'/);
+  assert.match(verifier, /must have exactly one active variable declaration/);
   assert.match(verifier, /acorn\.parseExpressionAt\(expression, 0, \{ ecmaVersion: 'latest' \}\)/);
   assert.match(verifier, /ast\.end,\s*expression\.length/);
   assert.match(verifier, /canonicalSchemaAst\(localApplySchemaAsts\[schemaName\]\)/);

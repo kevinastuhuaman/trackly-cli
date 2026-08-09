@@ -3,51 +3,75 @@
 
 const assert = require('node:assert/strict');
 const acorn = require('acorn');
+const babelParser = require('@babel/parser');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 
+const parsedSourceCache = new Map();
+
+function parseFullSource(source, sourcePath) {
+  if (parsedSourceCache.has(source)) return parsedSourceCache.get(source);
+  let ast;
+  try {
+    ast = babelParser.parse(source, {
+      sourceType: 'unambiguous',
+      plugins: ['typescript'],
+    });
+  } catch (error) {
+    assert.fail(`Could not parse ${sourcePath} as executable JavaScript/TypeScript: ${error.message}`);
+  }
+  parsedSourceCache.set(source, ast);
+  return ast;
+}
+
 function schemaDefinitionBounds(source, name, sourcePath) {
-  const declaration = new RegExp(`const\\s+${name}\\s*=\\s*`).exec(source);
-  assert.ok(declaration, `${name} is missing from ${sourcePath}`);
-  const start = declaration.index + declaration[0].length;
-  let parens = 0;
-  let braces = 0;
-  let brackets = 0;
-  let quote = '';
-  let escaped = false;
-  for (let index = start; index < source.length; index++) {
-    const char = source[index];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (char === '\\') escaped = true;
-      else if (char === quote) quote = '';
-      continue;
+  const matches = [];
+  function visit(node, parent = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, parent);
+      return;
     }
-    if (char === "'" || char === '"' || char === '`') { quote = char; continue; }
-    if (char === '(') parens++;
-    else if (char === ')') parens--;
-    else if (char === '{') braces++;
-    else if (char === '}') braces--;
-    else if (char === '[') brackets++;
-    else if (char === ']') brackets--;
-    else if (char === ';' && parens === 0 && braces === 0 && brackets === 0) {
-      return { declarationStart: declaration.index, expressionStart: start, semicolon: index };
+    if (
+      node.type === 'VariableDeclarator'
+      && node.id?.type === 'Identifier'
+      && node.id.name === name
+    ) {
+      matches.push({ declarator: node, declaration: parent });
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child, node);
     }
   }
-  assert.fail(`${name} is unterminated in ${sourcePath}`);
+  visit(parseFullSource(source, sourcePath));
+  assert.equal(matches.length, 1, `${name} must have exactly one active variable declaration in ${sourcePath}`);
+  const [{ declarator, declaration }] = matches;
+  assert.equal(
+    declaration?.type,
+    'VariableDeclaration',
+    `${name} in ${sourcePath} must belong to a variable declaration`,
+  );
+  assert.ok(declarator.init, `${name} in ${sourcePath} must have an initializer`);
+  return {
+    declarationStart: declaration.start,
+    declarationEnd: declaration.end,
+    expressionStart: declarator.init.start,
+    expressionEnd: declarator.init.end,
+  };
 }
 
 function schemaDefinition(source, name, sourcePath) {
   const bounds = schemaDefinitionBounds(source, name, sourcePath);
-  return source.slice(bounds.expressionStart, bounds.semicolon).trim();
+  return source.slice(bounds.expressionStart, bounds.expressionEnd);
 }
 
 function exactSchemaDefinition(source, name, sourcePath) {
   const bounds = schemaDefinitionBounds(source, name, sourcePath);
-  return source.slice(bounds.declarationStart, bounds.semicolon + 1);
+  return source.slice(bounds.declarationStart, bounds.declarationEnd);
 }
 
 const AST_METADATA_FIELDS = new Set(['start', 'end', 'loc', 'range', 'raw']);
