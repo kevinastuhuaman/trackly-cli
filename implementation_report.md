@@ -74,13 +74,13 @@ separate reviewed merge-to-main action.
 
 **Branch:** `codex/mcp-analytics-spike`
 
-**Worktree:** `/Users/kevinastuhuamanflores/Code/trackly-cli/.worktrees/codex/mcp-analytics-spike`
+**Worktree:** isolated feature worktree
 
 ## Verdict
 
 PostHog MCP Analytics would materially improve Trackly's operator visibility. The strongest new signals are per-user and per-session tool journeys, exact tool schemas seen by agents, agent-supplied intent, MCP client/runtime attribution, missing-capability reports, sanitized failures, and selected non-sensitive job-search inputs/results.
 
-Trackly is small enough that 100% capture of eligible MCP traffic is the right initial setting. Production validation should use all authenticated MCP users, not a founder-only cohort: Kevin does not normally use MCP, so founder traffic would be both sparse and unrepresentative.
+Trackly is small enough that 100% capture of eligible MCP traffic is the right initial setting. Production validation should use all authenticated MCP users rather than a founder-only cohort, which would be sparse and unrepresentative.
 
 The current worktree is an executable, test-covered spike. It is intentionally **not ready to merge, publish, or enable for users**. The production rollout first needs a cross-repository contract amendment, a backend-owned identity/opt-out response, a stronger free-text privacy gate, and a decision on the PostHog package's stricter Node requirement.
 
@@ -153,11 +153,11 @@ The canonical `close-ai/docs/analytics/CONTRACT.md` currently says:
 - authenticated identity is backend-owned (`distinct_id = String(users.id)`);
 - verified email/name may be PostHog person properties, but may not be copied into events;
 - the CLI/MCP should have no local analytics SDK or cached numeric user ID;
-- retention is 30 days on the current PostHog free plan;
-- access is limited to Kevin;
+- event retention is 12 months and session-replay retention is 30 days;
+- access is limited to Trackly and its service providers;
 - `users.analytics_opt_out` is the user-wide control.
 
-Kevin has explicitly approved changing this contract for rich MCP analytics. That amendment still must land in the canonical contract and event catalog before production CLI code merges.
+The rich MCP analytics contract amendment is explicitly approved. It still must land in the canonical contract and event catalog before production CLI code merges.
 
 Relevant active work as of August 8, 2026:
 
@@ -177,7 +177,9 @@ Production should obtain an ephemeral, server-authoritative analytics context af
 - `analytics_opt_out` from `users.analytics_opt_out`;
 - no numeric user ID persisted in Trackly CLI config;
 - opt-out stops future capture immediately;
-- already-captured traces expire under the 30-day policy unless account/deletion handling requires earlier removal.
+- already-captured analytics events expire under the 12-month event-retention
+  policy unless account/deletion handling requires earlier removal; session
+  replay data expires after 30 days.
 
 Anonymous initialize/tool-discovery events should remain anonymous before authentication, then use normal PostHog identity merging once the backend context becomes available and the account has not opted out.
 
@@ -219,7 +221,9 @@ The focused suite proves:
 
 Repository-wide verification is green: **299 tests passed**, the package-lock and published shrinkwrap are byte-identical, `npm pack --dry-run` includes the analytics module, `git diff --check` passes, and the registry-backed npm security audit reports no vulnerabilities or temporary exceptions.
 
-No real production-user MCP traces were collected in this worktree. The package has not been published or deployed, and no local PostHog management/query credential was available for an ingestion readback. Production validation therefore begins only after the gates below are complete.
+No real production-user MCP traces were collected during the spike. The package
+had not been published or deployed, so production validation begins only after
+the gates below are complete.
 
 ## Recommended rollout sequence
 
@@ -227,9 +231,10 @@ No real production-user MCP traces were collected in this worktree. The package 
 2. Add the backend-owned analytics identity plus `analytics_opt_out` response, and the Account Settings toggle.
 3. Resolve the Node compatibility decision.
 4. Add adversarial free-text privacy tests and fail closed whenever classification is uncertain.
-5. Verify PostHog console controls: 30-day retention, Kevin-only access, DPA, product caps, and 80% event/error alerts.
+5. Verify PostHog console controls: 12-month event retention, 30-day replay
+   retention, restricted operator access, DPA, product caps, and 80% event/error alerts.
 6. Publish behind an emergency kill switch, enable for 100% of eligible authenticated MCP users, and retain anonymous pre-auth lifecycle traces.
-7. Prove both network delivery and PostHog ingestion using a unique correlation ID, then inspect all-user production traces—not Kevin-only traces.
+7. Prove both network delivery and PostHog ingestion using a unique correlation ID, then inspect all-user production traces rather than a founder-only sample.
 8. Create dashboards for tool adoption, client mix, latency/error rates, missing capabilities, intent clusters, and version/runtime regressions.
 9. Enable the autonomous improvement loop only after telemetry quality is proven.
 
@@ -248,7 +253,7 @@ Each issue should carry redacted trace links, affected versions/clients, reprodu
 
 ## Final recommendation
 
-Proceed toward production-wide MCP analytics. It is unusually high leverage for Trackly because agents hide much of the user journey from ordinary UI analytics, and the future autonomous maintenance loop needs trace-level evidence. Do not narrow validation to Kevin. Do not ship the current spike unchanged: complete the identity/opt-out, contract, Node, and free-text privacy gates first.
+Proceed toward production-wide MCP analytics. It is unusually high leverage for Trackly because agents hide much of the user journey from ordinary UI analytics, and the future autonomous maintenance loop needs trace-level evidence. Do not narrow validation to a founder-only sample. Do not ship the current spike unchanged: complete the identity/opt-out, contract, Node, and free-text privacy gates first.
 
 ---
 
@@ -296,7 +301,8 @@ Production use requires the companion backend schema and runtime changes:
   public response fields;
 - a second fail-closed sensitive-content gate for résumé text, profile answers,
   demographic/work-authorization answers, and application notes;
-- 30-day retention disclosure and an Account Settings opt-out.
+- 12-month event / 30-day session-replay retention disclosure and an Account
+  Settings opt-out.
 
 The CLI's local sanitizer is defense in depth. The backend is the authoritative
 privacy and identity boundary, so a modified or older client cannot expand what
@@ -310,7 +316,7 @@ supported range: `^20.20.0 || >=22.22.0`.
 
 ## Verification
 
-- Full CLI suite: 300 passed, 0 failed.
+- Full CLI suite: 307 passed, 0 failed.
 - Analytics-focused tests cover relay identity separation, anonymous event
   restrictions, default-on/disable behavior, sensitive redaction, optional
   context on all 48 source tools, missing-capability reporting, runtime
@@ -322,8 +328,9 @@ supported range: `^20.20.0 || >=22.22.0`.
 ## Release order
 
 1. Review and merge the backend schema contract/migration.
-2. Review and merge the backend runtime relay and privacy gates.
-3. Review and merge the web Account Settings toggle and policy disclosure.
+2. Review and merge the web Account Settings toggle and policy disclosure.
+3. Review and merge the backend runtime relay and privacy gates only after the
+   disclosure is live.
 4. Rebase this CLI branch onto those reviewed contracts, publish through the
    normal release workflow, then validate all eligible production MCP traffic.
 

@@ -44,8 +44,16 @@ test('backend relay is anonymous before auth and backend-identified after auth',
   const relay = createBackendRelay({
     fetch: async (url, options) => {
       requests.push({ url: String(url), options });
+      if (String(url).endsWith('/api/jobscout/analytics-preference')) {
+        return {
+          ok: true,
+          async json() { return { shareUsageAnalytics: true }; },
+        };
+      }
       return { ok: true };
     },
+    loadConfig: () => ({}),
+    saveConfig() {},
   });
 
   try {
@@ -69,9 +77,11 @@ test('backend relay is anonymous before auth and backend-identified after auth',
 
     assert.equal(requests[0].url, 'https://closeai.mba/api/jobscout/mcp-analytics/anonymous');
     assert.equal(requests[0].options.headers.Authorization, undefined);
-    assert.equal(requests[1].url, 'https://closeai.mba/api/jobscout/mcp-analytics');
+    assert.equal(requests[1].url, 'https://closeai.mba/api/jobscout/analytics-preference');
     assert.equal(requests[1].options.headers.Authorization, 'Bearer trk_test_analytics_key');
-    assert.doesNotMatch(requests[1].options.body, /"distinctId":"42"/);
+    assert.equal(requests[2].url, 'https://closeai.mba/api/jobscout/mcp-analytics');
+    assert.equal(requests[2].options.headers.Authorization, 'Bearer trk_test_analytics_key');
+    assert.doesNotMatch(requests[2].options.body, /"distinctId":"42"/);
   } finally {
     if (previous.apiKey === undefined) delete process.env.TRACKLY_API_KEY;
     else process.env.TRACKLY_API_KEY = previous.apiKey;
@@ -98,6 +108,8 @@ test('anonymous relay preserves setup failures and missing-capability reports on
         body: { async cancel() { cancellations += 1; } },
       };
     },
+    loadConfig: () => ({}),
+    saveConfig() {},
   });
 
   try {
@@ -127,6 +139,68 @@ test('anonymous relay preserves setup failures and missing-capability reports on
     else process.env.TRACKLY_BASE_URL = previous.baseUrl;
     if (previous.configDir === undefined) delete process.env.TRACKLY_CONFIG_DIR;
     else process.env.TRACKLY_CONFIG_DIR = previous.configDir;
+  }
+});
+
+test('cached opt-out suppresses anonymous lifecycle before authentication', async () => {
+  const previous = {
+    apiKey: process.env.TRACKLY_API_KEY,
+    configDir: process.env.TRACKLY_CONFIG_DIR,
+  };
+  const requests = [];
+  const relay = createBackendRelay({
+    fetch: async (url) => {
+      requests.push(String(url));
+      return { ok: true };
+    },
+    loadConfig: () => ({ mcpAnalyticsOptOut: true }),
+    saveConfig() {},
+  });
+
+  try {
+    delete process.env.TRACKLY_API_KEY;
+    process.env.TRACKLY_CONFIG_DIR = `/tmp/trackly-mcp-analytics-cached-opt-out-${process.pid}`;
+    relay.capture({ event: '$mcp_initialize', properties: {} });
+    await relay.flush();
+    assert.deepEqual(requests, []);
+  } finally {
+    if (previous.apiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previous.apiKey;
+    if (previous.configDir === undefined) delete process.env.TRACKLY_CONFIG_DIR;
+    else process.env.TRACKLY_CONFIG_DIR = previous.configDir;
+  }
+});
+
+test('authenticated preference lookup fails closed and caches only the opt-out boolean', async () => {
+  const previousApiKey = process.env.TRACKLY_API_KEY;
+  const requests = [];
+  const savedConfigs = [];
+  const relay = createBackendRelay({
+    fetch: async (url) => {
+      requests.push(String(url));
+      return {
+        ok: true,
+        async json() { return { shareUsageAnalytics: false }; },
+      };
+    },
+    loadConfig: () => ({}),
+    saveConfig: (config) => savedConfigs.push(config),
+  });
+
+  try {
+    process.env.TRACKLY_API_KEY = 'trk_test_opt_out';
+    relay.capture({
+      event: '$mcp_tool_call',
+      properties: { $mcp_tool_name: 'trackly_search_jobs' },
+    });
+    await relay.flush();
+
+    assert.deepEqual(requests, ['https://closeai.mba/api/jobscout/analytics-preference']);
+    assert.deepEqual(savedConfigs, [{ mcpAnalyticsOptOut: true }]);
+    assert.doesNotMatch(JSON.stringify(savedConfigs), /userId|distinctId|trk_test_opt_out/);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previousApiKey;
   }
 });
 
@@ -222,13 +296,14 @@ test('rich public-search telemetry preserves useful content and removes forbidde
     },
   });
 
-  assert.equal(result.properties.$mcp_intent, 'Find product jobs at fintech companies in San Francisco.');
-  assert.equal(
+  assert.equal(result.properties.$mcp_intent, 'job_discovery');
+  assert.deepEqual(
     result.properties.$mcp_parameters.request.params.arguments.keywords,
-    'fintech product manager',
+    { length: 'fintech product manager'.length },
   );
   assert.equal(result.properties.$mcp_parameters.request.params.arguments.apiKey, '[redacted]');
   assert.equal(result.properties.$mcp_parameters.request.params.arguments.profileAnswers, '[redacted]');
+  assert.doesNotMatch(JSON.stringify(result), /Find product jobs|fintech product manager/);
 
   const response = JSON.parse(result.properties.$mcp_response.content[0].text);
   assert.equal(response.jobs[0].title, 'Product Manager');
@@ -297,7 +372,7 @@ test('missing-capability intent uses the SDK resource-name shape', () => {
     },
   });
 
-  assert.equal(result.properties.$mcp_intent, 'Compare two saved jobs side by side.');
+  assert.equal(result.properties.$mcp_intent, 'compare_options');
 });
 
 test('client identity is removed because authenticated identity is backend-owned', () => {
@@ -345,9 +420,13 @@ test('error telemetry removes secrets, user paths, and sensitive payload values'
   assert.doesNotMatch(serialized, /private-user/);
   assert.doesNotMatch(serialized, /private-linux/);
   assert.doesNotMatch(serialized, /do not capture/);
-  assert.match(serialized, /\[redacted\]/);
-  assert.match(serialized, /<local-path>/);
+  assert.doesNotMatch(serialized, /\[redacted\]|<local-path>/);
   assert.match(serialized, /wrapTool/);
+  assert.deepEqual(result.properties.$exception_list, [{
+    type: 'Error',
+    category: 'unknown',
+    stacktrace: { frames: [{ function_name: 'wrapTool' }] },
+  }]);
 });
 
 test('enabled instrumentation advertises optional context and strips it before handlers', async (t) => {
@@ -398,6 +477,12 @@ test('enabled instrumentation advertises optional context and strips it before h
   }));
   assert.deepEqual(handlerArgs, { keywords: 'fintech' });
 
+  await assert.doesNotReject(client.callTool({
+    name: 'trackly_search_jobs',
+    arguments: { keywords: 'fintech', context: '' },
+  }));
+  assert.deepEqual(handlerArgs, { keywords: 'fintech' });
+
   await client.callTool({
     name: 'trackly_search_jobs',
     arguments: {
@@ -410,10 +495,11 @@ test('enabled instrumentation advertises optional context and strips it before h
   assert.deepEqual(handlerArgs, { keywords: 'fintech' });
   const toolCall = captures.find((capture) => (
     capture.event === '$mcp_tool_call'
-      && capture.properties.$mcp_intent === 'Find fintech product roles for the current job-search session.'
+      && capture.properties.$mcp_intent === 'job_discovery'
   ));
   assert.ok(toolCall);
-  assert.equal(toolCall.properties.$mcp_intent, 'Find fintech product roles for the current job-search session.');
+  assert.equal(toolCall.properties.$mcp_intent, 'job_discovery');
+  assert.doesNotMatch(JSON.stringify(toolCall), /current job-search session|"fintech"/);
   assert.equal(toolCall.properties.$mcp_parameters.request.params.arguments.context, undefined);
   assert.equal(toolCall.properties.channel, 'mcp');
   assert.equal(toolCall.properties.contract_version, 3);
@@ -427,21 +513,48 @@ test('enabled instrumentation advertises optional context and strips it before h
 });
 
 test('instrumentation failure and shutdown failure are fail-open', async () => {
-  const server = {};
+  const server = { _registeredTools: {} };
+  const warnings = [];
   const configured = configureMcpAnalytics(server, {
     env: ENABLED_ENV,
     createRelay: () => ({ _shutdown() { throw new Error('shutdown failed'); } }),
     loadSdk: () => ({ instrument() { throw new Error('instrument failed'); } }),
+    onWarning: (warning) => warnings.push(warning),
   });
 
   assert.equal(configured.enabled, false);
   assert.equal(configured.reason, 'instrumentation_failed');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /tools will continue/);
   await assert.doesNotReject(shutdownMcpAnalytics(server));
+});
+
+test('SDK private-tool registry drift disables analytics visibly without breaking tools', () => {
+  let instrumentCalls = 0;
+  const warnings = [];
+  const configured = configureMcpAnalytics({}, {
+    env: ENABLED_ENV,
+    createRelay: () => ({ capture() {}, async _shutdown() {} }),
+    loadSdk: () => ({
+      instrument() {
+        instrumentCalls += 1;
+        return {};
+      },
+    }),
+    onWarning: (warning) => warnings.push(warning),
+  });
+
+  assert.equal(configured.enabled, false);
+  assert.equal(configured.reason, 'instrumentation_failed');
+  assert.equal(instrumentCalls, 0);
+  assert.deepEqual(warnings, [
+    'Usage analytics are unavailable; MCP tools will continue without telemetry.',
+  ]);
 });
 
 test('a malformed cyclic analytics event is dropped instead of escaping beforeSend', () => {
   let beforeSend;
-  const server = {};
+  const server = { _registeredTools: {} };
   const configured = configureMcpAnalytics(server, {
     env: ENABLED_ENV,
     createRelay: () => ({ capture() {}, async _shutdown() {} }),

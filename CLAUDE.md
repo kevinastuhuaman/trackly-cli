@@ -4,7 +4,7 @@ CLI + MCP server for the Trackly job tracker. Lets users search 170K+ jobs acros
 
 ## Tech Stack
 
-- **Runtime:** Node.js 20+ (pure JS, no build step, no TypeScript)
+- **Runtime:** Node.js `^20.20.0 || >=22.22.0` (pure JS, no build step, no TypeScript)
 - **MCP SDK:** `@modelcontextprotocol/sdk` (stdio transport)
 - **Validation:** `zod` (MCP tool input schemas)
 - **Auth:** Google OAuth via local callback server, tokens stored in `~/.trackly/config.json`
@@ -26,7 +26,7 @@ bin/trackly          # CLI entrypoint (shebang script). All CLI commands + arg p
 lib/agent.js         # Agent setup, doctor, private resume cache, and public skill installation
 lib/client.js        # HTTP client: config loading, token refresh, apiRequest()
 lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies(), outputStats(), outputContacts(), outputReferralCampaign(), outputNetworkBrief()
-mcp/server.js        # MCP server: 48 tools, launched via `trackly mcp`
+mcp/server.js        # MCP server: 49 tools, launched via `trackly mcp`
 contracts/           # Versioned hosted/local Trackly Apply MCP schema contract
 skills/trackly-apply/  # Sanitized public browser-mechanics skill bundled with the CLI
 scripts/             # Maintainer checks; the packaged audit verifier is the named exception
@@ -48,7 +48,7 @@ There is a small Node test suite (`npm test`), but no linter and no build step. 
 
 1. User runs `trackly mcp` (or AI agent spawns it via stdio)
 2. `bin/trackly` delegates to `mcp/server.js`
-3. `mcp/server.js` creates an `McpServer` with 48 tools, connects via `StdioServerTransport`
+3. `mcp/server.js` creates an `McpServer` with 49 tools, connects via `StdioServerTransport`
 4. Each tool calls `apiRequest()` from `lib/client.js` with a `trackly-mcp/<version>` User-Agent derived from `package.json`
 5. CLI commands use `trackly-cli/<version>` User-Agent derived from `package.json` (separate channel attribution)
 
@@ -57,7 +57,10 @@ MCP setup for Claude Code:
 claude mcp add --scope user trackly -- trackly mcp
 ```
 
-The 48 MCP tools include the complete search, network, profile, and Trackly Apply set documented in `docs/trackly-tools.md`. Keep this count synchronized with `mcp/server.js`, `README.md`, and the docs-drift tests.
+The 49 MCP tools include 48 Trackly search, network, profile, and Trackly Apply
+tools plus the analytics-owned `get_more_tools` missing-capability tool. Keep
+this count synchronized with `mcp/server.js`, `README.md`, and the docs-drift
+tests.
 
 Job function values — **14 canonical values** that match backend `ALL_JOB_FUNCTIONS` at `granola-followup-app/src/routes/jobscout-filter-utils.ts:17-21`, the backend `job_function` DB column, and the local mirror `JOB_FUNCTIONS` in `mcp/server.js`: `product`, `engineering`, `design`, `data`, `marketing`, `sales`, `partnerships`, `finance`, `strategy`, `operations`, `people`, `legal`, `support`, `other`. `partnerships` is documented in CHANGELOG `0.2.1`; any doc still listing 13 values is stale. The MCP test at `test/mcp-schema.test.js` locks this local/backend mapping.
 
@@ -132,9 +135,11 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 5. **`--json` flag or non-TTY stdout** triggers JSON output mode on all commands.
 6. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).
 7. **Keep dependencies minimal.** Direct runtime dependencies are
-   `@modelcontextprotocol/sdk`, `zod`, Hono, and exact `fast-uri` / `ip-address`
-   security pins that guarantee the SDK's audited patched resolution. The pins
-   must be reviewed and bumped manually when upstream constraints change. The
+   `@modelcontextprotocol/sdk`, `@posthog/mcp`, `posthog-node`, `zod`, Hono, and
+   exact `fast-uri` / `ip-address` security pins that guarantee the SDK's
+   audited patched resolution. The pins must be reviewed and bumped manually
+   when upstream constraints change. PostHog is MCP-only and relays through
+   Trackly's backend; no project key or numeric user ID is stored locally. The
    local MCP transport remains stdio-only; do not add or initialize an HTTP
    server. The CLI HTTP client uses raw `node:https`/`node:http`.
 8. **Token refresh is automatic.** On 401, `apiRequest()` tries one refresh via `/api/auth/refresh` before failing. The `_isRetry` flag prevents infinite loops.

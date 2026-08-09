@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The instrumented local MCP surface now exposes 49 tools, including
   `get_more_tools` for missing-capability feedback.
+- The supported Node.js range is now `^20.20.0 || >=22.22.0`, matching the
+  pinned PostHog MCP instrumentation packages.
 
 ### Fixed
 

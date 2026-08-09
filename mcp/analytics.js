@@ -7,13 +7,17 @@ const {
   ensureSecureUrl,
   getRequestHeaders,
   hasAuth,
+  loadConfig,
   normalizeEndpoint,
+  saveConfig,
 } = require('../lib/client');
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const RELAY_TIMEOUT_MS = 2_000;
 const AUTHENTICATED_RELAY_PATH = '/api/jobscout/mcp-analytics';
 const ANONYMOUS_RELAY_PATH = '/api/jobscout/mcp-analytics/anonymous';
+const ANALYTICS_PREFERENCE_PATH = '/api/jobscout/analytics-preference';
+const ANALYTICS_OPT_OUT_CONFIG_KEY = 'mcpAnalyticsOptOut';
 const MCP_ANALYTICS_USER_AGENT = `trackly-mcp-analytics/${PACKAGE_VERSION}`;
 const REDACTED = '[redacted]';
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on', 'enabled']);
@@ -122,6 +126,97 @@ function scrubString(value) {
     .replace(/[A-Za-z]:\\Users\\[^\\\s"'`]+(?:\\[^\s"'`]*)?/g, '<local-path>');
 }
 
+function contentLength(value) {
+  return { length: Math.min(String(value).length, 100_000) };
+}
+
+function classifyIntent(toolName, value) {
+  const text = typeof value === 'string' ? value.toLowerCase() : '';
+  if (/\b(?:compare|versus|difference|choose|decision)\b/.test(text)) return 'compare_options';
+  if (/\b(?:debug|error|failed|failure|broken|troubleshoot)\b/.test(text)) return 'troubleshoot';
+  if (/\b(?:apply|application|submit)\b/.test(text)) return 'application_workflow';
+  if (/\b(?:explain|why|details?|describe)\b/.test(text)) return 'inspect_details';
+  if (/\b(?:recommend|best|rank|prioritize)\b/.test(text)) return 'decision_support';
+  const defaults = {
+    trackly_search_jobs: 'job_discovery',
+    trackly_get_job: 'inspect_job',
+    trackly_search_companies: 'company_discovery',
+    trackly_list_companies: 'browse_companies',
+    trackly_ask: 'natural_language_job_search',
+    get_more_tools: 'missing_capability',
+  };
+  return defaults[toolName] || 'other';
+}
+
+function classifyError(value) {
+  const text = typeof value === 'string' ? value.toLowerCase() : '';
+  if (/\b(?:401|unauthenticated|authentication|invalid token|expired token)\b/.test(text)) {
+    return 'authentication';
+  }
+  if (/\b(?:403|forbidden|permission|not authorized)\b/.test(text)) return 'authorization';
+  if (/\b(?:429|rate limit|too many requests)\b/.test(text)) return 'rate_limit';
+  if (/\b(?:timeout|timed out|deadline|abort)\b/.test(text)) return 'timeout';
+  if (/\b(?:404|not found|missing)\b/.test(text)) return 'not_found';
+  if (/\b(?:400|invalid|validation|schema|bad request)\b/.test(text)) return 'validation';
+  if (/\b(?:409|conflict|stale)\b/.test(text)) return 'conflict';
+  if (/\b(?:fetch|network|socket|connection|dns|econn)\b/.test(text)) return 'network';
+  if (/\b(?:500|502|503|504|internal|upstream|unavailable)\b/.test(text)) return 'server';
+  return 'unknown';
+}
+
+function safeFrameName(value, maxLength = 120) {
+  if (typeof value !== 'string' || value === '<local-path>') return undefined;
+  const basename = value.replace(/\\/g, '/').split('/').pop() || '';
+  const withoutExtension = basename.replace(/\.(?:c?js|mjs|ts|tsx)$/i, '');
+  return /^[A-Za-z0-9_.$@<>+-]+$/.test(withoutExtension)
+    ? withoutExtension.slice(0, maxLength)
+    : undefined;
+}
+
+function safeFrameNumber(value) {
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isSafeInteger(number) && number >= 0 && number <= 10_000_000
+    ? number
+    : undefined;
+}
+
+function projectExceptionList(value, errorValue) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 10).map((candidate) => {
+    const exception = candidate && typeof candidate === 'object' ? candidate : {};
+    const stacktrace = exception.stacktrace && typeof exception.stacktrace === 'object'
+      ? exception.stacktrace
+      : {};
+    const frames = Array.isArray(stacktrace.frames) ? stacktrace.frames : [];
+    const projectedFrames = frames.slice(0, 50).map((candidateFrame) => {
+      const frame = candidateFrame && typeof candidateFrame === 'object' ? candidateFrame : {};
+      const projected = {};
+      const moduleName = safeFrameName(
+        frame.module_name ?? frame.module ?? frame.filename ?? frame.abs_path,
+      );
+      const functionName = safeFrameName(
+        frame.function_name ?? frame.function ?? frame.functionName,
+      );
+      const lineNumber = safeFrameNumber(
+        frame.line_number ?? frame.lineno ?? frame.lineNumber,
+      );
+      const columnNumber = safeFrameNumber(
+        frame.column_number ?? frame.colno ?? frame.columnNumber,
+      );
+      if (moduleName) projected.module_name = moduleName;
+      if (functionName) projected.function_name = functionName;
+      if (lineNumber !== undefined) projected.line_number = lineNumber;
+      if (columnNumber !== undefined) projected.column_number = columnNumber;
+      return projected;
+    }).filter((frame) => Object.keys(frame).length > 0);
+    return {
+      type: safeFrameName(exception.type, 80) || 'Error',
+      category: classifyError(exception.value ?? errorValue),
+      stacktrace: { frames: projectedFrames },
+    };
+  });
+}
+
 function redactValue(value) {
   if (typeof value === 'string') return scrubString(value);
   if (Array.isArray(value)) return value.map(redactValue);
@@ -161,8 +256,18 @@ function redactMcpResponse(response) {
 function removeContextParameter(parameters) {
   if (!parameters || typeof parameters !== 'object') return parameters;
   const redacted = redactValue(parameters);
-  const args = redacted.request?.params?.arguments;
-  if (args && typeof args === 'object') delete args.context;
+  const candidates = [
+    redacted.request?.params?.arguments,
+    redacted.params?.arguments,
+    redacted.arguments,
+  ];
+  for (const args of candidates) {
+    if (!args || typeof args !== 'object') continue;
+    delete args.context;
+    for (const key of ['keywords', 'query']) {
+      if (typeof args[key] === 'string') args[key] = contentLength(args[key]);
+    }
+  }
   return redacted;
 }
 
@@ -202,15 +307,22 @@ function sanitizeMcpAnalyticsEvent(event) {
       properties.$mcp_response = redactMcpResponse(properties.$mcp_response);
     }
     if (typeof properties.$mcp_intent === 'string') {
-      properties.$mcp_intent = scrubString(properties.$mcp_intent);
+      properties.$mcp_intent = classifyIntent(toolName, properties.$mcp_intent);
+    }
+    if (properties.$mcp_intent_source !== 'context_parameter'
+        && properties.$mcp_intent_source !== 'inferred') {
+      delete properties.$mcp_intent_source;
     }
   }
 
   if (typeof properties.$mcp_error_message === 'string') {
-    properties.$mcp_error_message = scrubString(properties.$mcp_error_message);
+    properties.$mcp_error_message = classifyError(properties.$mcp_error_message);
   }
   if (properties.$exception_list !== undefined) {
-    properties.$exception_list = redactValue(properties.$exception_list);
+    properties.$exception_list = projectExceptionList(
+      properties.$exception_list,
+      properties.$mcp_error_message,
+    );
   }
   return sanitized;
 }
@@ -225,7 +337,9 @@ function safelySanitizeMcpAnalyticsEvent(event) {
 
 function addOptionalContextToTools(server) {
   const tools = server?._registeredTools;
-  if (!tools || typeof tools !== 'object') return;
+  if (!tools || typeof tools !== 'object') {
+    throw new Error('unsupported_mcp_sdk_tool_registry');
+  }
 
   for (const tool of Object.values(tools)) {
     const shape = tool?.inputSchema?.shape;
@@ -235,7 +349,7 @@ function addOptionalContextToTools(server) {
     tool.update({
       paramsSchema: {
         ...shape,
-        context: z.string().min(1).max(1_000).optional().describe(CONTEXT_DESCRIPTION),
+        context: z.string().max(1_000).optional().describe(CONTEXT_DESCRIPTION),
       },
       callback: (args, extra) => {
         if (!args || typeof args !== 'object' || !Object.hasOwn(args, 'context')) {
@@ -265,16 +379,75 @@ function runtimeEventProperties(env = process.env) {
 
 function createBackendRelay(options = {}) {
   const fetchImpl = options.fetch || globalThis.fetch;
+  const loadConfigImpl = options.loadConfig || loadConfig;
+  const saveConfigImpl = options.saveConfig || saveConfig;
   const pending = new Set();
+  let cachedOptOut = readCachedAnalyticsOptOut();
+  let authenticatedPreferenceResolved = false;
+  let preferenceLookup = null;
+
+  function readCachedAnalyticsOptOut() {
+    try {
+      return loadConfigImpl()[ANALYTICS_OPT_OUT_CONFIG_KEY] === true;
+    } catch {
+      return true;
+    }
+  }
+
+  function persistCachedAnalyticsOptOut(optedOut) {
+    cachedOptOut = optedOut;
+    try {
+      const config = loadConfigImpl();
+      if (optedOut) config[ANALYTICS_OPT_OUT_CONFIG_KEY] = true;
+      else if (Object.hasOwn(config, ANALYTICS_OPT_OUT_CONFIG_KEY)) {
+        delete config[ANALYTICS_OPT_OUT_CONFIG_KEY];
+      } else {
+        return;
+      }
+      saveConfigImpl(config);
+    } catch {
+      // The in-memory privacy gate remains authoritative for this process.
+    }
+  }
+
+  async function resolveAuthenticatedPreference() {
+    if (authenticatedPreferenceResolved) return !cachedOptOut;
+    if (preferenceLookup) return preferenceLookup;
+
+    preferenceLookup = (async () => {
+      const url = normalizeEndpoint(ANALYTICS_PREFERENCE_PATH);
+      ensureSecureUrl(url, 'MCP analytics preference');
+      const response = await fetchImpl(url, {
+        method: 'GET',
+        headers: getRequestHeaders(false, MCP_ANALYTICS_USER_AGENT),
+        signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
+      });
+      if (!response?.ok || typeof response.json !== 'function') {
+        throw new Error('analytics_preference_unavailable');
+      }
+      const preference = await response.json();
+      if (!preference || typeof preference.shareUsageAnalytics !== 'boolean') {
+        throw new Error('analytics_preference_invalid');
+      }
+      persistCachedAnalyticsOptOut(!preference.shareUsageAnalytics);
+      authenticatedPreferenceResolved = true;
+      return preference.shareUsageAnalytics;
+    })().catch(() => false).finally(() => {
+      preferenceLookup = null;
+    });
+    return preferenceLookup;
+  }
 
   function capture(event) {
     try {
       if (!event || typeof event !== 'object' || event.event === '$identify') return;
       const authenticated = hasAuth();
       if (!authenticated && !ANONYMOUS_RELAY_EVENTS.has(event.event)) return;
+      if (!authenticated && cachedOptOut) return;
 
       const endpoint = authenticated ? AUTHENTICATED_RELAY_PATH : ANONYMOUS_RELAY_PATH;
       const delivery = (async () => {
+        if (authenticated && !(await resolveAuthenticatedPreference())) return;
         const url = normalizeEndpoint(endpoint);
         ensureSecureUrl(url, 'MCP analytics');
         const response = await fetchImpl(url, {
@@ -349,6 +522,13 @@ function configureMcpAnalytics(server, options = {}) {
       } catch {
         // A synchronous SDK shutdown failure is still an analytics-only failure.
       }
+    }
+    try {
+      const warn = options.onWarning
+        || ((message) => process.stderr.write(`[trackly-mcp] ${message}\n`));
+      warn('Usage analytics are unavailable; MCP tools will continue without telemetry.');
+    } catch {
+      // Warning delivery is analytics-only and must also fail open.
     }
     return { enabled: false, reason: 'instrumentation_failed' };
   }

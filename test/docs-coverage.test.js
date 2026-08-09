@@ -120,7 +120,7 @@ test('README "N tools" count claims all match the real tool count', () => {
 });
 
 test('contributor guide MCP tool counts match the real tool count', () => {
-  const count = extractToolNames(serverSrc).length;
+  const count = extractToolNames(serverSrc).length + RUNTIME_INJECTED_TOOL_NAMES.length;
   const claims = toolCountClaims(contributorSrc);
   assert.ok(claims.length > 0, 'expected at least one tool-count claim in CLAUDE.md');
   for (const claim of claims) {
