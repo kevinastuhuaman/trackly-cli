@@ -536,11 +536,43 @@ async function startMcpServer(options = {}) {
   return server;
 }
 
+function installMcpSignalHandlers(server, options = {}) {
+  const signalTarget = options.signalTarget || process;
+  const exit = options.exit || ((code) => process.exit(code));
+  const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
+  let terminating = false;
+  const handlers = new Map();
+  const cleanup = () => {
+    for (const [signal, handler] of handlers) {
+      signalTarget.removeListener(signal, handler);
+    }
+    handlers.clear();
+  };
+  for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    const handler = () => {
+      if (terminating) return;
+      terminating = true;
+      void Promise.resolve()
+        .then(() => shutdownAnalytics(server))
+        .catch(() => {})
+        .finally(() => {
+          cleanup();
+          exit(exitCode);
+        });
+    };
+    handlers.set(signal, handler);
+    signalTarget.once(signal, handler);
+  }
+  return cleanup;
+}
+
 if (require.main === module) {
-  startMcpServer().catch((error) => {
-    console.error('MCP server error:', error);
-    process.exit(1);
-  });
+  startMcpServer()
+    .then((server) => installMcpSignalHandlers(server))
+    .catch((error) => {
+      console.error('MCP server error:', error);
+      process.exit(1);
+    });
 }
 
 module.exports = {
@@ -548,6 +580,7 @@ module.exports = {
   createAuthErrorResult,
   createErrorResult,
   createServer,
+  installMcpSignalHandlers,
   startMcpServer,
   throwMcpResourceError,
 };

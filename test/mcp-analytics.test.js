@@ -2,11 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
 const { z } = require('zod');
-const { createServer, startMcpServer } = require('../mcp/server');
+const { createServer, installMcpSignalHandlers, startMcpServer } = require('../mcp/server');
 
 const {
   createBackendRelay,
@@ -160,6 +161,37 @@ test('cached opt-out suppresses anonymous lifecycle before authentication', asyn
   try {
     delete process.env.TRACKLY_API_KEY;
     process.env.TRACKLY_CONFIG_DIR = `/tmp/trackly-mcp-analytics-cached-opt-out-${process.pid}`;
+    relay.capture({ event: '$mcp_initialize', properties: {} });
+    await relay.flush();
+    assert.deepEqual(requests, []);
+  } finally {
+    if (previous.apiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previous.apiKey;
+    if (previous.configDir === undefined) delete process.env.TRACKLY_CONFIG_DIR;
+    else process.env.TRACKLY_CONFIG_DIR = previous.configDir;
+  }
+});
+
+test('anonymous delivery refreshes an opt-out persisted by another MCP process', async () => {
+  const previous = {
+    apiKey: process.env.TRACKLY_API_KEY,
+    configDir: process.env.TRACKLY_CONFIG_DIR,
+  };
+  const requests = [];
+  let config = {};
+  const relay = createBackendRelay({
+    fetch: async (url) => {
+      requests.push(String(url));
+      return { ok: true };
+    },
+    loadConfig: () => ({ ...config }),
+    saveConfig() {},
+  });
+
+  try {
+    delete process.env.TRACKLY_API_KEY;
+    process.env.TRACKLY_CONFIG_DIR = `/tmp/trackly-mcp-analytics-cross-process-${process.pid}`;
+    config = { mcpAnalyticsOptOut: true };
     relay.capture({ event: '$mcp_initialize', properties: {} });
     await relay.flush();
     assert.deepEqual(requests, []);
@@ -573,6 +605,20 @@ test('error telemetry removes secrets, user paths, and sensitive payload values'
   }]);
 });
 
+test('exception fallback classification uses the original error message', () => {
+  const result = sanitizeMcpAnalyticsEvent({
+    event: '$exception',
+    properties: {
+      $mcp_tool_name: 'trackly_search_jobs',
+      $mcp_error_message: 'Upstream returned 429 Too Many Requests',
+      $exception_list: [{ type: 'Error', stacktrace: { frames: [] } }],
+    },
+  });
+
+  assert.equal(result.properties.$mcp_error_message, 'rate_limit');
+  assert.equal(result.properties.$exception_list[0].category, 'rate_limit');
+});
+
 test('string redaction removes configured and arbitrary working-directory prefixes', () => {
   const previousConfigDir = process.env.TRACKLY_CONFIG_DIR;
   process.env.TRACKLY_CONFIG_DIR = '/srv/trackly-private';
@@ -795,4 +841,28 @@ test('transport close starts bounded analytics shutdown', async () => {
 
   assert.equal(shutdownCalls, 1);
   await server.close().catch(() => {});
+});
+
+test('SIGTERM flushes analytics before exiting the MCP process', async () => {
+  const signalTarget = new EventEmitter();
+  let finishShutdown;
+  const shutdownFinished = new Promise((resolve) => { finishShutdown = resolve; });
+  const exits = [];
+  const shutdownAnalytics = test.mock.fn(async () => shutdownFinished);
+  const cleanup = installMcpSignalHandlers({}, {
+    signalTarget,
+    shutdownAnalytics,
+    exit: (code) => exits.push(code),
+  });
+
+  signalTarget.emit('SIGTERM');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shutdownAnalytics.mock.callCount(), 1);
+  assert.deepEqual(exits, []);
+
+  finishShutdown();
+  await shutdownFinished;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(exits, [143]);
+  cleanup();
 });

@@ -325,13 +325,14 @@ function sanitizeMcpAnalyticsEvent(event) {
     }
   }
 
-  if (typeof properties.$mcp_error_message === 'string') {
-    properties.$mcp_error_message = classifyError(properties.$mcp_error_message);
+  const sourceErrorMessage = properties.$mcp_error_message;
+  if (typeof sourceErrorMessage === 'string') {
+    properties.$mcp_error_message = classifyError(sourceErrorMessage);
   }
   if (properties.$exception_list !== undefined) {
     properties.$exception_list = projectExceptionList(
       properties.$exception_list,
-      properties.$mcp_error_message,
+      sourceErrorMessage,
     );
   }
   return sanitized;
@@ -477,6 +478,10 @@ function createBackendRelay(options = {}) {
       const authContext = authenticated ? authenticatedRequestContext() : null;
       if (authenticated && !authContext) return;
       if (!authenticated && !ANONYMOUS_RELAY_EVENTS.has(event.event)) return;
+      // Another MCP process can persist an opt-out before this process loses
+      // authentication. Refresh the anonymous gate from disk before every
+      // unauthenticated delivery so stale in-memory consent never wins.
+      if (!authenticated) cachedOptOut = readCachedAnalyticsOptOut();
       if (!authenticated && cachedOptOut) return;
 
       const endpoint = authenticated ? AUTHENTICATED_RELAY_PATH : ANONYMOUS_RELAY_PATH;
