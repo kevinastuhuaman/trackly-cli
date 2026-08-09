@@ -12,6 +12,7 @@ const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 const {
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertCommonJsDestructuredRequire,
   assertActiveFunctionDirectStatementAst,
   assertActiveFunctionDefinitionAst,
   assertBabelPropertyExpression,
@@ -29,6 +30,7 @@ const {
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
   directToolRegistrationsInNamedFactory,
+  directToolRegistrationsInNamedParameterFunction,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
@@ -56,6 +58,7 @@ function filesBelow(directory) {
   const visit = (current) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const absolute = path.join(current, entry.name);
+      assert.equal(entry.isSymbolicLink(), false, `skill trees must not contain symbolic links: ${absolute}`);
       if (entry.isDirectory()) visit(absolute);
       if (entry.isFile()) files.push(absolute);
     }
@@ -87,6 +90,17 @@ function referencedTools(directory) {
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
+
+test('skill tree hashing and tool discovery fail closed on symbolic links', (t) => {
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-symlink-tree-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'target.md');
+  const link = path.join(directory, 'linked.md');
+  fs.writeFileSync(target, 'safe');
+  fs.symlinkSync(target, link);
+  assert.throws(() => treeSha256(directory), /skill trees must not contain symbolic links/);
+  assert.throws(() => referencedTools(directory), /skill trees must not contain symbolic links/);
+});
 
 test('executable digest hashing is exact-byte and fail-closed on formatting changes', () => {
   const compact = 'const value={label:"two words",template:`keep this space`,pattern:/a b/};';
@@ -240,8 +254,78 @@ test('registration extraction ignores commented tools and binds the active publi
   assert.equal(registeredInputSchemaName(registration, 'Apply registration fixture'), 'activeSchema');
 });
 
+test('local Apply registrations are bound to the helper reached by createServer', () => {
+  const applySource = `
+    function registerApplyTools(server, dependencies) {
+      server.registerTool('trackly_one', { inputSchema: oneSchema }, oneHandler);
+      server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler);
+    }
+  `;
+  assert.deepEqual(
+    directToolRegistrationsInNamedParameterFunction(
+      applySource,
+      'registerApplyTools',
+      'server',
+      'registerTool',
+      'local registration fixture',
+    ).map(({ name }) => name),
+    ['trackly_one', 'trackly_two'],
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedParameterFunction(
+      applySource.replace(
+        "server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler);",
+        "function disabled() { server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler); }",
+      ),
+      'registerApplyTools',
+      'server',
+      'registerTool',
+      'nested local registration fixture',
+    ),
+    /must register every server\.registerTool tool directly on its reachable body/,
+  );
+  const serverSource = `
+    const { registerApplyTools } = require('./apply-tools');
+    function createServer() {
+      const server = makeServer();
+      registerApplyTools(server, {
+        wrapTool,
+        mcpUserAgent: MCP_USER_AGENT,
+        throwMcpResourceError,
+      });
+      return server;
+    }
+  `;
+  assert.doesNotThrow(() => assertCommonJsDestructuredRequire(
+    serverSource,
+    'registerApplyTools',
+    './apply-tools',
+    'local server fixture',
+  ));
+  assert.doesNotThrow(() => assertActiveFunctionDirectStatementAst(
+    serverSource,
+    'createServer',
+    `registerApplyTools(server, {
+      wrapTool,
+      mcpUserAgent: MCP_USER_AGENT,
+      throwMcpResourceError,
+    });`,
+    'local server fixture',
+  ));
+  assert.throws(
+    () => assertCommonJsDestructuredRequire(
+      serverSource.replace("require('./apply-tools')", "require('./decoy-tools')"),
+      'registerApplyTools',
+      './apply-tools',
+      'decoy local server fixture',
+    ),
+    /must import registerApplyTools exactly once from \.\/apply-tools/,
+  );
+});
+
 test('plugin registration proof accepts only unconditional calls in the exported server factory', () => {
   const factoryFixture = (body, returnedServer = 'server') => `
+    import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
     export function createTracklyPluginMcpServer(
       authToken: string,
       requestApi: PluginApiRequest = apiRequest,
@@ -279,6 +363,15 @@ test('plugin registration proof accepts only unconditional calls in the exported
       'server factory fixture',
     ).map(({ name }) => name),
     ['trackly_one', 'trackly_two'],
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+    `).replace(
+      "from '@modelcontextprotocol/sdk/server/mcp.js'",
+      "from './decoy-mcp.js'",
+    ), 'createTracklyPluginMcpServer', 'registerPluginTool', 'decoy McpServer import fixture'),
+    /must import McpServer as McpServer exactly once from @modelcontextprotocol\/sdk\/server\/mcp\.js/,
   );
   assert.throws(
     () => directToolRegistrationsInExportedFunction(factoryFixture(`
@@ -370,6 +463,7 @@ test('plugin registration proof accepts only unconditional calls in the exported
 
 test('hosted schema registration proof uses only direct reachable factory initialization', () => {
   const source = `
+    import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
     function neverCalled() {
       server.registerTool('trackly_decoy', { inputSchema: decoySchema }, decoyHandler);
     }
@@ -387,6 +481,18 @@ test('hosted schema registration proof uses only direct reachable factory initia
       'hosted factory registration fixture',
     ).map(({ name }) => name),
     ['trackly_active'],
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "from '@modelcontextprotocol/sdk/server/mcp.js'",
+        "from './decoy-mcp.js'",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'decoy McpServer provenance fixture',
+    ),
+    /must import McpServer as McpServer exactly once from @modelcontextprotocol\/sdk\/server\/mcp\.js/,
   );
   assert.throws(
     () => directToolRegistrationsInNamedFactory(
@@ -506,6 +612,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
     routeWrapperStart = '',
     routeWrapperEnd = '',
   ) => `
+    import { Router } from 'express';
     import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
     import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
     import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
@@ -515,6 +622,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
     import { requireTracklyAccess } from '../services/trackly-access.js';
     import { createTracklyPluginMcpServer } from './plugin-server.js';
     import { generateHostedOAuthInternalToken } from './server.js';
+    const router = Router();
     const RESOURCE_METADATA_URL = \`\${process.env.MCP_ISSUER_URL || 'https://mcp.usetrackly.app'}/.well-known/oauth-protected-resource/api/plugin/trackly/mcp\`;
     const allowedOrigins = new Set([
       'https://closeai.mba',
@@ -598,6 +706,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
       },
     );
     ${routeWrapperEnd}
+    export default router;
   `;
   const routerSource = routerFixture(`
     const server = createTracklyPluginMcpServer(authToken);
@@ -614,6 +723,30 @@ test('plugin registration proof binds the exported factory to the live POST rout
     'createTracklyPluginMcpServer',
     'router fixture',
   ));
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace("import { Router } from 'express';", "import { Router } from './decoy-express.js';"),
+      'createTracklyPluginMcpServer',
+      'decoy Router import fixture',
+    ),
+    /must import Router as Router exactly once from express/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace('const router = Router();', 'const router = decoyRouter;'),
+      'createTracklyPluginMcpServer',
+      'decoy Router initializer fixture',
+    ),
+    /router in decoy Router initializer fixture must preserve its locked executable definition/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace('export default router;', 'export default decoyRouter;'),
+      'createTracklyPluginMcpServer',
+      'decoy default export fixture',
+    ),
+    /must default-export the exact canonical Express router receiving POST/,
+  );
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(
       routerSource.replace(

@@ -4,6 +4,7 @@
 const assert = require('node:assert/strict');
 const acorn = require('acorn');
 const babelParser = require('@babel/parser');
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -99,6 +100,142 @@ function activeToolRegistrations(source, expectedCallee, sourcePath) {
   return registrations;
 }
 
+function directToolRegistrationsInNamedParameterFunction(
+  source,
+  expectedFunction,
+  receiverParameter,
+  method,
+  sourcePath,
+) {
+  const ast = parseFullSource(source, sourcePath);
+  const functions = ast.program.body.filter((statement) => (
+    statement.type === 'FunctionDeclaration' && statement.id?.name === expectedFunction
+  ));
+  assert.equal(functions.length, 1, `${sourcePath} must define exactly one top-level ${expectedFunction}`);
+  const factory = functions[0];
+  assert.equal(
+    factory.params[0]?.type,
+    'Identifier',
+    `${expectedFunction} in ${sourcePath} must receive its server directly`,
+  );
+  assert.equal(factory.params[0].name, receiverParameter);
+  const direct = factory.body.body.flatMap((statement) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    const callee = call?.type === 'CallExpression' ? call.callee : null;
+    const receiver = callee?.type === 'MemberExpression' ? unwrapTransparentExpression(callee.object) : null;
+    if (receiver?.type !== 'Identifier' || receiver.name !== receiverParameter) return [];
+    const member = callee.computed
+      ? (callee.property?.type === 'StringLiteral' ? callee.property.value : null)
+      : (callee.property?.type === 'Identifier' ? callee.property.name : null);
+    if (member !== method) return [];
+    assert.equal(call.arguments[0]?.type, 'StringLiteral', `${sourcePath} registrations must use static names`);
+    return [{ name: call.arguments[0].value, call }];
+  });
+  const all = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'CallExpression' && node.callee?.type === 'MemberExpression') {
+      const receiver = unwrapTransparentExpression(node.callee.object);
+      const member = node.callee.computed
+        ? (node.callee.property?.type === 'StringLiteral' ? node.callee.property.value : null)
+        : (node.callee.property?.type === 'Identifier' ? node.callee.property.name : null);
+      if (receiver?.type === 'Identifier' && receiver.name === receiverParameter && member === method) all.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(factory.body);
+  assert.equal(
+    all.length,
+    direct.length,
+    `${expectedFunction} in ${sourcePath} must register every ${receiverParameter}.${method} tool directly on its reachable body`,
+  );
+  return direct;
+}
+
+function assertCommonJsDestructuredRequire(source, importedName, moduleName, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const matches = ast.program.body.filter((statement) => {
+    if (statement.type !== 'VariableDeclaration' || statement.kind !== 'const') return false;
+    return statement.declarations.some((declaration) => (
+      declaration.id?.type === 'ObjectPattern'
+      && declaration.id.properties.some((property) => (
+        property.type === 'ObjectProperty'
+        && property.key?.type === 'Identifier'
+        && property.key.name === importedName
+        && property.value?.type === 'Identifier'
+        && property.value.name === importedName
+      ))
+      && declaration.init?.type === 'CallExpression'
+      && declaration.init.callee?.type === 'Identifier'
+      && declaration.init.callee.name === 'require'
+      && declaration.init.arguments[0]?.type === 'StringLiteral'
+      && declaration.init.arguments[0].value === moduleName
+    ));
+  });
+  assert.equal(
+    matches.length,
+    1,
+    `${sourcePath} must import ${importedName} exactly once from ${moduleName}`,
+  );
+}
+
+function gitOutput(repository, args, encoding = 'utf8') {
+  try {
+    return childProcess.execFileSync('git', ['-C', repository, ...args], {
+      encoding,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const detail = error.stderr ? String(error.stderr).trim() : error.message;
+    assert.fail(`Could not verify hosted snapshot Git provenance in ${repository}: ${detail}`);
+  }
+}
+
+function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
+  const fixturePath = path.join(cliRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+  const sourceCommit = fixture.sourceRuntime.commit;
+  const mergeCommit = fixture.mergedRuntime.commit;
+  assert.equal(
+    gitOutput(backendRoot, ['rev-parse', 'HEAD']).trim(),
+    sourceCommit,
+    `${backendRoot} must be checked out at the exact reviewed runtime source commit`,
+  );
+  for (const commit of [sourceCommit, fixture.sourceRuntime.parent, mergeCommit, ...fixture.mergedRuntime.parents]) {
+    gitOutput(backendRoot, ['cat-file', '-e', `${commit}^{commit}`]);
+  }
+  assert.deepEqual(
+    gitOutput(backendRoot, ['show', '-s', '--format=%P', sourceCommit]).trim().split(/\s+/),
+    [fixture.sourceRuntime.parent],
+    `${sourceCommit} must have the recorded reviewed parent`,
+  );
+  assert.deepEqual(
+    gitOutput(backendRoot, ['show', '-s', '--format=%P', mergeCommit]).trim().split(/\s+/),
+    fixture.mergedRuntime.parents,
+    `${mergeCommit} must have the recorded merge parents in order`,
+  );
+  const lockedSources = {
+    pluginServer: 'src/mcp/plugin-server.ts',
+    pluginScopes: 'src/mcp/plugin-scopes.ts',
+    jobBriefService: 'src/services/job-brief.ts',
+  };
+  for (const [lockName, relativePath] of Object.entries(lockedSources)) {
+    const committedBytes = gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null);
+    assert.equal(
+      sha256ExactBytes(committedBytes),
+      fixture.sourceSha256[lockName],
+      `${relativePath} bytes at ${sourceCommit} drifted from the reviewed hosted snapshot`,
+    );
+  }
+}
+
 function directToolRegistrationsInNamedFactory(
   source,
   expectedFunction,
@@ -106,6 +243,13 @@ function directToolRegistrationsInNamedFactory(
   sourcePath,
   expectedToolCatalog = null,
 ) {
+  assertImportBinding(
+    source,
+    'McpServer',
+    'McpServer',
+    '@modelcontextprotocol/sdk/server/mcp.js',
+    sourcePath,
+  );
   const ast = parseFullSource(source, sourcePath);
   const factories = ast.program.body.filter((statement) => (
     statement.type === 'ExportNamedDeclaration'
@@ -298,6 +442,13 @@ function directToolRegistrationsInExportedFunction(
   expectedCallee,
   sourcePath,
 ) {
+  assertImportBinding(
+    source,
+    'McpServer',
+    'McpServer',
+    '@modelcontextprotocol/sdk/server/mcp.js',
+    sourcePath,
+  );
   const ast = parseFullSource(source, sourcePath);
   const factories = ast.program.body.filter((statement) => (
     statement.type === 'ExportNamedDeclaration'
@@ -524,6 +675,18 @@ function directToolRegistrationsInExportedFunction(
 
 function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, sourcePath) {
   const ast = parseFullSource(source, sourcePath);
+  assertImportBinding(source, 'Router', 'Router', 'express', sourcePath);
+  assertActiveVariableInitializerAst(source, 'router', 'Router()', sourcePath);
+  const exportedRouters = ast.program.body.filter((statement) => (
+    statement.type === 'ExportDefaultDeclaration'
+    && statement.declaration?.type === 'Identifier'
+    && statement.declaration.name === 'router'
+  ));
+  assert.equal(
+    exportedRouters.length,
+    1,
+    `${sourcePath} must default-export the exact canonical Express router receiving POST /`,
+  );
   assertImportBinding(
     source,
     'StreamableHTTPServerTransport',
@@ -2239,6 +2402,7 @@ const backendCandidates = backendDir
     ];
 const localContractPath = path.join(cliRoot, 'contracts', 'trackly-apply-tools.json');
 const localApplySourcePath = path.join(cliRoot, 'mcp', 'apply-tools.js');
+const localServerSourcePath = path.join(cliRoot, 'mcp', 'server.js');
 const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'contracts', 'trackly-apply-tools.json')))
   || backendCandidates[0];
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
@@ -2262,6 +2426,7 @@ if (!fs.existsSync(hostedPluginContractPath)) {
 
 const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
 const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
+const localServerSource = fs.readFileSync(localServerSourcePath, 'utf8');
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
 const hostedApplySource = fs.readFileSync(hostedApplySourcePath, 'utf8');
 const hostedPluginContract = JSON.parse(fs.readFileSync(hostedPluginContractPath, 'utf8'));
@@ -2286,6 +2451,24 @@ const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, '
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
 const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
 const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
+
+verifyHostedSnapshotGitProvenance(cliRoot, backendRoot);
+assertCommonJsDestructuredRequire(
+  localServerSource,
+  'registerApplyTools',
+  './apply-tools',
+  localServerSourcePath,
+);
+assertActiveFunctionDirectStatementAst(
+  localServerSource,
+  'createServer',
+  `registerApplyTools(server, {
+    wrapTool,
+    mcpUserAgent: MCP_USER_AGENT,
+    throwMcpResourceError,
+  });`,
+  localServerSourcePath,
+);
 
 verifyCoordinatedBackendCore({
   localContract: local,
@@ -2441,6 +2624,40 @@ assertActiveFunctionDefinitionAst(
   }`,
   hostedPluginSourcePath,
 );
+assertImportBinding(
+  hostedApplySource,
+  'generateInternalToken',
+  'generateInternalToken',
+  './mcp-tokens.js',
+  hostedApplySourcePath,
+);
+assertImportBinding(
+  hostedApplySource,
+  'verifiedHostedMcpOAuthContext',
+  'verifiedHostedMcpOAuthContext',
+  './hosted-auth-context.js',
+  hostedApplySourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedApplySource,
+  'generateHostedOAuthInternalToken',
+  `function generateHostedOAuthInternalToken(authInfo: HostedOAuthAuthInfo): string {
+    return generateInternalToken(
+      {
+        id: authInfo.extra.userId,
+        email: authInfo.extra.email,
+        name: authInfo.extra.name || '',
+        authEpoch: authInfo.extra.authEpoch,
+      },
+      verifiedHostedMcpOAuthContext({
+        clientId: authInfo.clientId,
+        grantId: authInfo.extra.grantId,
+        scopes: authInfo.scopes,
+      }),
+    );
+  }`,
+  hostedApplySourcePath,
+);
 const executablePluginRegistrations = directToolRegistrationsInExportedFunction(
   hostedPluginSource,
   'createTracklyPluginMcpServer',
@@ -2479,6 +2696,19 @@ assert.equal(
 );
 assertActiveFunctionDefinitionAst(
   hostedPluginScopesSource,
+  'requiredScopesForPluginTool',
+  `function requiredScopesForPluginTool(toolName: string): McpScope[] | null {
+    if (!Object.hasOwn(TRACKLY_PLUGIN_TOOL_SCOPES, toolName)) return null;
+    return [
+      ...TRACKLY_PLUGIN_TOOL_SCOPES[
+        toolName as keyof typeof TRACKLY_PLUGIN_TOOL_SCOPES
+      ],
+    ];
+  }`,
+  hostedPluginScopesPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginScopesSource,
   'requiredScopesForPluginToolCall',
   `function requiredScopesForPluginToolCall(
     toolName: string,
@@ -2512,6 +2742,80 @@ assertActiveFunctionDefinitionAst(
       }
     }
     return required;
+  }`,
+  hostedPluginScopesPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginScopesSource,
+  'enforceTracklyPluginScope',
+  `function enforceTracklyPluginScope(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
+    type JsonRpcMessage = {
+      id?: unknown;
+      method?: unknown;
+      params?: { name?: unknown; arguments?: unknown };
+    };
+    if (Array.isArray(req.body)) {
+      res.status(400).json(req.body.map((candidate: unknown) => ({
+        jsonrpc: '2.0',
+        error: { code: -32600, message: 'JSON-RPC batches are not supported' },
+        id: candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+          ? (candidate as JsonRpcMessage).id ?? null
+          : null,
+      })));
+      return;
+    }
+    const messages: unknown[] = Array.isArray(req.body) ? req.body : [req.body];
+    const granted = Array.isArray((req as any).auth?.scopes)
+      ? (req as any).auth.scopes as string[]
+      : [];
+    const grantedSet = new Set(granted);
+    let denied: { message: JsonRpcMessage; required: McpScope[] | null } | undefined;
+    for (const candidate of messages) {
+      if (candidate === null || typeof candidate !== 'object') continue;
+      const message = candidate as JsonRpcMessage;
+      if (typeof message.method === 'string'
+        && TRACKLY_PLUGIN_SCOPE_FREE_METHODS.has(message.method)) continue;
+      if (message.method !== 'tools/call') {
+        denied = { message, required: null };
+        break;
+      }
+      const name = message.params?.name;
+      const required = typeof name === 'string'
+        ? requiredScopesForPluginToolCall(name, message.params?.arguments)
+        : null;
+      if (required === null || required.some((scope) => !grantedSet.has(scope))) {
+        denied = { message, required };
+        break;
+      }
+    }
+
+    if (!denied) {
+      next();
+      return;
+    }
+
+    const required = denied.required || [];
+    res.setHeader(
+      'WWW-Authenticate',
+      \`Bearer error="insufficient_scope", scope="\${required.join(' ')}"\`,
+    );
+    res.status(403).json({
+      jsonrpc: '2.0',
+      error: {
+        code: -32001,
+        message: 'Insufficient OAuth scope',
+        data: {
+          error: 'insufficient_scope',
+          required_scopes: required,
+          granted_scopes: granted,
+        },
+      },
+      id: denied.message.id ?? null,
+    });
   }`,
   hostedPluginScopesPath,
 );
@@ -2854,7 +3158,13 @@ for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) 
     ['hosted', hostedApplySource, hostedApplySourcePath, mapping.hostedPublishedAndParse],
   ]) {
     const registrations = (side === 'local'
-      ? activeToolRegistrations(sourceText, 'server.registerTool', sourcePath)
+      ? directToolRegistrationsInNamedParameterFunction(
+        sourceText,
+        'registerApplyTools',
+        'server',
+        'registerTool',
+        sourcePath,
+      )
       : directToolRegistrationsInNamedFactory(
         sourceText,
         'createTracklyMcpServer',
@@ -2878,6 +3188,18 @@ for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) 
     }
   }
 }
+
+const grantSensitiveStorageRegistration = pluginToolRegistration(
+  'trackly_grant_sensitive_storage_consent',
+);
+assertWrappedHandlerAst(
+  grantSensitiveStorageRegistration,
+  `({ expectedRevision }) => requestApi(
+    'PATCH', '/api/jobscout/application-profile', authToken,
+    { expectedRevision, source: 'mcp', sensitiveStorageConsent: true },
+  )`,
+  hostedPluginSourcePath,
+);
 assertTruthWrapperCompatibility(
   localApplySchemaAsts.truthCertificationInputSchema,
   hostedApplySchemaAsts.truthCertificationSchema,
@@ -3629,6 +3951,7 @@ module.exports = {
   CHECKED_IN_HOSTED_FIXTURE_SHA256,
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertCommonJsDestructuredRequire,
   assertActiveFunctionDirectStatementAst,
   assertActiveFunctionDefinitionAst,
   assertBabelPropertyExpression,
@@ -3647,6 +3970,7 @@ module.exports = {
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
   directToolRegistrationsInNamedFactory,
+  directToolRegistrationsInNamedParameterFunction,
   exactSchemaDefinition,
   parseSchemaExpression,
   referencedConstantIdentifiers,
@@ -3662,6 +3986,7 @@ module.exports = {
   verifyHostedContract,
   verifyCheckedInHostedContractFixture,
   verifyCoordinatedBackendCore,
+  verifyHostedSnapshotGitProvenance,
   wrappedHandlerReturnProperties,
   wrappedHandlerReturnedObjectProperties,
 };
