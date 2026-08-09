@@ -25,6 +25,9 @@ const pluginLockPath = path.join(cliRoot, 'plugins', 'trackly', 'skill-lock.json
 if (!fs.existsSync(hostedContractPath)) {
   throw new Error(`Hosted contract not found at ${hostedContractPath}. Set TRACKLY_BACKEND_DIR to the close-ai checkout.`);
 }
+if (!fs.existsSync(hostedPluginContractPath)) {
+  throw new Error(`Hosted plugin contract not found at ${hostedPluginContractPath}. Set TRACKLY_BACKEND_DIR to a plugin-capable close-ai checkout.`);
+}
 
 const local = JSON.parse(fs.readFileSync(localContractPath, 'utf8'));
 const hosted = JSON.parse(fs.readFileSync(hostedContractPath, 'utf8'));
@@ -134,5 +137,5 @@ assert.ok(
 );
 
 console.log(
-  `Trackly Apply MCP contracts, named executable schemas, and the ${hostedPluginTools.length}-tool public plugin facade match at ${local.contractVersion}.`,
+  `Trackly Apply MCP contracts match at ${local.contractVersion}; the ${hostedPluginTools.length}-tool public plugin facade matches at ${hostedPluginContract.contractVersion}.`,
 );
