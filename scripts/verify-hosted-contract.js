@@ -10,7 +10,10 @@ function normalizeJavaScriptTrivia(source) {
   const tokens = [];
   let index = 0;
   let regexMayStart = true;
+  let pendingControlCondition = false;
+  const parenthesisContexts = [];
 
+  const controlConditionKeywords = new Set(['catch', 'for', 'if', 'switch', 'while', 'with']);
   const regexPrefixKeywords = new Set([
     'await', 'case', 'delete', 'in', 'instanceof', 'of', 'return', 'throw',
     'typeof', 'void', 'yield',
@@ -106,7 +109,11 @@ function normalizeJavaScriptTrivia(source) {
       const start = index++;
       while (index < source.length && /[A-Za-z0-9_$]/.test(source[index])) index++;
       const token = source.slice(start, index);
+      const previousToken = tokens.at(-1);
       tokens.push(token);
+      pendingControlCondition = controlConditionKeywords.has(token)
+        && previousToken !== '.'
+        && previousToken !== '?.';
       regexMayStart = regexPrefixKeywords.has(token);
       continue;
     }
@@ -134,12 +141,26 @@ function normalizeJavaScriptTrivia(source) {
     ].find((candidate) => source.startsWith(candidate, index)) || char;
     tokens.push(operator);
     index += operator.length;
-    if (operator === ')' || operator === ']' || operator === '}' || operator === '.' || operator === '?.') {
-      regexMayStart = false;
-    } else if (operator === '++' || operator === '--') {
-      regexMayStart = false;
-    } else {
+    if (operator === '(') {
+      parenthesisContexts.push(pendingControlCondition ? 'control-condition' : 'ordinary');
+      pendingControlCondition = false;
       regexMayStart = true;
+    } else if (operator === ')') {
+      regexMayStart = parenthesisContexts.pop() === 'control-condition';
+    } else {
+      pendingControlCondition = false;
+      if (
+        operator === ']'
+        || operator === '}'
+        || operator === '.'
+        || operator === '?.'
+        || operator === '++'
+        || operator === '--'
+      ) {
+        regexMayStart = false;
+      } else {
+        regexMayStart = true;
+      }
     }
   }
 

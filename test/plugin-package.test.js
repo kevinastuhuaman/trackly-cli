@@ -117,6 +117,23 @@ test('executable digest normalization preserves literal contents and removes onl
     sha256ExecutableSource(compact.replace('/a b/', '/ab/')),
     'spaces inside regular-expression literals must affect executable digests',
   );
+  assert.notEqual(
+    normalizeJavaScriptTrivia('if (enabled) /a b/.test(value);'),
+    normalizeJavaScriptTrivia('if (enabled) /a  b/.test(value);'),
+    'regular-expression bytes after a control-flow condition must remain digest-significant',
+  );
+  for (const source of [
+    'calculate(value) / divisor / next;',
+    '(value) / divisor / next;',
+  ]) {
+    assert.deepEqual(
+      JSON.parse(normalizeJavaScriptTrivia(source)),
+      source.startsWith('calculate')
+        ? ['calculate', '(', 'value', ')', '/', 'divisor', '/', 'next', ';']
+        : ['(', 'value', ')', '/', 'divisor', '/', 'next', ';'],
+      'a slash after an ordinary call or grouping parenthesis must remain division',
+    );
+  }
 });
 
 test('importing executable digest helpers never runs hosted verification as a side effect', () => {
