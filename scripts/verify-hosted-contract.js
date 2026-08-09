@@ -253,9 +253,12 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     'src/mcp/plugin-server.ts',
     'src/mcp/plugin-router.ts',
     'src/mcp/plugin-scopes.ts',
+    'src/mcp/oauth-provider.ts',
+    'src/mcp/mcp-tokens.ts',
     'src/services/job-brief.ts',
     'src/services/trackly-access.ts',
     'src/services/application-profile/apply-execution-contract.ts',
+    'src/services/application-profile/catalog.ts',
     'src/services/application-profile/service.ts',
     'src/routes/jobscout-filter-utils.ts',
   ]) {
@@ -306,6 +309,44 @@ function directToolRegistrationsInNamedFactory(
     `${sourcePath} must export exactly one ${expectedFunction} function declaration`,
   );
   const factory = factories[0].declaration;
+  const shadowBindings = [];
+  function bindingContainsMcpServer(node) {
+    if (node === null || typeof node !== 'object') return false;
+    if (node.type === 'Identifier') return node.name === 'McpServer';
+    if (node.type === 'RestElement') return bindingContainsMcpServer(node.argument);
+    if (node.type === 'AssignmentPattern') return bindingContainsMcpServer(node.left);
+    if (node.type === 'ArrayPattern') return node.elements.some(bindingContainsMcpServer);
+    if (node.type === 'ObjectPattern') return node.properties.some((property) => (
+      property.type === 'RestElement'
+        ? bindingContainsMcpServer(property.argument)
+        : bindingContainsMcpServer(property.value)
+    ));
+    return false;
+  }
+  for (const parameter of factory.params) {
+    if (bindingContainsMcpServer(parameter)) shadowBindings.push(parameter);
+  }
+  function findShadowBindings(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) findShadowBindings(child);
+      return;
+    }
+    if (node.type === 'VariableDeclarator' && bindingContainsMcpServer(node.id)) shadowBindings.push(node);
+    if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
+      && node.id?.name === 'McpServer') shadowBindings.push(node);
+    if (node.type === 'CatchClause' && bindingContainsMcpServer(node.param)) shadowBindings.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      findShadowBindings(child);
+    }
+  }
+  findShadowBindings(factory.body);
+  assert.equal(
+    shadowBindings.length,
+    0,
+    `${expectedFunction} in ${sourcePath} must not shadow the canonical imported McpServer binding`,
+  );
   const factoryStatements = factory.body.body;
   const expectedCalleeParts = expectedCallee.split('.');
   assert.equal(expectedCalleeParts.length, 2, `${expectedCallee} must be a direct receiver method`);
@@ -393,6 +434,15 @@ function directToolRegistrationsInNamedFactory(
     );
     return [{ method, name: call.arguments[0].value, call }];
   });
+  const serverDeclaration = serverBindings[0].declaration;
+  function referencesFactoryServer(node) {
+    if (node === null || typeof node !== 'object') return false;
+    if (Array.isArray(node)) return node.some(referencesFactoryServer);
+    if (node.type === 'Identifier' && node.name === expectedServerBinding) return true;
+    return Object.entries(node).some(([key, child]) => (
+      key !== 'loc' && key !== 'extra' && referencesFactoryServer(child)
+    ));
+  }
   if (expectedToolCatalog !== null) {
     const actualToolCatalog = directFactoryRegistrations
       .filter(({ method }) => method === 'tool' || method === 'registerTool')
@@ -418,6 +468,28 @@ function directToolRegistrationsInNamedFactory(
         && allowedTailRegistrationMethods.has(callee.property.name);
     }),
     `${expectedFunction} in ${sourcePath} must reach its final server return through direct registration calls on the exact server, without a branch, return, throw, or other executable statement after ${expectedCallee} registration`,
+  );
+  assert.ok(
+    factoryStatements.slice(0, -1).every((statement) => {
+      if (statement === serverDeclaration) return true;
+      if (statement.type === 'VariableDeclaration') {
+        return !statement.declarations.some((declarator) => referencesFactoryServer(declarator.init));
+      }
+      const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+      const callee = call?.type === 'CallExpression' ? call.callee : null;
+      const receiver = callee?.type === 'MemberExpression'
+        ? unwrapTransparentExpression(callee.object)
+        : null;
+      const method = callee?.type === 'MemberExpression' && !callee.computed
+        && callee.property?.type === 'Identifier'
+        ? callee.property.name
+        : null;
+      return receiver?.type === 'Identifier'
+        && receiver.name === expectedServerBinding
+        && allowedTailRegistrationMethods.has(method)
+        && call.arguments[0]?.type === 'StringLiteral';
+    }),
+    `${expectedFunction} in ${sourcePath} may not alias the factory server or perform registrations outside its direct cataloged registration statements`,
   );
   const factoryReturns = [];
   const serverRebindings = [];
@@ -1234,6 +1306,62 @@ function assertActiveFunctionDefinitionAst(source, name, expectedSource, sourceP
     canonicalSchemaAst(expectedProgram[0]),
     `${name} in ${sourcePath} must preserve its locked executable branch semantics`,
   );
+}
+
+function assertActiveClassMethodDefinitionAst(
+  source,
+  className,
+  methodName,
+  expectedMethodSource,
+  sourcePath,
+) {
+  const program = parseFullSource(source, sourcePath).program;
+  const classes = program.body.flatMap((statement) => {
+    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+    return declaration?.type === 'ClassDeclaration' && declaration.id?.name === className
+      ? [declaration]
+      : [];
+  });
+  assert.equal(classes.length, 1, `${sourcePath} must define exactly one top-level ${className} class`);
+  const methods = classes[0].body.body.filter((member) => (
+    member.type === 'ClassMethod'
+    && !member.computed
+    && member.key?.type === 'Identifier'
+    && member.key.name === methodName
+  ));
+  assert.equal(methods.length, 1, `${className} in ${sourcePath} must define exactly one ${methodName} method`);
+  const fixture = parseFullSource(
+    `class ExpectedMethod { ${expectedMethodSource} }`,
+    `${className}.${methodName} expected contract`,
+  ).program.body[0].body.body[0];
+  assert.deepEqual(
+    canonicalSchemaAst(methods[0]),
+    canonicalSchemaAst(fixture),
+    `${className}.${methodName} in ${sourcePath} must preserve its locked executable semantics`,
+  );
+}
+
+function staticApplicationFieldSensitivityMap(source, sourcePath) {
+  const array = unwrapTransparentExpression(
+    activeVariableDeclarator(source, 'APPLICATION_PROFILE_FIELD_DEFINITIONS', sourcePath).declarator.init,
+  );
+  assert.equal(array?.type, 'ArrayExpression', `${sourcePath} application field catalog must be a static array`);
+  const entries = array.elements.map((element, index) => {
+    const properties = staticBabelObjectProperties(element, `${sourcePath} application field ${index}`);
+    assert.equal(properties.key?.type, 'StringLiteral', `${sourcePath} application field ${index} needs a static key`);
+    assert.equal(
+      properties.sensitivity?.type,
+      'StringLiteral',
+      `${sourcePath} application field ${properties.key.value} needs a static sensitivity`,
+    );
+    assert.ok(
+      ['standard', 'sensitive', 'restricted'].includes(properties.sensitivity.value),
+      `${sourcePath} application field ${properties.key.value} has an unsupported sensitivity`,
+    );
+    return [properties.key.value, properties.sensitivity.value];
+  });
+  assert.equal(new Set(entries.map(([key]) => key)).size, entries.length, `${sourcePath} field keys must be unique`);
+  return Object.fromEntries(entries);
 }
 
 function assertActiveFunctionDirectStatementAst(
@@ -2533,9 +2661,12 @@ const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-pl
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
 const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
 const hostedPluginScopesPath = path.join(backendRoot, 'src', 'mcp', 'plugin-scopes.ts');
+const hostedOAuthProviderPath = path.join(backendRoot, 'src', 'mcp', 'oauth-provider.ts');
+const hostedMcpTokensPath = path.join(backendRoot, 'src', 'mcp', 'mcp-tokens.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
 const hostedTracklyAccessPath = path.join(backendRoot, 'src', 'services', 'trackly-access.ts');
 const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
+const hostedApplicationProfileCatalogPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'catalog.ts');
 const hostedApplicationProfileServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'service.ts');
 const hostedJobscoutFilterUtilsPath = path.join(backendRoot, 'src', 'routes', 'jobscout-filter-utils.ts');
 const pluginLockPath = path.join(cliRoot, 'plugins', 'trackly', 'skill-lock.json');
@@ -2570,9 +2701,12 @@ if (
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
+const hostedOAuthProviderSource = fs.readFileSync(hostedOAuthProviderPath, 'utf8');
+const hostedMcpTokensSource = fs.readFileSync(hostedMcpTokensPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
 const hostedTracklyAccessSource = fs.readFileSync(hostedTracklyAccessPath, 'utf8');
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
+const hostedApplicationProfileCatalogSource = fs.readFileSync(hostedApplicationProfileCatalogPath, 'utf8');
 const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
 const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
 
@@ -2776,6 +2910,233 @@ assertActiveFunctionDefinitionAst(
   }`,
   hostedTracklyAccessPath,
 );
+assertImportBinding(hostedTracklyAccessSource, 'pool', 'pool', '../config/database.js', hostedTracklyAccessPath);
+assertActiveFunctionDefinitionAst(
+  hostedTracklyAccessSource,
+  'isUndefinedSchemaError',
+  `function isUndefinedSchemaError(error: unknown): boolean {
+    const code = (error as { code?: string } | null)?.code;
+    return code === '42703' || code === '42P01';
+  }`,
+  hostedTracklyAccessPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedTracklyAccessSource,
+  'getTracklyAccessMode',
+  `function getTracklyAccessMode(): TracklyAccessMode {
+    const configured = process.env.TRACKLY_ACCESS_MODE?.trim().toLowerCase();
+    return configured === 'audit' || configured === 'enforce' ? configured : 'off';
+  }`,
+  hostedTracklyAccessPath,
+);
+assertActiveVariableInitializerAst(
+  hostedTracklyAccessSource,
+  'WEB_ACCESS_DECISION_COMPLETED',
+  "Symbol('trackly.webAccessDecisionCompleted')",
+  hostedTracklyAccessPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedTracklyAccessSource,
+  'webAccessDecisionCompleted',
+  `function webAccessDecisionCompleted(user: unknown): boolean {
+    return typeof user === 'object'
+      && user !== null
+      && (user as { [WEB_ACCESS_DECISION_COMPLETED]?: boolean })[WEB_ACCESS_DECISION_COMPLETED] === true;
+  }`,
+  hostedTracklyAccessPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedTracklyAccessSource,
+  'getTracklyEntitlements',
+  `async function getTracklyEntitlements(
+    userId: number,
+    database: Queryable = pool,
+  ): Promise<TracklyEntitlements> {
+    try {
+      const result = await database.query<{
+        trackly_access_enabled: boolean;
+        web_access_enabled: boolean;
+      }>(
+        \`SELECT trackly_access_enabled, web_access_enabled
+         FROM users
+        WHERE id = $1\`,
+        [userId],
+      );
+      if (!result || !Array.isArray(result.rows)) {
+        return { schemaReady: false, tracklyAccessEnabled: null, webAccessEnabled: null };
+      }
+      const row = result.rows[0];
+      if (!row) {
+        return { schemaReady: true, tracklyAccessEnabled: false, webAccessEnabled: false };
+      }
+      return {
+        schemaReady: true,
+        tracklyAccessEnabled: row.trackly_access_enabled === true,
+        webAccessEnabled: row.web_access_enabled === true,
+      };
+    } catch (error) {
+      if (isUndefinedSchemaError(error)) {
+        return { schemaReady: false, tracklyAccessEnabled: null, webAccessEnabled: null };
+      }
+      throw error;
+    }
+  }`,
+  hostedTracklyAccessPath,
+);
+assertImportBinding(hostedMcpTokensSource, 'default', 'jwt', 'jsonwebtoken', hostedMcpTokensPath);
+assertActiveVariableInitializerAst(hostedMcpTokensSource, 'MCP_JWT_SECRET', "BASE_SECRET + '-mcp'", hostedMcpTokensPath);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
+  'MCP_ALLOWED_RESOURCES',
+  `Object.freeze([
+    MCP_LEGACY_RESOURCE,
+    MCP_PLUGIN_RESOURCE,
+  ] as [string, string])`,
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(hostedMcpTokensSource, 'MCP_ACCESS_IDENTITY_VERSION', '1 as const', hostedMcpTokensPath);
+assertActiveFunctionDefinitionAst(
+  hostedMcpTokensSource,
+  'verifyMcpAccessToken',
+  `function verifyMcpAccessToken(
+    token: string,
+    expectedResource?: string,
+  ): McpTokenPayload | null {
+    try {
+      const decoded = jwt.verify(token, MCP_JWT_SECRET, {
+        audience: expectedResource
+          ? normalizeMcpResource(expectedResource)
+          : [...MCP_ALLOWED_RESOURCES],
+      }) as unknown as McpTokenPayload;
+      if (decoded.type !== 'mcp_access') return null;
+      if (decoded.identityClassVersion !== MCP_ACCESS_IDENTITY_VERSION) return null;
+      if (decoded.identityClass !== 'ordinary' && decoded.identityClass !== 'review') return null;
+      if (typeof decoded.grant_id !== 'string' || decoded.grant_id.length === 0) return null;
+      const resource = normalizeMcpResource(
+        decoded.resource || (decoded.aud === MCP_LEGACY_RESOURCE ? MCP_LEGACY_RESOURCE : undefined),
+      );
+      if (decoded.aud !== resource) return null;
+      const scopes = normalizeMcpScopes(decoded.scopes);
+      const authEpoch = normalizeAuthEpoch(decoded.authEpoch, 0);
+      return authEpoch === null ? null : { ...decoded, authEpoch, scopes, resource };
+    } catch {
+      return null;
+    }
+  }`,
+  hostedMcpTokensPath,
+);
+for (const [importedName, localName, moduleName] of [
+  ['verifyMcpAccessToken', 'verifyMcpAccessToken', './mcp-tokens.js'],
+  ['normalizeMcpResource', 'normalizeMcpResource', './mcp-tokens.js'],
+  ['normalizeAuthEpoch', 'normalizeAuthEpoch', '../utils/auth-epoch.js'],
+  ['isConfiguredReviewUserId', 'isConfiguredReviewUserId', '../services/review-identity.js'],
+  ['getTracklyAccessMode', 'getTracklyAccessMode', '../services/trackly-access.js'],
+  ['getTracklyEntitlements', 'getTracklyEntitlements', '../services/trackly-access.js'],
+  ['normalizeMcpScopes', 'normalizeMcpScopes', './mcp-scopes.js'],
+  ['isScopeSubset', 'isScopeSubset', './mcp-scopes.js'],
+]) {
+  assertImportBinding(hostedOAuthProviderSource, importedName, localName, moduleName, hostedOAuthProviderPath);
+}
+assertActiveFunctionDefinitionAst(
+  hostedOAuthProviderSource,
+  'requireMcpEntitlement',
+  `async function requireMcpEntitlement(
+    userId: number,
+    database: NonNullable<Parameters<typeof getTracklyEntitlements>[1]> = pool,
+  ): Promise<void> {
+    const mode = getTracklyAccessMode();
+    if (mode === 'off') return;
+    let entitlement;
+    try {
+      entitlement = await getTracklyEntitlements(userId, database);
+    } catch (error) {
+      if (mode === 'audit') {
+        logger.warn('trackly-access', 'MCP entitlement lookup failed during audit', { userId });
+        return;
+      }
+      throw error;
+    }
+    if (entitlement.schemaReady && entitlement.tracklyAccessEnabled) return;
+    if (mode === 'audit') {
+      logger.warn('trackly-access', 'would deny MCP credential operation', { userId });
+      return;
+    }
+    throw new InvalidGrantError('Trackly access requires an invitation. Visit https://usetrackly.app/early-access');
+  }`,
+  hostedOAuthProviderPath,
+);
+assertActiveVariableInitializerAst(
+  hostedOAuthProviderSource,
+  'tracklyOAuthProvider',
+  'new TracklyOAuthProvider()',
+  hostedOAuthProviderPath,
+);
+assertActiveClassMethodDefinitionAst(
+  hostedOAuthProviderSource,
+  'TracklyOAuthProvider',
+  'verifyAccessToken',
+  `async verifyAccessToken(token: string): Promise<AuthInfo> {
+    const decoded = verifyMcpAccessToken(token);
+
+    if (!decoded) {
+      throw new InvalidTokenError('Invalid or expired MCP access token');
+    }
+
+    if (decoded.identityClass === 'review' || isConfiguredReviewUserId(decoded.userId)) {
+      throw new InvalidTokenError('Invalid or expired MCP access token');
+    }
+
+    let grant: McpGrantRow;
+    try {
+      const result = await pool.query<McpGrantRow>(
+        \`SELECT grant.grant_id, grant.user_id, grant.client_id,
+                grant.consented_scopes, grant.resource, users.auth_epoch
+         FROM mcp_oauth_grants AS grant
+         JOIN users ON users.id = grant.user_id
+         WHERE grant.grant_id = $1
+           AND grant.revoked_at IS NULL
+           AND grant.expires_at > NOW()\`,
+        [decoded.grant_id],
+      );
+      if (result.rows.length !== 1) {
+        throw new InvalidTokenError('Invalid or expired MCP access token');
+      }
+      grant = result.rows[0];
+      const authoritativeScopes = normalizeMcpScopes(grant.consented_scopes);
+      const currentAuthEpoch = normalizeAuthEpoch(grant.auth_epoch, 0);
+      if (
+        grant.user_id !== decoded.userId
+        || grant.client_id !== decoded.client_id
+        || normalizeMcpResource(grant.resource) !== decoded.resource
+        || currentAuthEpoch === null
+        || currentAuthEpoch !== decoded.authEpoch
+        || !isScopeSubset(decoded.scopes, authoritativeScopes)
+      ) {
+        throw new InvalidTokenError('Invalid or expired MCP access token');
+      }
+      await requireMcpEntitlement(decoded.userId);
+    } catch (error) {
+      if (error instanceof InvalidTokenError) throw error;
+      throw new InvalidTokenError('Invalid or expired MCP access token');
+    }
+
+    return {
+      token,
+      clientId: decoded.client_id,
+      scopes: decoded.scopes,
+      expiresAt: decoded.exp!,
+      extra: {
+        userId: decoded.userId,
+        email: decoded.email,
+        name: decoded.name,
+        authEpoch: decoded.authEpoch,
+        grantId: decoded.grant_id,
+        resource: decoded.resource,
+      },
+    };
+  }`,
+  hostedOAuthProviderPath,
+);
 assertImportBinding(
   hostedPluginSource,
   'default',
@@ -2928,6 +3289,38 @@ const executableScopeContract = staticStringArrayMap(
   hostedPluginScopesSource,
   'TRACKLY_PLUGIN_TOOL_SCOPES',
   hostedPluginScopesPath,
+);
+assertImportBinding(
+  hostedPluginScopesSource,
+  'APPLICATION_FIELD_BY_KEY',
+  'APPLICATION_FIELD_BY_KEY',
+  '../services/application-profile/catalog.js',
+  hostedPluginScopesPath,
+);
+assertActiveVariableInitializerAst(
+  hostedApplicationProfileCatalogSource,
+  'APPLICATION_PROFILE_FIELDS',
+  `APPLICATION_PROFILE_FIELD_DEFINITIONS.map((field, index) => ({
+    ...field,
+    order: index + 1,
+    rationale: rationaleForCategory(field.category),
+  }))`,
+  hostedApplicationProfileCatalogPath,
+);
+assertActiveVariableInitializerAst(
+  hostedApplicationProfileCatalogSource,
+  'APPLICATION_FIELD_BY_KEY',
+  'new Map(APPLICATION_PROFILE_FIELDS.map((field) => [field.key, field]))',
+  hostedApplicationProfileCatalogPath,
+);
+const applicationFieldSensitivityMap = staticApplicationFieldSensitivityMap(
+  hostedApplicationProfileCatalogSource,
+  hostedApplicationProfileCatalogPath,
+);
+assert.equal(
+  sha256ExactBytes(JSON.stringify(applicationFieldSensitivityMap)),
+  'd6970a25e4b10d3c32b7eb6bb2548915a6bf4d6ec6fc1f619677120383a36854',
+  'Application profile field keys and sensitivity classifications drifted from the reviewed conditional-scope catalog',
 );
 assert.deepEqual(
   executableScopeContract,
@@ -4263,6 +4656,7 @@ module.exports = {
   schemaDefinition,
   sha256ExactBytes,
   staticStringArrayMap,
+  staticApplicationFieldSensitivityMap,
   typescriptConstArrayValues,
   verifyHostedContract,
   verifyCheckedInHostedContractFixture,

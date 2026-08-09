@@ -41,6 +41,7 @@ const {
   registrationArgumentSources,
   schemaObjectPropertyAsts,
   sha256ExactBytes,
+  staticApplicationFieldSensitivityMap,
   staticStringArrayMap,
   verifyHostedSnapshotGitProvenance,
   wrappedHandlerReturnProperties,
@@ -708,6 +709,57 @@ test('hosted schema registration proof uses only direct reachable factory initia
       'const reassigned hosted factory fixture',
     ),
     /must reach its final server return through direct registration calls on the exact server/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        "server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+        "const add = server.registerTool.bind(server);\n      add('trackly_hidden', { inputSchema: activeSchema }, activeHandler);\n      server.registerTool('trackly_active', { inputSchema: activeSchema }, activeHandler);",
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'aliased registration fixture',
+    ),
+    /may not alias the factory server or perform registrations outside its direct cataloged registration statements/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedFactory(
+      source.replace(
+        'export function createTracklyMcpServer()',
+        'export function createTracklyMcpServer(McpServer = DecoyServer)',
+      ),
+      'createTracklyMcpServer',
+      'server.registerTool',
+      'shadowed constructor fixture',
+    ),
+    /must not shadow the canonical imported McpServer binding/,
+  );
+});
+
+test('application field sensitivity catalog extraction is static and fail closed', () => {
+  const source = `
+    const APPLICATION_PROFILE_FIELD_DEFINITIONS = [
+      { key: 'email', sensitivity: 'sensitive' },
+      { key: 'portfolioUrl', sensitivity: 'standard' },
+    ] as const;
+  `;
+  assert.deepEqual(
+    staticApplicationFieldSensitivityMap(source, 'application catalog fixture'),
+    { email: 'sensitive', portfolioUrl: 'standard' },
+  );
+  assert.throws(
+    () => staticApplicationFieldSensitivityMap(
+      source.replace("sensitivity: 'sensitive'", 'sensitivity: classifyField()'),
+      'dynamic application catalog fixture',
+    ),
+    /needs a static sensitivity/,
+  );
+  assert.throws(
+    () => staticApplicationFieldSensitivityMap(
+      source.replace("sensitivity: 'sensitive'", "sensitivity: 'public'"),
+      'unsupported application catalog fixture',
+    ),
+    /has an unsupported sensitivity/,
   );
 });
 
