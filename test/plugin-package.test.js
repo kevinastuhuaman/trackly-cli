@@ -16,6 +16,7 @@ const {
   assertCommonJsDestructuredRequire,
   assertActiveFunctionDirectStatementAst,
   assertActiveFunctionDefinitionAst,
+  assertActiveTopLevelStatementAst,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
@@ -141,6 +142,21 @@ test('executable digest hashing is exact-byte and fail-closed on formatting chan
     sha256ExactBytes('do /a b/.test(value); while(ok)'),
     sha256ExactBytes('do /a  b/.test(value); while(ok)'),
     'regular-expression bytes after do must remain digest-significant',
+  );
+});
+
+test('token secret initialization requires the active fail-closed production guard', () => {
+  const guard = `if (!BASE_SECRET) {
+    throw new Error('missing secret');
+  }`;
+  assert.doesNotThrow(() => assertActiveTopLevelStatementAst(guard, guard, 'token guard fixture'));
+  assert.throws(
+    () => assertActiveTopLevelStatementAst(
+      `function neverCalled() { ${guard} }`,
+      guard,
+      'nested token guard fixture',
+    ),
+    /must execute its locked fail-closed top-level statement exactly once/,
   );
 });
 
@@ -348,7 +364,30 @@ test('local Apply registrations are bound to the helper reached by createServer'
       'registerTool',
       'nested local registration fixture',
     ),
-    /must register every server\.registerTool tool directly on its reachable body/,
+    /must not alias, escape, or otherwise reference server outside direct catalog registrations/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedParameterFunction(
+      applySource.replace("server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler);", "server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler);\n      return server;"),
+      'registerApplyTools',
+      'server',
+      'registerTool',
+      'returned local server fixture',
+    ),
+    /must not alias, escape, or otherwise reference server outside direct catalog registrations/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedParameterFunction(
+      applySource.replace(
+        "server.tool('trackly_zero', 'zero', {}, zeroHandler);",
+        "const add = server.tool.bind(server);\n      add('trackly_hidden', 'hidden', {}, hiddenHandler);\n      server.tool('trackly_zero', 'zero', {}, zeroHandler);",
+      ),
+      'registerApplyTools',
+      'server',
+      'tool',
+      'aliased local registration fixture',
+    ),
+    /must not alias, escape, or otherwise reference server outside direct catalog registrations/,
   );
   const baseSource = `
     function createServer() {
@@ -398,6 +437,21 @@ test('local Apply registrations are bound to the helper reached by createServer'
     'local server fixture',
     { mustPrecedeSoleFinalReturn: true },
   ));
+  const escapedServerSource = baseSource.replace(
+    "server.tool('trackly_base_one', 'one', {}, oneHandler);",
+    "publishServer(server);\n      server.tool('trackly_base_one', 'one', {}, oneHandler);",
+  );
+  assert.throws(
+    () => directToolRegistrationsInNamedParameterFunction(
+      escapedServerSource,
+      'createServer',
+      'server',
+      'tool',
+      'escaped local server fixture',
+      'direct-construction',
+    ),
+    /must not alias, escape, or otherwise reference server outside direct catalog registrations/,
+  );
   const registrationStatement = `registerApplyTools(server, {
       wrapTool,
       mcpUserAgent: MCP_USER_AGENT,
@@ -1187,6 +1241,38 @@ test('handler inspection accepts only the canonical executable wrapTool call sha
     ),
     /must provide exactly a handler, fallback message, and optional structured-content flag/,
   );
+});
+
+test('sensitive-consent revocation handler binds revision, confirmation, endpoint, and response', () => {
+  const handler = `(params) => requestApi(
+    'PATCH', '/api/jobscout/application-profile', authToken,
+    { ...params, source: 'mcp', sensitiveStorageConsent: false },
+  )`;
+  const registrationFrom = (handlerSource, sourcePath) => activeToolRegistrations(
+    `registerPluginTool('trackly_revoke_sensitive_storage_consent', { inputSchema }, wrapTool(${handlerSource}, 'Failed to revoke sensitive storage consent'));`,
+    'registerPluginTool',
+    sourcePath,
+  )[0];
+  assert.doesNotThrow(() => assertWrappedHandlerAst(
+    registrationFrom(handler, 'revocation handler fixture'),
+    handler,
+    'revocation handler fixture',
+  ));
+  for (const [label, drifted] of [
+    ['endpoint', handler.replace('/api/jobscout/application-profile', '/api/jobscout/application-profile/decoy')],
+    ['payload', handler.replace('{ ...params, source:', '{ expectedRevision: params.expectedRevision, source:')],
+    ['consent', handler.replace('sensitiveStorageConsent: false', 'sensitiveStorageConsent: true')],
+    ['response', handler.replace("=> requestApi(", "=> { requestApi(").replace("\n  )", "\n  ); return { success: true }; }")],
+  ]) {
+    assert.throws(
+      () => assertWrappedHandlerAst(
+        registrationFrom(drifted, `${label} revocation drift fixture`),
+        handler,
+        `${label} revocation drift fixture`,
+      ),
+      /must preserve its complete locked executable semantics/,
+    );
+  }
 });
 
 test('local wrapper handlers must actively parse params with their strict schema', () => {

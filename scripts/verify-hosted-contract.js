@@ -151,6 +151,79 @@ function directToolRegistrationsInNamedParameterFunction(
     assert.equal(call.arguments[0]?.type, 'StringLiteral', `${sourcePath} registrations must use static names`);
     return [{ name: call.arguments[0].value, call }];
   });
+  const permittedReceiverReferences = new Set();
+  if (receiverOrigin === 'parameter') {
+    permittedReceiverReferences.add(factory.params[0]);
+  } else {
+    const receiverDeclaration = factory.body.body.find((statement) => (
+      statement.type === 'VariableDeclaration'
+      && statement.declarations.some((declaration) => declaration.id?.name === receiverParameter)
+    ));
+    const receiverDeclarator = receiverDeclaration.declarations.find(
+      (declaration) => declaration.id?.name === receiverParameter,
+    );
+    permittedReceiverReferences.add(receiverDeclarator.id);
+  }
+  const catalogRegistrationMethods = new Set(['tool', 'registerTool', 'registerPrompt', 'registerResource']);
+  for (const statement of factory.body.body) {
+    const expression = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    const callee = expression?.type === 'CallExpression' ? expression.callee : null;
+    const receiver = callee?.type === 'MemberExpression' ? unwrapTransparentExpression(callee.object) : null;
+    const member = callee?.type === 'MemberExpression'
+      ? (callee.computed
+        ? (callee.property?.type === 'StringLiteral' ? callee.property.value : null)
+        : (callee.property?.type === 'Identifier' ? callee.property.name : null))
+      : null;
+    if (receiver?.type === 'Identifier'
+      && receiver.name === receiverParameter
+      && catalogRegistrationMethods.has(member)
+      && expression.arguments[0]?.type === 'StringLiteral') {
+      permittedReceiverReferences.add(receiver);
+    }
+    if (expectedFunction === 'createServer'
+      && callee?.type === 'Identifier'
+      && callee.name === 'registerApplyTools'
+      && expression.arguments[0]?.type === 'Identifier'
+      && expression.arguments[0].name === receiverParameter) {
+      permittedReceiverReferences.add(expression.arguments[0]);
+    }
+    if (expectedFunction === 'createServer'
+      && statement.type === 'ReturnStatement'
+      && statement.argument?.type === 'Identifier'
+      && statement.argument.name === receiverParameter) {
+      permittedReceiverReferences.add(statement.argument);
+    }
+  }
+  const unverifiedReceiverReferences = [];
+  function visitReceiverReferences(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitReceiverReferences(child, parent, parentKey);
+      return;
+    }
+    if (node.type === 'Identifier' && node.name === receiverParameter) {
+      const isStaticMemberName = parent?.type === 'MemberExpression'
+        && parentKey === 'property'
+        && parent.computed === false;
+      const isStaticObjectKey = parent?.type === 'ObjectProperty'
+        && parentKey === 'key'
+        && parent.computed === false
+        && parent.shorthand === false;
+      if (!isStaticMemberName && !isStaticObjectKey && !permittedReceiverReferences.has(node)) {
+        unverifiedReceiverReferences.push(node);
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitReceiverReferences(child, node, key);
+    }
+  }
+  visitReceiverReferences(factory.body);
+  assert.equal(
+    unverifiedReceiverReferences.length,
+    0,
+    `${expectedFunction} in ${sourcePath} must not alias, escape, or otherwise reference ${receiverParameter} outside direct catalog registrations, the verified Apply registration call, and its final return`,
+  );
   const all = [];
   function visit(node) {
     if (node === null || typeof node !== 'object') return;
@@ -1435,6 +1508,21 @@ function assertActiveVariableInitializerAst(source, name, expectedExpression, so
     canonicalSchemaAst(activeVariableDeclarator(source, name, sourcePath).declarator.init),
     canonicalSchemaAst(babelParser.parseExpression(expectedExpression, { plugins: ['typescript'] })),
     `${name} in ${sourcePath} must preserve its locked executable definition`,
+  );
+}
+
+function assertActiveTopLevelStatementAst(source, expectedStatement, sourcePath) {
+  const program = parseFullSource(source, sourcePath).program;
+  const fixture = parseFullSource(expectedStatement, `${sourcePath} expected top-level statement`).program.body;
+  assert.equal(fixture.length, 1, `${sourcePath} expected top-level contract must contain one statement`);
+  const expectedAst = JSON.stringify(canonicalSchemaAst(fixture[0]));
+  const matches = program.body.filter((statement) => (
+    JSON.stringify(canonicalSchemaAst(statement)) === expectedAst
+  ));
+  assert.equal(
+    matches.length,
+    1,
+    `${sourcePath} must execute its locked fail-closed top-level statement exactly once`,
   );
 }
 
@@ -2984,6 +3072,37 @@ assertActiveFunctionDefinitionAst(
   hostedTracklyAccessPath,
 );
 assertImportBinding(hostedMcpTokensSource, 'default', 'jwt', 'jsonwebtoken', hostedMcpTokensPath);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
+  'isProduction',
+  "process.env.NODE_ENV === 'production'",
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
+  'jwtSecretFromEnv',
+  "(process.env.JWT_SECRET || '').trim()",
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
+  'sessionSecretFromEnv',
+  "(process.env.SESSION_SECRET || '').trim()",
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
+  'BASE_SECRET',
+  "jwtSecretFromEnv || sessionSecretFromEnv || (isProduction ? '' : 'local-dev-jwt-secret')",
+  hostedMcpTokensPath,
+);
+assertActiveTopLevelStatementAst(
+  hostedMcpTokensSource,
+  `if (!BASE_SECRET) {
+    throw new Error('[MCP Tokens] Missing JWT_SECRET or SESSION_SECRET in production.');
+  }`,
+  hostedMcpTokensPath,
+);
 assertActiveVariableInitializerAst(hostedMcpTokensSource, 'MCP_JWT_SECRET', "BASE_SECRET + '-mcp'", hostedMcpTokensPath);
 assertActiveVariableInitializerAst(
   hostedMcpTokensSource,
@@ -3037,6 +3156,7 @@ for (const [importedName, localName, moduleName] of [
 ]) {
   assertImportBinding(hostedOAuthProviderSource, importedName, localName, moduleName, hostedOAuthProviderPath);
 }
+assertImportBinding(hostedOAuthProviderSource, 'pool', 'pool', '../config/database.js', hostedOAuthProviderPath);
 assertActiveFunctionDefinitionAst(
   hostedOAuthProviderSource,
   'requireMcpEntitlement',
@@ -3874,6 +3994,17 @@ assertWrappedHandlerAst(
   )`,
   hostedPluginSourcePath,
 );
+const revokeSensitiveStorageRegistration = pluginToolRegistration(
+  'trackly_revoke_sensitive_storage_consent',
+);
+assertWrappedHandlerAst(
+  revokeSensitiveStorageRegistration,
+  `(params) => requestApi(
+    'PATCH', '/api/jobscout/application-profile', authToken,
+    { ...params, source: 'mcp', sensitiveStorageConsent: false },
+  )`,
+  hostedPluginSourcePath,
+);
 assertTruthWrapperCompatibility(
   localApplySchemaAsts.truthCertificationInputSchema,
   hostedApplySchemaAsts.truthCertificationSchema,
@@ -4627,6 +4758,7 @@ module.exports = {
   activeToolRegistrations,
   assertCommonJsDestructuredRequire,
   assertActiveFunctionDirectStatementAst,
+  assertActiveTopLevelStatementAst,
   assertActiveFunctionDefinitionAst,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
