@@ -158,28 +158,20 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     1,
     `${sourcePath} must import generateHostedOAuthInternalToken exactly once from ./server.js`,
   );
-  const postRoutes = [];
-  function visit(node) {
-    if (node === null || typeof node !== 'object') return;
-    if (Array.isArray(node)) {
-      for (const child of node) visit(child);
-      return;
-    }
-    if (
-      node.type === 'CallExpression'
-      && babelCalleeName(node.callee) === 'router.post'
-      && node.arguments[0]?.type === 'StringLiteral'
-      && node.arguments[0].value === '/'
-    ) {
-      postRoutes.push(node);
-    }
-    for (const [key, child] of Object.entries(node)) {
-      if (key === 'loc' || key === 'extra') continue;
-      visit(child);
-    }
-  }
-  visit(ast);
-  assert.equal(postRoutes.length, 1, `${sourcePath} must define exactly one POST / plugin route`);
+  const postRoutes = ast.program.body.flatMap((statement) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    return call?.type === 'CallExpression'
+      && babelCalleeName(call.callee) === 'router.post'
+      && call.arguments[0]?.type === 'StringLiteral'
+      && call.arguments[0].value === '/'
+      ? [call]
+      : [];
+  });
+  assert.equal(
+    postRoutes.length,
+    1,
+    `${sourcePath} must execute exactly one POST / plugin route registration at module initialization`,
+  );
   const handler = postRoutes[0].arguments.at(-1);
   assert.ok(
     handler?.type === 'ArrowFunctionExpression' || handler?.type === 'FunctionExpression',
@@ -207,6 +199,49 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     ],
     `POST / in ${sourcePath} must authenticate and authorize the request before its handler`,
   );
+  for (const [importedName, localName, moduleName] of [
+    ['default', 'rateLimit', 'express-rate-limit'],
+    ['ipKeyGenerator', 'ipKeyGenerator', 'express-rate-limit'],
+    ['requireBearerAuth', 'requireBearerAuth', '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js'],
+    ['tracklyOAuthProvider', 'tracklyOAuthProvider', './oauth-provider.js'],
+    ['MCP_PLUGIN_RESOURCE', 'MCP_PLUGIN_RESOURCE', './mcp-tokens.js'],
+    ['enforceTracklyPluginScope', 'enforceTracklyPluginScope', './plugin-scopes.js'],
+    ['requireTracklyAccess', 'requireTracklyAccess', '../services/trackly-access.js'],
+  ]) {
+    assertImportBinding(source, importedName, localName, moduleName, sourcePath);
+  }
+  assertActiveVariableInitializerAst(
+    source,
+    'RESOURCE_METADATA_URL',
+    "`${process.env.MCP_ISSUER_URL || 'https://mcp.usetrackly.app'}/.well-known/oauth-protected-resource/api/plugin/trackly/mcp`",
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(
+    source,
+    'allowedOrigins',
+    `new Set([
+      'https://closeai.mba',
+      'https://www.closeai.mba',
+      'https://usetrackly.app',
+      'https://www.usetrackly.app',
+      'https://mcp.usetrackly.app',
+      'https://chatgpt.com',
+    ])`,
+    sourcePath,
+  );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'validateOrigin',
+    `function validateOrigin(req: Request, res: Response, next: NextFunction): void {
+      const origin = req.headers.origin;
+      if (origin && !allowedOrigins.has(origin)) {
+        res.status(403).json({ error: 'Forbidden origin' });
+        return;
+      }
+      next();
+    }`,
+    sourcePath,
+  );
   assert.deepEqual(
     canonicalSchemaAst(activeVariableDeclarator(source, 'bearerAuth', sourcePath).declarator.init),
     canonicalSchemaAst(babelParser.parseExpression(
@@ -214,6 +249,69 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
       { plugins: ['typescript'] },
     )),
     `bearerAuth in ${sourcePath} must be the SDK bearer authentication middleware`,
+  );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'enforcePluginResource',
+    `function enforcePluginResource(
+      req: Request,
+      res: Response,
+      next: NextFunction,
+    ): void {
+      if ((req as Request & { auth?: HostedOAuthAuthInfo }).auth?.extra?.resource === MCP_PLUGIN_RESOURCE) {
+        next();
+        return;
+      }
+      res.setHeader('WWW-Authenticate', \`Bearer resource_metadata="\${RESOURCE_METADATA_URL}"\`);
+      res.status(401).json({ error: 'Bearer token is not valid for the trackly plugin resource' });
+    }`,
+    sourcePath,
+  );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'requirePluginEnabled',
+    `function requirePluginEnabled(
+      _req: Request,
+      res: Response,
+      next: NextFunction,
+    ): void {
+      if (process.env.MCP_SERVER_ENABLED === 'true') {
+        next();
+        return;
+      }
+      res.status(503).json({ error: 'trackly plugin is not enabled' });
+    }`,
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(
+    source,
+    'ipLimiter',
+    `rateLimit({
+      windowMs: 60_000,
+      max: PLUGIN_SHARED_EGRESS_RATE_LIMIT_MAX,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many trackly plugin requests. Try again later.' },
+    })`,
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(
+    source,
+    'identityLimiter',
+    `rateLimit({
+      windowMs: 60_000,
+      max: 120,
+      standardHeaders: true,
+      legacyHeaders: false,
+      keyGenerator: (req) => {
+        const auth = (req as Request & { auth?: HostedOAuthAuthInfo }).auth;
+        return auth?.extra?.userId
+          ? \`\${auth.clientId}:\${auth.extra.userId}\`
+          : ipKeyGenerator(req.ip || '');
+      },
+      message: { error: 'trackly plugin rate limit exceeded. Try again later.' },
+    })`,
+    sourcePath,
   );
   const directHandlerDeclarators = handler.body.body.flatMap((statement) => (
     statement.type === 'VariableDeclaration' ? statement.declarations : []
@@ -431,6 +529,34 @@ function assertActiveFunctionDefinitionAst(source, name, expectedSource, sourceP
   );
 }
 
+function assertActiveVariableInitializerAst(source, name, expectedExpression, sourcePath) {
+  assert.deepEqual(
+    canonicalSchemaAst(activeVariableDeclarator(source, name, sourcePath).declarator.init),
+    canonicalSchemaAst(babelParser.parseExpression(expectedExpression, { plugins: ['typescript'] })),
+    `${name} in ${sourcePath} must preserve its locked executable definition`,
+  );
+}
+
+function assertImportBinding(source, importedName, localName, moduleName, sourcePath) {
+  const matches = parseFullSource(source, sourcePath).program.body.filter((statement) => (
+    statement.type === 'ImportDeclaration'
+    && statement.source.value === moduleName
+    && statement.specifiers.some((specifier) => {
+      if (importedName === 'default') {
+        return specifier.type === 'ImportDefaultSpecifier' && specifier.local?.name === localName;
+      }
+      return specifier.type === 'ImportSpecifier'
+        && specifier.imported?.name === importedName
+        && specifier.local?.name === localName;
+    })
+  ));
+  assert.equal(
+    matches.length,
+    1,
+    `${sourcePath} must import ${importedName} as ${localName} exactly once from ${moduleName}`,
+  );
+}
+
 function wrappedHandlerFunction(registration, sourcePath) {
   const wrapper = registration.call.arguments[2];
   assert.equal(wrapper?.type, 'CallExpression', `${registration.name} handler in ${sourcePath} must use a wrapper call`);
@@ -456,6 +582,26 @@ function wrappedHandlerReturnedObjectProperties(registration, sourcePath) {
     return staticBabelObjectProperties(handler.body, `${registration.name} output projection`);
   }
   return wrappedHandlerReturnProperties(registration, sourcePath);
+}
+
+function assertWrappedHandlerDirectStatementAst(registration, expectedStatement, sourcePath) {
+  const handler = wrappedHandlerFunction(registration, sourcePath);
+  assert.equal(handler.body?.type, 'BlockStatement', `${registration.name} handler in ${sourcePath} must use a block body`);
+  const fixture = parseFullSource(
+    `function expectedHandlerStatement() { ${expectedStatement} }`,
+    `${registration.name} expected handler statement`,
+  ).program.body[0];
+  assert.equal(fixture.type, 'FunctionDeclaration');
+  assert.equal(fixture.body.body.length, 1);
+  const expectedAst = canonicalSchemaAst(fixture.body.body[0]);
+  const matches = handler.body.body.filter((statement) => (
+    JSON.stringify(canonicalSchemaAst(statement)) === JSON.stringify(expectedAst)
+  ));
+  assert.equal(
+    matches.length,
+    1,
+    `${registration.name} handler in ${sourcePath} must execute its locked direct statement exactly once`,
+  );
 }
 
 function directCallsInWrappedHandler(registration, expectedCallee, sourcePath) {
@@ -520,8 +666,13 @@ function assertWrappedHandlerAssignedRequestEndpoint(
   method,
   pathExpression,
   sourcePath,
-  guardExpression = null,
+  options = {},
 ) {
+  const {
+    afterBindingName = null,
+    calleeName = 'requestApi',
+    guardExpression = null,
+  } = options;
   const handler = wrappedHandlerFunction(registration, sourcePath);
   const matches = [];
   function visit(node, parentBlock = null, activeGuard = null) {
@@ -547,23 +698,30 @@ function assertWrappedHandlerAssignedRequestEndpoint(
     }
   }
   visit(handler);
+  const expectedGuard = guardExpression === null
+    ? null
+    : canonicalSchemaAst(babelParser.parseExpression(guardExpression, { plugins: ['typescript'] }));
+  const guardedMatches = matches.filter(({ guard }) => (
+    guardExpression === null
+    || JSON.stringify(canonicalSchemaAst(guard)) === JSON.stringify(expectedGuard)
+  ));
   assert.equal(
-    matches.length,
+    guardedMatches.length,
     1,
     `${registration.name} handler in ${sourcePath} must bind its live ${bindingName} request exactly once`,
   );
-  const [{ declarator, block, guard }] = matches;
+  const [{ declarator, block, guard }] = guardedMatches;
   if (guardExpression !== null) {
     assert.deepEqual(
       canonicalSchemaAst(guard),
-      canonicalSchemaAst(babelParser.parseExpression(guardExpression, { plugins: ['typescript'] })),
+      expectedGuard,
       `${registration.name} live ${bindingName} request in ${sourcePath} must execute under ${guardExpression}`,
     );
   }
   assert.equal(declarator.init?.type, 'AwaitExpression');
   const requestCall = declarator.init.argument;
   assert.equal(requestCall?.type, 'CallExpression');
-  assert.equal(babelCalleeName(requestCall.callee), 'requestApi');
+  assert.equal(babelCalleeName(requestCall.callee), calleeName);
   const [methodArgument, pathArgument] = requestCall.arguments;
   assert.equal(methodArgument?.type, 'StringLiteral');
   assert.equal(methodArgument.value, method);
@@ -577,6 +735,18 @@ function assertWrappedHandlerAssignedRequestEndpoint(
     statement.type === 'VariableDeclaration' && statement.declarations.includes(declarator)
   ));
   assert.ok(declarationStatementIndex >= 0);
+  if (afterBindingName !== null) {
+    const prerequisiteIndex = block.body.findIndex((statement) => (
+      statement.type === 'VariableDeclaration'
+      && statement.declarations.some((candidate) => (
+        candidate.id?.type === 'Identifier' && candidate.id.name === afterBindingName
+      ))
+    ));
+    assert.ok(
+      prerequisiteIndex >= 0 && prerequisiteIndex < declarationStatementIndex,
+      `${registration.name} live ${bindingName} request in ${sourcePath} must occur after ${afterBindingName}`,
+    );
+  }
   const laterSource = block.body.slice(declarationStatementIndex + 1);
   let referenced = false;
   function findReference(node) {
@@ -726,6 +896,9 @@ const AST_METADATA_FIELDS = new Set([
   'extra',
   'comments',
   'errors',
+  'leadingComments',
+  'trailingComments',
+  'innerComments',
 ]);
 
 function canonicalSchemaAst(value) {
@@ -1717,28 +1890,83 @@ assert.deepEqual(
 for (const [field, expression] of Object.entries(applyOutputContract)) {
   assertSchemaPropertyExpression(applyOutputProperties, field, expression, 'applyOutputSchema');
 }
+const startOrResumeRegistration = pluginToolRegistration('trackly_start_or_resume_apply');
 const startOrResume = pluginToolDefinition('trackly_start_or_resume_apply');
-for (const marker of ['browserSurface', 'plugin-prepare']) {
-  assert.match(startOrResume, new RegExp(marker.replaceAll('/', '\\/')));
-}
+assertWrappedHandlerAssignedRequestEndpoint(
+  startOrResumeRegistration,
+  'prepared',
+  'POST',
+  '`/api/jobscout/apply/batches/${batchId}/plugin-prepare`',
+  hostedPluginSourcePath,
+  { afterBindingName: 'page', calleeName: 'orchestrationRequest' },
+);
 assert.match(startOrResume, /browserSurface: z\.enum\(APPLY_BROWSER_SURFACES\)/);
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
 const getWorkRegistration = pluginToolRegistration('trackly_get_apply_work');
-const getWork = pluginToolDefinition('trackly_get_apply_work');
+const getWorkDescriptorProperties = staticBabelObjectProperties(
+  getWorkRegistration.call.arguments[1],
+  'trackly_get_apply_work descriptor',
+);
+assertBabelPropertyExpression(
+  getWorkDescriptorProperties,
+  'inputSchema',
+  `z.object({
+    executionId: z.number().int().min(1).optional(),
+    snapshot: z.object({
+      memberIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+      profileKeys: z.array(z.string().min(1).max(200)).max(100).optional(),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+    }).strict().optional(),
+  }).strict().superRefine((value, context) => {
+    if (value.snapshot && !value.executionId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'executionId is required for a snapshot' });
+    }
+  })`,
+  'trackly_get_apply_work descriptor',
+);
 assertWrappedHandlerAssignedRequestEndpoint(
   getWorkRegistration,
   'work',
   'POST',
   '`/api/jobscout/apply/executions/${resolvedExecutionId}/plugin-work`',
   hostedPluginSourcePath,
-  '!snapshot',
+  { guardExpression: '!snapshot' },
 );
-assert.match(getWork, /memberIds: z\.array\(z\.number\(\)\.int\(\)\.min\(1\)\)\.min\(1\)/);
-assert.match(getWork, /profileKeys: z\.array\(z\.string\(\)\.min\(1\)\.max\(200\)\)\.max\(100\)\.optional\(\)/);
+assertWrappedHandlerAssignedRequestEndpoint(
+  getWorkRegistration,
+  'workSnapshot',
+  'POST',
+  '`/api/jobscout/apply/executions/${resolvedExecutionId}/snapshot`',
+  hostedPluginSourcePath,
+);
+assertWrappedHandlerDirectStatementAst(
+  getWorkRegistration,
+  `return {
+    ...projectApplyWorkSnapshot(workSnapshot, snapshot.profileKeys ?? []),
+    kind: 'snapshot' as const,
+  };`,
+  hostedPluginSourcePath,
+);
 
+const progressRegistration = pluginToolRegistration('trackly_report_apply_progress');
 const progress = pluginToolDefinition('trackly_report_apply_progress');
-assert.match(progress, /plugin-observations\/bulk/);
+assertWrappedHandlerAssignedRequestEndpoint(
+  progressRegistration,
+  'response',
+  'POST',
+  "'/api/jobscout/apply/plugin-observations/bulk'",
+  hostedPluginSourcePath,
+  { guardExpression: "params.operation === 'record_observations'" },
+);
+assertWrappedHandlerAssignedRequestEndpoint(
+  progressRegistration,
+  'renewedWork',
+  'POST',
+  '`/api/jobscout/apply/executions/${executionId}/plugin-work`',
+  hostedPluginSourcePath,
+  { afterBindingName: 'response' },
+);
 assert.doesNotMatch(progress, /\bleaseToken\b/);
 const progressOutputProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
@@ -1780,8 +2008,6 @@ assert.deepEqual(
 for (const [field, expression] of Object.entries(progressOutputContract)) {
   assertSchemaPropertyExpression(progressOutputProperties, field, expression, 'progressOutputSchema');
 }
-assert.match(progress, /plugin-work/);
-
 const resumeRegistration = pluginToolRegistration('trackly_prepare_resume_artifact');
 const resumeDescriptorProperties = staticBabelObjectProperties(
   resumeRegistration.call.arguments[1],
@@ -1878,10 +2104,10 @@ assertWrappedHandlerRequestEndpoint(
   hostedPluginSourcePath,
 );
 
-const reconcile = pluginToolDefinition('trackly_reconcile_manual_submission');
+const reconcileRegistration = pluginToolRegistration('trackly_reconcile_manual_submission');
 const reconcileInputSchema = registrationDescriptorPropertyAst(
   hostedPluginSource,
-  pluginToolRegistration('trackly_reconcile_manual_submission'),
+  reconcileRegistration,
   'inputSchema',
   hostedPluginSourcePath,
 );
@@ -1948,7 +2174,12 @@ for (const [confirmation, contract] of Object.entries(reconcileBranchContract)) 
     );
   }
 }
-assert.match(reconcile, /plugin-manual-submission/);
+assertWrappedHandlerRequestEndpoint(
+  reconcileRegistration,
+  'POST',
+  '`/api/jobscout/apply/runs/${runId}/plugin-manual-submission`',
+  hostedPluginSourcePath,
+);
 
 console.log(
   `Trackly Apply MCP contracts match at ${local.contractVersion}; the ${hostedPluginTools.length}-tool public plugin facade matches at ${hostedPluginContract.contractVersion}.`,
@@ -1965,6 +2196,7 @@ module.exports = {
   assertSchemaPropertyExpression,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
+  assertWrappedHandlerDirectStatementAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,

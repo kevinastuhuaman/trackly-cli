@@ -18,6 +18,7 @@ const {
   assertExportedFactoryUsedByPluginRouter,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
+  assertWrappedHandlerDirectStatementAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
   classifyFreeIdentifiers,
@@ -266,13 +267,83 @@ test('plugin registration proof binds the exported factory to the live POST rout
     handlerBody,
     authInfoExpression = '(req as Request & { auth: HostedOAuthAuthInfo }).auth',
     authTokenExpression = 'generateHostedOAuthInternalToken(authInfo)',
+    routeWrapperStart = '',
+    routeWrapperEnd = '',
   ) => `
+    import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+    import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+    import { tracklyOAuthProvider } from './oauth-provider.js';
+    import { MCP_PLUGIN_RESOURCE } from './mcp-tokens.js';
+    import { enforceTracklyPluginScope } from './plugin-scopes.js';
+    import { requireTracklyAccess } from '../services/trackly-access.js';
     import { createTracklyPluginMcpServer } from './plugin-server.js';
     import { generateHostedOAuthInternalToken } from './server.js';
+    const RESOURCE_METADATA_URL = \`\${process.env.MCP_ISSUER_URL || 'https://mcp.usetrackly.app'}/.well-known/oauth-protected-resource/api/plugin/trackly/mcp\`;
+    const allowedOrigins = new Set([
+      'https://closeai.mba',
+      'https://www.closeai.mba',
+      'https://usetrackly.app',
+      'https://www.usetrackly.app',
+      'https://mcp.usetrackly.app',
+      'https://chatgpt.com',
+    ]);
+    function validateOrigin(req: Request, res: Response, next: NextFunction): void {
+      const origin = req.headers.origin;
+      if (origin && !allowedOrigins.has(origin)) {
+        res.status(403).json({ error: 'Forbidden origin' });
+        return;
+      }
+      next();
+    }
     const bearerAuth = requireBearerAuth({
       verifier: tracklyOAuthProvider,
       resourceMetadataUrl: RESOURCE_METADATA_URL,
     });
+    export function enforcePluginResource(
+      req: Request,
+      res: Response,
+      next: NextFunction,
+    ): void {
+      if ((req as Request & { auth?: HostedOAuthAuthInfo }).auth?.extra?.resource === MCP_PLUGIN_RESOURCE) {
+        next();
+        return;
+      }
+      res.setHeader('WWW-Authenticate', \`Bearer resource_metadata="\${RESOURCE_METADATA_URL}"\`);
+      res.status(401).json({ error: 'Bearer token is not valid for the trackly plugin resource' });
+    }
+    export function requirePluginEnabled(
+      _req: Request,
+      res: Response,
+      next: NextFunction,
+    ): void {
+      if (process.env.MCP_SERVER_ENABLED === 'true') {
+        next();
+        return;
+      }
+      res.status(503).json({ error: 'trackly plugin is not enabled' });
+    }
+    export const PLUGIN_SHARED_EGRESS_RATE_LIMIT_MAX = 6_000;
+    const ipLimiter = rateLimit({
+      windowMs: 60_000,
+      max: PLUGIN_SHARED_EGRESS_RATE_LIMIT_MAX,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many trackly plugin requests. Try again later.' },
+    });
+    const identityLimiter = rateLimit({
+      windowMs: 60_000,
+      max: 120,
+      standardHeaders: true,
+      legacyHeaders: false,
+      keyGenerator: (req) => {
+        const auth = (req as Request & { auth?: HostedOAuthAuthInfo }).auth;
+        return auth?.extra?.userId
+          ? \`\${auth.clientId}:\${auth.extra.userId}\`
+          : ipKeyGenerator(req.ip || '');
+      },
+      message: { error: 'trackly plugin rate limit exceeded. Try again later.' },
+    });
+    ${routeWrapperStart}
     router.post(
       '/',
       requirePluginEnabled,
@@ -289,6 +360,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
         ${handlerBody}
       },
     );
+    ${routeWrapperEnd}
   `;
   const routerSource = routerFixture(`
     const server = createTracklyPluginMcpServer(authToken);
@@ -305,6 +377,23 @@ test('plugin registration proof binds the exported factory to the live POST rout
     'createTracklyPluginMcpServer',
     'router fixture',
   ));
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerFixture(`
+        const server = createTracklyPluginMcpServer(authToken);
+        const transport = new StreamableHTTPServerTransport({});
+        try {
+          await server.connect(transport);
+          await transport.handleRequest(req, res, req.body);
+        } finally {
+          await server.close();
+        }
+      `, undefined, undefined, 'function registerLater() {', '}'),
+      'createTracklyPluginMcpServer',
+      'dead route fixture',
+    ),
+    /must execute exactly one POST \/ plugin route registration at module initialization/,
+  );
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
       if (false) {
@@ -347,25 +436,30 @@ test('plugin registration proof binds the exported factory to the live POST rout
     /must mint authToken only from authenticated authInfo/,
   );
   assert.throws(
-    () => assertExportedFactoryUsedByPluginRouter(`
-      import { createTracklyPluginMcpServer } from './plugin-server.js';
-      import { generateHostedOAuthInternalToken } from './server.js';
-      const bearerAuth = requireBearerAuth({
-        verifier: tracklyOAuthProvider,
-        resourceMetadataUrl: RESOURCE_METADATA_URL,
-      });
-      router.post(
-        '/', requirePluginEnabled, validateOrigin, ipLimiter, bearerAuth,
-        enforcePluginResource, requireTracklyAccess, enforceTracklyPluginScope, identityLimiter,
-        async (req: Request, res: Response) => {
-          const authInfo = req.body.auth;
-          const authToken = generateHostedOAuthInternalToken(authInfo);
-          const server = createTracklyPluginMcpServer(authToken);
-          const transport = new StreamableHTTPServerTransport({});
-        },
-      );
-    `, 'createTracklyPluginMcpServer', 'raw auth context fixture'),
+    () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
+      const server = createTracklyPluginMcpServer(authToken);
+      const transport = new StreamableHTTPServerTransport({});
+    `, 'req.body.auth'), 'createTracklyPluginMcpServer', 'raw auth context fixture'),
     /must derive authInfo from the authenticated request context/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace("from './plugin-scopes.js'", "from './no-op.js'"),
+      'createTracklyPluginMcpServer',
+      'wrong middleware provenance fixture',
+    ),
+    /must import enforceTracklyPluginScope as enforceTracklyPluginScope exactly once from \.\/plugin-scopes\.js/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace(
+        "if (origin && !allowedOrigins.has(origin))",
+        "if (false)",
+      ),
+      'createTracklyPluginMcpServer',
+      'no-op origin middleware fixture',
+    ),
+    /validateOrigin.*must preserve its locked executable branch semantics/,
   );
 });
 
@@ -480,6 +574,13 @@ test('live work endpoint validation binds the consumed request result', () => {
         );
         return work;
       }
+      const workSnapshot = await requestApi(
+        'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/snapshot\`, authToken, snapshot,
+      );
+      return {
+        ...projectApplyWorkSnapshot(workSnapshot, snapshot.profileKeys ?? []),
+        kind: 'snapshot' as const,
+      };
     }));
   `;
   const [valid] = activeToolRegistrations(validSource, 'registerPluginTool', 'live work fixture');
@@ -489,7 +590,22 @@ test('live work endpoint validation binds the consumed request result', () => {
     'POST',
     '`/api/jobscout/apply/executions/${resolvedExecutionId}/plugin-work`',
     'live work fixture',
-    '!snapshot',
+    { guardExpression: '!snapshot' },
+  ));
+  assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
+    valid,
+    'workSnapshot',
+    'POST',
+    '`/api/jobscout/apply/executions/${resolvedExecutionId}/snapshot`',
+    'live work fixture',
+  ));
+  assert.doesNotThrow(() => assertWrappedHandlerDirectStatementAst(
+    valid,
+    `return {
+      ...projectApplyWorkSnapshot(workSnapshot, snapshot.profileKeys ?? []),
+      kind: 'snapshot' as const,
+    };`,
+    'live work fixture',
   ));
 
   const decoySource = `
@@ -512,9 +628,205 @@ test('live work endpoint validation binds the consumed request result', () => {
       'POST',
       '`/api/jobscout/apply/executions/${resolvedExecutionId}/plugin-work`',
       'decoy work fixture',
-      '!snapshot',
+      { guardExpression: '!snapshot' },
     ),
     /live work request.*must target/s,
+  );
+  const snapshotDecoySource = `
+    registerPluginTool('trackly_get_apply_work', { inputSchema }, wrapTool(async () => {
+      // /snapshot and projectApplyWorkSnapshot(workSnapshot, snapshot.profileKeys ?? [])
+      const workSnapshot = await requestApi(
+        'POST', \`/api/jobscout/apply/executions/\${resolvedExecutionId}/unbounded-work\`, authToken, snapshot,
+      );
+      return { ...workSnapshot, kind: 'snapshot' as const };
+    }));
+  `;
+  const [snapshotDecoy] = activeToolRegistrations(
+    snapshotDecoySource,
+    'registerPluginTool',
+    'snapshot decoy fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerAssignedRequestEndpoint(
+      snapshotDecoy,
+      'workSnapshot',
+      'POST',
+      '`/api/jobscout/apply/executions/${resolvedExecutionId}/snapshot`',
+      'snapshot decoy fixture',
+    ),
+    /live workSnapshot request.*must target/s,
+  );
+  assert.throws(
+    () => assertWrappedHandlerDirectStatementAst(
+      snapshotDecoy,
+      `return {
+        ...projectApplyWorkSnapshot(workSnapshot, snapshot.profileKeys ?? []),
+        kind: 'snapshot' as const,
+      };`,
+      'snapshot decoy fixture',
+    ),
+    /must execute its locked direct statement exactly once/,
+  );
+});
+
+test('snapshot input verification binds the complete active bounded schema', () => {
+  const expectedInputSchema = `z.object({
+    executionId: z.number().int().min(1).optional(),
+    snapshot: z.object({
+      memberIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+      profileKeys: z.array(z.string().min(1).max(200)).max(100).optional(),
+      browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+    }).strict().optional(),
+  }).strict()`;
+  const source = `
+    registerPluginTool('trackly_get_apply_work', {
+      /* inputSchema: ${expectedInputSchema}, */
+      inputSchema: z.object({
+        executionId: z.number().int().min(1).optional(),
+        snapshot: z.object({
+          memberIds: z.array(z.number().int().min(1)).max(999),
+          profileKeys: z.array(z.string()).max(1_000).optional(),
+          browserSurface: z.enum(APPLY_BROWSER_SURFACES),
+        }).strict().optional(),
+      }).strict(),
+    }, handler);
+  `;
+  const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'snapshot schema fixture');
+  const descriptor = registration.call.arguments[1];
+  assert.throws(
+    () => assertBabelPropertyExpression(
+      Object.fromEntries(descriptor.properties.map((property) => [property.key.name, property.value])),
+      'inputSchema',
+      expectedInputSchema,
+      'snapshot schema fixture',
+    ),
+    /inputSchema must equal/,
+  );
+});
+
+test('start, progress, and reconciliation checks bind active endpoint control flow', () => {
+  const startSource = `
+    registerPluginTool('trackly_start_or_resume_apply', { inputSchema }, wrapTool(async () => {
+      const page = await orchestrationRequest('GET', pagePath);
+      const prepared = await orchestrationRequest(
+        'POST', \`/api/jobscout/apply/batches/\${batchId}/plugin-prepare\`, body,
+      );
+      return prepared;
+    }));
+  `;
+  const [start] = activeToolRegistrations(startSource, 'registerPluginTool', 'start endpoint fixture');
+  assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
+    start,
+    'prepared',
+    'POST',
+    '`/api/jobscout/apply/batches/${batchId}/plugin-prepare`',
+    'start endpoint fixture',
+    { afterBindingName: 'page', calleeName: 'orchestrationRequest' },
+  ));
+  const [wrongStart] = activeToolRegistrations(
+    startSource.replace('/plugin-prepare', '/wrong-prepare'),
+    'registerPluginTool',
+    'wrong start endpoint fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerAssignedRequestEndpoint(
+      wrongStart,
+      'prepared',
+      'POST',
+      '`/api/jobscout/apply/batches/${batchId}/plugin-prepare`',
+      'wrong start endpoint fixture',
+      { afterBindingName: 'page', calleeName: 'orchestrationRequest' },
+    ),
+    /live prepared request.*must target/s,
+  );
+
+  const progressSource = `
+    registerPluginTool('trackly_report_apply_progress', { inputSchema }, wrapTool(async (params) => {
+      if (params.operation === 'record_observations') {
+        const response = await requestApi(
+          'POST', '/api/jobscout/apply/plugin-observations/bulk', authToken, body,
+        );
+        return response;
+      }
+      const response = await requestApi('POST', mutationPath, authToken, body);
+      const renewedWork = await requestApi(
+        'POST', \`/api/jobscout/apply/executions/\${executionId}/plugin-work\`, authToken, {},
+      );
+      return renewedWork;
+    }));
+  `;
+  const [progressRegistration] = activeToolRegistrations(
+    progressSource,
+    'registerPluginTool',
+    'progress endpoint fixture',
+  );
+  assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
+    progressRegistration,
+    'response',
+    'POST',
+    "'/api/jobscout/apply/plugin-observations/bulk'",
+    'progress endpoint fixture',
+    { guardExpression: "params.operation === 'record_observations'" },
+  ));
+  assert.doesNotThrow(() => assertWrappedHandlerAssignedRequestEndpoint(
+    progressRegistration,
+    'renewedWork',
+    'POST',
+    '`/api/jobscout/apply/executions/${executionId}/plugin-work`',
+    'progress endpoint fixture',
+    { afterBindingName: 'response' },
+  ));
+  const [wrongObservation] = activeToolRegistrations(
+    progressSource.replace('/plugin-observations/bulk', '/wrong-observations'),
+    'registerPluginTool',
+    'wrong observation endpoint fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerAssignedRequestEndpoint(
+      wrongObservation,
+      'response',
+      'POST',
+      "'/api/jobscout/apply/plugin-observations/bulk'",
+      'wrong observation endpoint fixture',
+      { guardExpression: "params.operation === 'record_observations'" },
+    ),
+    /live response request.*must target/s,
+  );
+  const [wrongRenewal] = activeToolRegistrations(
+    progressSource.replace('/plugin-work', '/wrong-work'),
+    'registerPluginTool',
+    'wrong renewal endpoint fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerAssignedRequestEndpoint(
+      wrongRenewal,
+      'renewedWork',
+      'POST',
+      '`/api/jobscout/apply/executions/${executionId}/plugin-work`',
+      'wrong renewal endpoint fixture',
+      { afterBindingName: 'response' },
+    ),
+    /live renewedWork request.*must target/s,
+  );
+
+  const reconcileSource = `
+    registerPluginTool('trackly_reconcile_manual_submission', { inputSchema }, wrapTool(({ runId }) =>
+      requestApi('POST', \`/api/jobscout/apply/runs/\${runId}/wrong-reconciliation\`, authToken, body)
+    ));
+  `;
+  const [reconcile] = activeToolRegistrations(
+    reconcileSource,
+    'registerPluginTool',
+    'reconcile endpoint fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerRequestEndpoint(
+      reconcile,
+      'POST',
+      '`/api/jobscout/apply/runs/${runId}/plugin-manual-submission`',
+      'reconcile endpoint fixture',
+    ),
+    /must target `\/api\/jobscout\/apply\/runs\/\$\{runId\}\/plugin-manual-submission`/,
   );
 });
 
