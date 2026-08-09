@@ -549,6 +549,6 @@ console.log(
 
 module.exports = { normalizeJavaScriptTrivia, sha256, verifyHostedContract };
 
-if (require.main === module || process.env.TRACKLY_BACKEND_DIR) {
+if (require.main === module) {
   verifyHostedContract();
 }

@@ -554,7 +554,7 @@ test('hosted parity verifier fails clearly when the plugin contract has no tools
       return originalReadFileSync(filePath, ...args);
     };
 
-    require(${JSON.stringify(verifierPath)});
+    require(${JSON.stringify(verifierPath)}).verifyHostedContract();
   `;
   const result = spawnSync(process.execPath, ['-e', childScript], {
     encoding: 'utf8',

@@ -99,6 +99,21 @@ test('executable digest normalization preserves literal contents and removes onl
   );
 });
 
+test('importing executable digest helpers never runs hosted verification as a side effect', () => {
+  const { spawnSync } = require('node:child_process');
+  const verifierPath = path.join(ROOT, 'scripts', 'verify-hosted-contract.js');
+  const result = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(verifierPath)})`], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      TRACKLY_BACKEND_DIR: '/definitely/not/a/backend',
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
 function validateAppBinding(manifest, appConfig) {
   const hasManifestBinding = Object.hasOwn(manifest, 'apps');
   assert.equal(hasManifestBinding, appConfig !== null, 'manifest and .app.json binding must appear together');
