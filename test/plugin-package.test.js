@@ -577,6 +577,14 @@ test('job-brief projection validation binds every active value expression', () =
     () => assertBabelPropertyExpression(properties, 'companyName', 'brief.contacts', 'job brief fixture'),
     /companyName must equal brief\.contacts/,
   );
+  const [alternateReturn] = activeToolRegistrations(source.replace(
+    'const brief = response.brief;',
+    'const brief = response.brief;\n      if (brief.contacts) return { contacts: brief.contacts };',
+  ), 'registerPluginTool', 'alternate job brief fixture');
+  assert.throws(
+    () => wrappedHandlerReturnProperties(alternateReturn, 'alternate job brief fixture'),
+    /must have exactly one reachable projection return/,
+  );
 });
 
 test('local wrapper handlers must actively parse params with their strict schema', () => {
@@ -599,6 +607,71 @@ test('local wrapper handlers must actively parse params with their strict schema
   assert.throws(
     () => assertWrappedHandlerParsesWithSchema(decoy, 'strictSchema', 'decoy parse fixture'),
     /must execute exactly one strictSchema\.parse\(params\) call/,
+  );
+  const conditionalSource = `
+    server.registerTool('trackly_strict', { inputSchema: publicSchema }, wrapTool(async (params) => {
+      if (enabled) {
+        const parsed = strictSchema.parse(params);
+      }
+      return requestApi('POST', '/permissive', params);
+    }));
+  `;
+  const [conditional] = activeToolRegistrations(
+    conditionalSource,
+    'server.registerTool',
+    'conditional parse fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerParsesWithSchema(conditional, 'strictSchema', 'conditional parse fixture'),
+    /must parse params in its first unconditional statement/,
+  );
+  const deadSource = `
+    server.registerTool('trackly_strict', { inputSchema: publicSchema }, wrapTool(async (params) => {
+      return requestApi('POST', '/permissive', params);
+      const parsed = strictSchema.parse(params);
+    }));
+  `;
+  const [dead] = activeToolRegistrations(deadSource, 'server.registerTool', 'dead parse fixture');
+  assert.throws(
+    () => assertWrappedHandlerParsesWithSchema(dead, 'strictSchema', 'dead parse fixture'),
+    /must parse params in its first unconditional statement/,
+  );
+});
+
+test('truth-certification handler locks auth, body, idempotency, and bounded projection', () => {
+  const source = `
+    registerPluginTool('trackly_certify_review_ready', { inputSchema }, wrapTool(async ({ runId, idempotencyKey, ...binding }) => {
+      const response = await requestApi(
+        'POST', \`/api/jobscout/apply/runs/\${runId}/plugin-review-ready\`, wrongToken,
+        binding,
+        { 'Idempotency-Key': idempotencyKey },
+      );
+      return {
+        view: 'review' as const,
+        success: response?.success !== false,
+        reviewReady: response?.success !== false,
+        status: safeReviewStatus(response?.outcome?.status ?? response?.status ?? response?.run?.status),
+        noSubmit: true as const,
+      };
+    }));
+  `;
+  const [registration] = activeToolRegistrations(source, 'registerPluginTool', 'certification handler fixture');
+  assert.throws(
+    () => assertWrappedHandlerAst(registration, `async ({ runId, idempotencyKey, ...binding }) => {
+      const response = await requestApi(
+        'POST', \`/api/jobscout/apply/runs/\${runId}/plugin-review-ready\`, authToken,
+        binding,
+        { 'Idempotency-Key': idempotencyKey },
+      );
+      return {
+        view: 'review' as const,
+        success: response?.success !== false,
+        reviewReady: response?.success !== false,
+        status: safeReviewStatus(response?.outcome?.status ?? response?.status ?? response?.run?.status),
+        noSubmit: true as const,
+      };
+    }`, 'certification handler fixture'),
+    /must preserve its complete locked executable semantics/,
   );
 });
 

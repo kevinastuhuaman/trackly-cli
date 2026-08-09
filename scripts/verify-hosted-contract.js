@@ -776,8 +776,30 @@ function wrappedHandlerFunction(registration, sourcePath) {
 function wrappedHandlerReturnProperties(registration, sourcePath) {
   const handler = wrappedHandlerFunction(registration, sourcePath);
   assert.equal(handler.body?.type, 'BlockStatement', `${registration.name} handler in ${sourcePath} must use a block body`);
-  const returns = handler.body.body.filter((statement) => statement.type === 'ReturnStatement');
-  assert.equal(returns.length, 1, `${registration.name} handler in ${sourcePath} must directly return one projection`);
+  const returns = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (
+      node !== handler
+      && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
+    ) return;
+    if (node.type === 'ReturnStatement') returns.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(handler);
+  assert.equal(returns.length, 1, `${registration.name} handler in ${sourcePath} must have exactly one reachable projection return`);
+  assert.equal(
+    handler.body.body.at(-1),
+    returns[0],
+    `${registration.name} handler in ${sourcePath} must end with its sole bounded projection return`,
+  );
   return staticBabelObjectProperties(returns[0].argument, `${registration.name} output projection`);
 }
 
@@ -890,6 +912,31 @@ function assertWrappedHandlerParsesWithSchema(registration, schemaName, sourcePa
   assert.equal(parseCalls[0].arguments.length, 1);
   assert.equal(parseCalls[0].arguments[0]?.type, 'Identifier');
   assert.equal(parseCalls[0].arguments[0].name, parameterName);
+  if (handler.body.type === 'BlockStatement') {
+    const firstStatement = handler.body.body[0];
+    assert.equal(
+      firstStatement?.type,
+      'VariableDeclaration',
+      `${registration.name} handler in ${sourcePath} must parse params in its first unconditional statement before forwarding or returning`,
+    );
+    assert.equal(firstStatement.declarations.length, 1);
+    assert.equal(
+      firstStatement.declarations[0].init,
+      parseCalls[0],
+      `${registration.name} handler in ${sourcePath} must directly initialize its first binding from ${schemaName}.parse(params)`,
+    );
+    return;
+  }
+  const forwardedCall = handler.body.type === 'AwaitExpression' ? handler.body.argument : handler.body;
+  assert.equal(
+    forwardedCall?.type,
+    'CallExpression',
+    `${registration.name} handler in ${sourcePath} must directly forward the parsed params from its expression body`,
+  );
+  assert.ok(
+    forwardedCall.arguments.includes(parseCalls[0]),
+    `${registration.name} handler in ${sourcePath} must evaluate ${schemaName}.parse(params) as a direct forwarding argument before the request call`,
+  );
 }
 
 function assertWrappedHandlerRequestEndpoint(registration, method, pathExpression, sourcePath) {
@@ -2576,13 +2623,25 @@ for (const [field, expression] of Object.entries(certifyInputContract)) {
     'trackly_certify_review_ready.inputSchema',
   );
 }
-assertWrappedHandlerAssignedRequestEndpoint(
+assertWrappedHandlerAst(
   certifyRegistration,
-  'response',
-  'POST',
-  '`/api/jobscout/apply/runs/${runId}/plugin-review-ready`',
+  `async ({ runId, idempotencyKey, ...binding }) => {
+    const response = await requestApi(
+      'POST', \`/api/jobscout/apply/runs/\${runId}/plugin-review-ready\`, authToken,
+      binding,
+      { 'Idempotency-Key': idempotencyKey },
+    );
+    return {
+      view: 'review' as const,
+      success: response?.success !== false,
+      reviewReady: response?.success !== false,
+      status: safeReviewStatus(
+        response?.outcome?.status ?? response?.status ?? response?.run?.status,
+      ),
+      noSubmit: true as const,
+    };
+  }`,
   hostedPluginSourcePath,
-  { requireReachableForAllInputs: true },
 );
 
 const reconcileRegistration = pluginToolRegistration('trackly_reconcile_manual_submission');

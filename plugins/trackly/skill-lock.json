@@ -113,9 +113,9 @@
       "trackly_reconcile_manual_submission": "32be19dadef3c8e3a1d9f320d3c1a9a0cde3845f930dac85641409f25a722b0a",
       "trackly_stop_apply": "8363bfe5eb7fb8ed4093b1f01bdaa9ebcb599ac35004fd13bab0ae6a2ab4f1ce"
     },
-    "pluginServerSha256": "f75fd1785b65594120b545c4fecee47a61d9b07719f8331b66777758b15a8ef6",
+    "pluginServerSha256": "fe5b50c09b1d7b24fb22c384589c50d2be1be8928472103663d5862a3561eb58",
     "pluginScopesSha256": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
-    "jobBriefServiceSha256": "38c1e59c85f3de09fd09ff6bfd94aa86ad00d6276a3202675ec27fac2fc8a4ab",
+    "jobBriefServiceSha256": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
     "schemaSha256": {
       "SAFE_IDEMPOTENCY_KEY": "046859665306e5aeaf57032c76268934e1b98c95d4c17a88434062c9b6a4547a",
       "SAFE_CODE": "a35176c6c3f6ee563d4b6f6f68e4c546d8b03b03915d37bf55dd5a7011927574",
