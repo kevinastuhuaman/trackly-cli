@@ -106,6 +106,7 @@ function directToolRegistrationsInNamedParameterFunction(
   receiverParameter,
   method,
   sourcePath,
+  receiverOrigin = 'parameter',
 ) {
   const ast = parseFullSource(source, sourcePath);
   const functions = ast.program.body.filter((statement) => (
@@ -113,12 +114,31 @@ function directToolRegistrationsInNamedParameterFunction(
   ));
   assert.equal(functions.length, 1, `${sourcePath} must define exactly one top-level ${expectedFunction}`);
   const factory = functions[0];
-  assert.equal(
-    factory.params[0]?.type,
-    'Identifier',
-    `${expectedFunction} in ${sourcePath} must receive its server directly`,
-  );
-  assert.equal(factory.params[0].name, receiverParameter);
+  if (receiverOrigin === 'parameter') {
+    assert.equal(
+      factory.params[0]?.type,
+      'Identifier',
+      `${expectedFunction} in ${sourcePath} must receive its server directly`,
+    );
+    assert.equal(factory.params[0].name, receiverParameter);
+  } else {
+    assert.equal(receiverOrigin, 'direct-construction');
+    const bindings = factory.body.body.flatMap((statement) => (
+      statement.type === 'VariableDeclaration' && statement.kind === 'const'
+        ? statement.declarations.filter((declaration) => (
+          declaration.id?.type === 'Identifier'
+          && declaration.id.name === receiverParameter
+          && declaration.init?.type === 'NewExpression'
+          && babelCalleeName(declaration.init.callee) === 'McpServer'
+        ))
+        : []
+    ));
+    assert.equal(
+      bindings.length,
+      1,
+      `${expectedFunction} in ${sourcePath} must directly construct one immutable ${receiverParameter} McpServer`,
+    );
+  }
   const direct = factory.body.body.flatMap((statement) => {
     const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
     const callee = call?.type === 'CallExpression' ? call.callee : null;
@@ -208,6 +228,11 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     sourceCommit,
     `${backendRoot} must be checked out at the exact reviewed runtime source commit`,
   );
+  assert.equal(
+    gitOutput(backendRoot, ['status', '--porcelain', '--untracked-files=all']).trim(),
+    '',
+    `${backendRoot} must be completely clean so every inspected backend byte comes from the reviewed commit`,
+  );
   for (const commit of [sourceCommit, fixture.sourceRuntime.parent, mergeCommit, ...fixture.mergedRuntime.parents]) {
     gitOutput(backendRoot, ['cat-file', '-e', `${commit}^{commit}`]);
   }
@@ -221,6 +246,25 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     fixture.mergedRuntime.parents,
     `${mergeCommit} must have the recorded merge parents in order`,
   );
+  for (const relativePath of [
+    'contracts/trackly-apply-tools.json',
+    'contracts/trackly-plugin-tools.json',
+    'src/mcp/server.ts',
+    'src/mcp/plugin-server.ts',
+    'src/mcp/plugin-router.ts',
+    'src/mcp/plugin-scopes.ts',
+    'src/services/job-brief.ts',
+    'src/services/trackly-access.ts',
+    'src/services/application-profile/apply-execution-contract.ts',
+    'src/services/application-profile/service.ts',
+    'src/routes/jobscout-filter-utils.ts',
+  ]) {
+    assert.equal(
+      sha256ExactBytes(fs.readFileSync(path.join(backendRoot, relativePath))),
+      sha256ExactBytes(gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null)),
+      `${relativePath} working bytes must exactly match the reviewed runtime commit`,
+    );
+  }
   const lockedSources = {
     pluginServer: 'src/mcp/plugin-server.ts',
     pluginScopes: 'src/mcp/plugin-scopes.ts',
@@ -2048,6 +2092,39 @@ function activeNamedDefinitionAst(source, name, sourcePath) {
     1,
     `${name} must have exactly one active top-level variable or function definition in ${sourcePath}`,
   );
+  const writes = [];
+  function targetContainsName(node) {
+    if (node === null || typeof node !== 'object') return false;
+    if (node.type === 'Identifier') return node.name === name;
+    if (node.type === 'RestElement') return targetContainsName(node.argument);
+    if (node.type === 'AssignmentPattern') return targetContainsName(node.left);
+    if (node.type === 'ArrayPattern') return node.elements.some(targetContainsName);
+    if (node.type === 'ObjectPattern') return node.properties.some((property) => (
+      property.type === 'RestElement'
+        ? targetContainsName(property.argument)
+        : targetContainsName(property.value)
+    ));
+    return false;
+  }
+  function visitWrites(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitWrites(child);
+      return;
+    }
+    if (node.type === 'AssignmentExpression' && targetContainsName(node.left)) writes.push(node);
+    if (node.type === 'UpdateExpression' && targetContainsName(node.argument)) writes.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitWrites(child);
+    }
+  }
+  visitWrites(parseFullSource(source, sourcePath));
+  assert.equal(
+    writes.length,
+    0,
+    `${name} in ${sourcePath} must never be assigned or updated after its locked definition`,
+  );
   return matches[0];
 }
 
@@ -2412,6 +2489,7 @@ const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-serv
 const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
 const hostedPluginScopesPath = path.join(backendRoot, 'src', 'mcp', 'plugin-scopes.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
+const hostedTracklyAccessPath = path.join(backendRoot, 'src', 'services', 'trackly-access.ts');
 const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
 const hostedApplicationProfileServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'service.ts');
 const hostedJobscoutFilterUtilsPath = path.join(backendRoot, 'src', 'routes', 'jobscout-filter-utils.ts');
@@ -2448,6 +2526,7 @@ const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
+const hostedTracklyAccessSource = fs.readFileSync(hostedTracklyAccessPath, 'utf8');
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
 const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
 const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
@@ -2530,6 +2609,126 @@ assertExportedFactoryUsedByPluginRouter(
   hostedPluginRouterSource,
   'createTracklyPluginMcpServer',
   hostedPluginRouterPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedTracklyAccessSource,
+  'requireTracklyAccess',
+  `async function requireTracklyAccess(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    await requireTracklyAccessForSurface(req, res, next);
+  }`,
+  hostedTracklyAccessPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedTracklyAccessSource,
+  'requireTracklyAccessForSurface',
+  `async function requireTracklyAccessForSurface(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    requiredSurface?: 'native',
+  ): Promise<void> {
+    const mode = getTracklyAccessMode();
+    const lifecycleExemptPaths = new Set(['/me', '/account', '/voice/history']);
+    if (mode === 'off' || req.path === '/jobscout/me' || lifecycleExemptPaths.has(req.path)) {
+      next();
+      return;
+    }
+
+    const passportSessionAlreadyAudited = mode === 'audit'
+      && requiredSurface !== 'native'
+      && req.isAuthenticated?.() === true
+      && Boolean((req.session as { passport?: { user?: unknown } } | undefined)?.passport?.user);
+    if (passportSessionAlreadyAudited && webAccessDecisionCompleted(req.user)) {
+      next();
+      return;
+    }
+
+    const userId = Number(
+      (req.user as { id?: number } | undefined)?.id
+      ?? (req as Request & { auth?: { extra?: { userId?: number } } }).auth?.extra?.userId,
+    );
+    if (!Number.isInteger(userId) || userId <= 0) {
+      if (mode === 'audit') {
+        logger.warn('trackly-access', 'identity unavailable during audit', { path: req.path });
+        next();
+        return;
+      }
+      res.status(401).json({
+        success: false,
+        code: 'AUTHENTICATION_REQUIRED',
+        error: 'Authentication is required.',
+      });
+      return;
+    }
+
+    try {
+      const access = await getTracklyEntitlements(userId);
+      if (!access.schemaReady) {
+        if (mode === 'audit') {
+          logger.warn('trackly-access', 'schema unavailable during audit', { userId, path: req.path });
+          next();
+          return;
+        }
+        res.status(503).json({
+          success: false,
+          code: 'ACCESS_CHECK_UNAVAILABLE',
+          error: 'Trackly access could not be verified. Please try again.',
+        });
+        return;
+      }
+      const authenticatedRequest = req as Request & { apiKeyId?: number; apiKeyUserId?: number };
+      const authenticatedUser = req.user as { client_platform?: string } | undefined;
+      const apiKeyId = Number(authenticatedRequest.apiKeyId);
+      const apiKeyUserId = Number(authenticatedRequest.apiKeyUserId);
+      const isApiKeyRequest = (Number.isInteger(apiKeyId) && apiKeyId > 0)
+        || (Number.isInteger(apiKeyUserId) && apiKeyUserId > 0);
+      const isWebSurface = requiredSurface !== 'native' && !isApiKeyRequest && (
+        req.isAuthenticated?.() === true
+        || authenticatedUser?.client_platform === 'web'
+      );
+      const accessEnabled = isWebSurface
+        ? access.webAccessEnabled
+        : access.tracklyAccessEnabled;
+      if (accessEnabled) {
+        next();
+        return;
+      }
+      if (mode === 'audit') {
+        logger.warn('trackly-access', 'would deny Trackly request', { userId, path: req.path });
+        next();
+        return;
+      }
+      res.status(403).json({
+        success: false,
+        code: isWebSurface ? 'WEB_ACCESS_REQUIRED' : 'INVITATION_REQUIRED',
+        error: isWebSurface
+          ? 'Trackly Web is currently available to existing members.'
+          : 'Trackly is currently available through a limited invitation rollout.',
+        accessUrl: isWebSurface
+          ? 'https://usetrackly.app/early-access?reason=web-access'
+          : 'https://usetrackly.app/early-access',
+      });
+    } catch (error) {
+      logger.error('trackly-access', 'access lookup failed', new Error('database lookup failed'), {
+        userId,
+        path: req.path,
+      });
+      if (mode === 'audit') {
+        next();
+        return;
+      }
+      res.status(503).json({
+        success: false,
+        code: 'ACCESS_CHECK_UNAVAILABLE',
+        error: 'Trackly access could not be verified. Please try again.',
+      });
+    }
+  }`,
+  hostedTracklyAccessPath,
 );
 assertImportBinding(
   hostedPluginSource,
@@ -3152,19 +3351,55 @@ const publishedSchemaCompatibility = {
     hostedPublishedAndParse: 'startApplyRunSchema',
   },
 };
+const executableLocalApplyRegistrations = [
+  ...directToolRegistrationsInNamedParameterFunction(
+    localApplySource,
+    'registerApplyTools',
+    'server',
+    'tool',
+    localApplySourcePath,
+  ),
+  ...directToolRegistrationsInNamedParameterFunction(
+    localApplySource,
+    'registerApplyTools',
+    'server',
+    'registerTool',
+    localApplySourcePath,
+  ),
+];
+const executableLocalBaseRegistrations = directToolRegistrationsInNamedParameterFunction(
+  localServerSource,
+  'createServer',
+  'server',
+  'tool',
+  localServerSourcePath,
+  'direct-construction',
+);
+const executableLocalApplyToolNames = executableLocalApplyRegistrations.map(({ name }) => name);
+const executableLocalToolNames = [
+  ...executableLocalBaseRegistrations.map(({ name }) => name),
+  ...executableLocalApplyToolNames,
+];
+assert.equal(
+  new Set(executableLocalToolNames).size,
+  executableLocalToolNames.length,
+  'Executable local MCP source must not register a tool name more than once',
+);
+assert.deepEqual(
+  [...executableLocalToolNames].sort(),
+  [
+    ...pluginLock.hostedMcpToolAllowlist.filter((name) => name !== 'trackly_chat'),
+    ...LOCAL_ONLY_TOOLS,
+  ].sort(),
+  'Executable local MCP registrations must exactly match the locked hosted catalog minus hosted-only chat plus local-only tools',
+);
 for (const [toolName, mapping] of Object.entries(publishedSchemaCompatibility)) {
   for (const [side, sourceText, sourcePath, schemaName] of [
     ['local', localApplySource, localApplySourcePath, mapping.localPublished],
     ['hosted', hostedApplySource, hostedApplySourcePath, mapping.hostedPublishedAndParse],
   ]) {
     const registrations = (side === 'local'
-      ? directToolRegistrationsInNamedParameterFunction(
-        sourceText,
-        'registerApplyTools',
-        'server',
-        'registerTool',
-        sourcePath,
-      )
+      ? executableLocalApplyRegistrations
       : directToolRegistrationsInNamedFactory(
         sourceText,
         'createTracklyMcpServer',

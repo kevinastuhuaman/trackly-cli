@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -41,6 +42,7 @@ const {
   schemaObjectPropertyAsts,
   sha256ExactBytes,
   staticStringArrayMap,
+  verifyHostedSnapshotGitProvenance,
   wrappedHandlerReturnProperties,
   wrappedHandlerReturnedObjectProperties,
 } = require('../scripts/verify-hosted-contract.js');
@@ -197,6 +199,58 @@ test('schema extraction ignores commented and nested decoys and resolves top-lev
     ),
     /must never be assigned or updated after declaration/,
   );
+  assert.throws(
+    () => activeNamedDefinitionAst(
+      'function lockedHelper() { return true; } lockedHelper = decoyHelper;',
+      'lockedHelper',
+      'reassigned function fixture',
+    ),
+    /must never be assigned or updated after its locked definition/,
+  );
+  assert.throws(
+    () => activeNamedDefinitionAst(
+      'function lockedHelper() { return true; } lockedHelper++;',
+      'lockedHelper',
+      'updated function fixture',
+    ),
+    /must never be assigned or updated after its locked definition/,
+  );
+});
+
+test('coordinated hosted provenance rejects a dirty reviewed-runtime checkout', (t) => {
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-provenance-'));
+  const cliRoot = path.join(root, 'cli');
+  const backendRoot = path.join(root, 'backend');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(cliRoot, 'plugins', 'trackly'), { recursive: true });
+  fs.mkdirSync(backendRoot, { recursive: true });
+  const git = (...args) => childProcess.execFileSync('git', ['-C', backendRoot, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  git('init');
+  fs.writeFileSync(path.join(backendRoot, 'tracked.txt'), 'reviewed\n');
+  git('add', 'tracked.txt');
+  childProcess.execFileSync('git', [
+    '-C', backendRoot,
+    '-c', 'user.name=Trackly Test',
+    '-c', 'user.email=test@usetrackly.app',
+    'commit', '-m', 'fixture',
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const sourceCommit = git('rev-parse', 'HEAD');
+  fs.writeFileSync(
+    path.join(cliRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json'),
+    JSON.stringify({
+      sourceRuntime: { commit: sourceCommit, parent: '0'.repeat(40) },
+      mergedRuntime: { commit: '1'.repeat(40), parents: [sourceCommit] },
+      sourceSha256: {},
+    }),
+  );
+  fs.writeFileSync(path.join(backendRoot, 'unreviewed.txt'), 'dirty\n');
+  assert.throws(
+    () => verifyHostedSnapshotGitProvenance(cliRoot, backendRoot),
+    /must be completely clean so every inspected backend byte comes from the reviewed commit/,
+  );
 });
 
 test('scope extraction ignores stale commented mappings and rejects dynamic object members', () => {
@@ -257,10 +311,21 @@ test('registration extraction ignores commented tools and binds the active publi
 test('local Apply registrations are bound to the helper reached by createServer', () => {
   const applySource = `
     function registerApplyTools(server, dependencies) {
+      server.tool('trackly_zero', 'zero', {}, zeroHandler);
       server.registerTool('trackly_one', { inputSchema: oneSchema }, oneHandler);
       server.registerTool('trackly_two', { inputSchema: twoSchema }, twoHandler);
     }
   `;
+  assert.deepEqual(
+    directToolRegistrationsInNamedParameterFunction(
+      applySource,
+      'registerApplyTools',
+      'server',
+      'tool',
+      'local registration fixture',
+    ).map(({ name }) => name),
+    ['trackly_zero'],
+  );
   assert.deepEqual(
     directToolRegistrationsInNamedParameterFunction(
       applySource,
@@ -283,6 +348,25 @@ test('local Apply registrations are bound to the helper reached by createServer'
       'nested local registration fixture',
     ),
     /must register every server\.registerTool tool directly on its reachable body/,
+  );
+  const baseSource = `
+    function createServer() {
+      const server = new McpServer({ name: 'trackly', version: PACKAGE_VERSION });
+      server.tool('trackly_base_one', 'one', {}, oneHandler);
+      server.tool('trackly_base_two', 'two', {}, twoHandler);
+      return server;
+    }
+  `;
+  assert.deepEqual(
+    directToolRegistrationsInNamedParameterFunction(
+      baseSource,
+      'createServer',
+      'server',
+      'tool',
+      'local base registration fixture',
+      'direct-construction',
+    ).map(({ name }) => name),
+    ['trackly_base_one', 'trackly_base_two'],
   );
   const serverSource = `
     const { registerApplyTools } = require('./apply-tools');
