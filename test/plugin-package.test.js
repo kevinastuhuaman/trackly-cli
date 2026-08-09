@@ -20,6 +20,9 @@ const {
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
+  assertLivePluginRouterMount,
+  assertMcpScopeHelperSemantics,
+  assertMergeCommitPreservesPaths,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
   assertWrappedHandlerGuardedBlockAst,
@@ -271,6 +274,38 @@ test('coordinated hosted provenance rejects a dirty reviewed-runtime checkout', 
   );
 });
 
+test('coordinated hosted provenance rejects merge commits that alter reviewed deployable blobs', (t) => {
+  const repository = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-merge-provenance-'));
+  t.after(() => fs.rmSync(repository, { recursive: true, force: true }));
+  const git = (...args) => childProcess.execFileSync('git', ['-C', repository, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  git('init');
+  git('config', 'user.name', 'Trackly Test');
+  git('config', 'user.email', 'test@usetrackly.app');
+  fs.writeFileSync(path.join(repository, 'deployable.ts'), 'export const reviewed = true;\n');
+  git('add', 'deployable.ts');
+  git('commit', '-m', 'reviewed source');
+  const sourceCommit = git('rev-parse', 'HEAD');
+  git('commit', '--allow-empty', '-m', 'preserving merge fixture');
+  const preservingCommit = git('rev-parse', 'HEAD');
+  assert.doesNotThrow(() => assertMergeCommitPreservesPaths(
+    repository,
+    sourceCommit,
+    preservingCommit,
+    ['deployable.ts'],
+  ));
+  fs.writeFileSync(path.join(repository, 'deployable.ts'), 'export const reviewed = false;\n');
+  git('add', 'deployable.ts');
+  git('commit', '-m', 'merge-time drift');
+  const driftedCommit = git('rev-parse', 'HEAD');
+  assert.throws(
+    () => assertMergeCommitPreservesPaths(repository, sourceCommit, driftedCommit, ['deployable.ts']),
+    /must exactly preserve reviewed source/,
+  );
+});
+
 test('scope extraction ignores stale commented mappings and rejects dynamic object members', () => {
   const source = `
     const TRACKLY_PLUGIN_TOOL_SCOPES = {
@@ -290,6 +325,133 @@ test('scope extraction ignores stale commented mappings and rejects dynamic obje
       'spread scope fixture',
     ),
     /only static properties \(no spreads or methods\)/,
+  );
+});
+
+test('OAuth scope normalization and subset checks stay fail-closed against the canonical scope catalog', () => {
+  const source = `
+    export const MCP_SCOPE_DEFINITIONS = {
+      'jobs:read': 'Search and view jobs, companies, contacts, and discovery preferences',
+      'tracking:read': 'View your saved jobs and application status',
+      'tracking:write': 'Update your job tracking status and discovery preferences',
+      'profile:read': 'View your application profile and Apply readiness',
+      'profile:write': 'Save user-approved application answers',
+      'sensitive:read': 'Read consented sensitive application answers needed for form filling',
+      'sensitive:write': 'Grant or revoke encrypted storage consent for sensitive application answers',
+      'apply:read': 'View your Apply queue, work, and value-free progress',
+      'apply:write': 'Read and update your application profile and prepare user-approved applications',
+    } as const;
+    type McpScope = keyof typeof MCP_SCOPE_DEFINITIONS;
+    export const MCP_SUPPORTED_SCOPES = Object.freeze(
+      Object.keys(MCP_SCOPE_DEFINITIONS) as McpScope[],
+    );
+    const MCP_SUPPORTED_SCOPE_SET = new Set<string>(MCP_SUPPORTED_SCOPES);
+    export function normalizeMcpScopes(
+      values: readonly string[] | undefined,
+      defaultToAll = false,
+    ): McpScope[] {
+      const candidate = values && values.length > 0
+        ? values
+        : (defaultToAll ? MCP_SUPPORTED_SCOPES : []);
+      if (candidate.length === 0 || candidate.some((scope) => !MCP_SUPPORTED_SCOPE_SET.has(scope))) {
+        throw new Error('Unsupported or empty MCP scope request');
+      }
+      return [...new Set(candidate)] as McpScope[];
+    }
+    export function isScopeSubset(
+      candidate: readonly string[],
+      allowed: readonly string[],
+    ): boolean {
+      const allowedSet = new Set(allowed);
+      return candidate.every((scope) => allowedSet.has(scope));
+    }
+  `;
+  assert.doesNotThrow(() => assertMcpScopeHelperSemantics(source, 'scope helper fixture'));
+  assert.throws(
+    () => assertMcpScopeHelperSemantics(
+      source.replace(
+        'return candidate.every((scope) => allowedSet.has(scope));',
+        'return candidate.some((scope) => allowedSet.has(scope));',
+      ),
+      'permissive subset fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
+  assert.throws(
+    () => assertMcpScopeHelperSemantics(
+      source.replace(
+        "candidate.some((scope) => !MCP_SUPPORTED_SCOPE_SET.has(scope))",
+        'false',
+      ),
+      'permissive normalization fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
+});
+
+test('the exported plugin router must be mounted on the exact production application path', () => {
+  const source = `
+    import express from 'express';
+    import tracklyPluginMcpRoutes from './mcp/plugin-router';
+    const PORT = 3000;
+    export function createApp() {
+      const app = express();
+      app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);
+      return app;
+    }
+    function startServer() {
+      const app = createApp();
+      app.listen(PORT);
+    }
+    if (require.main === module) {
+      startServer();
+    }
+  `;
+  assert.doesNotThrow(() => assertLivePluginRouterMount(
+    source,
+    'tracklyPluginMcpRoutes',
+    './mcp/plugin-router',
+    '/api/plugin/trackly/mcp',
+    'application mount fixture',
+  ));
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        "app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);",
+        "app.use('/api/plugin/trackly/mcp', decoyRouter);",
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'decoy application mount fixture',
+    ),
+    /must directly mount imported tracklyPluginMcpRoutes exactly once/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        "app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);",
+        "app.use('/api/plugin/trackly/mcp-v2', tracklyPluginMcpRoutes);",
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'wrong application path fixture',
+    ),
+    /must directly mount imported tracklyPluginMcpRoutes exactly once/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        "app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);",
+        "const escapedRouter = tracklyPluginMcpRoutes;\n      app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);",
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'escaped application router fixture',
+    ),
+    /must not alias, escape, or mount tracklyPluginMcpRoutes outside its locked live path/,
   );
 });
 
@@ -1771,6 +1933,59 @@ test('active facade descriptors bind complete input and named output contracts',
 });
 
 test('readiness profile references must originate from canonical keys and public schema labels', () => {
+  const missingKeyProjection = `const missingRequiredKeys = Array.isArray(profile?.completeness?.missingKeys)
+    ? (profile.completeness.missingKeys as unknown[]).flatMap((key): string[] => (
+      typeof key === 'string' && key.length <= 200 && CANONICAL_PROFILE_KEY.test(key)
+        ? [key]
+        : []
+    )).slice(0, 100)
+    : [];`;
+  const trustedMissingProjection = `const missingRequired = missingRequiredKeys.flatMap((key) => (
+    fieldLabels.has(key) ? [{ key, label: fieldLabels.get(key)! }] : []
+  ));`;
+  const trustedAvailabilityProjection = `const profileProjectionAvailable = schemaProjectionAvailable
+    && profileBodyAvailable
+    && missingRequired.length === missingRequiredKeys.length;`;
+  const trustedMissingSource = `
+    function projectApplyReadiness() {
+      ${missingKeyProjection}
+      ${trustedMissingProjection}
+      ${trustedAvailabilityProjection}
+      return missingRequired;
+    }
+  `;
+  for (const statement of [missingKeyProjection, trustedMissingProjection, trustedAvailabilityProjection]) {
+    assert.doesNotThrow(() => assertActiveFunctionDirectStatementAst(
+      trustedMissingSource,
+      'projectApplyReadiness',
+      statement,
+      'trusted missing readiness fixture',
+    ));
+  }
+  assert.throws(
+    () => assertActiveFunctionDirectStatementAst(
+      trustedMissingSource.replace(
+        'fieldLabels.has(key) ? [{ key, label: fieldLabels.get(key)! }] : []',
+        "[{ key, label: fieldLabels.get(key) ?? 'Required profile field' }]",
+      ),
+      'projectApplyReadiness',
+      trustedMissingProjection,
+      'fallback missing readiness fixture',
+    ),
+    /must execute its locked direct statement exactly once/,
+  );
+  assert.throws(
+    () => assertActiveFunctionDirectStatementAst(
+      trustedMissingSource.replace(
+        'missingRequired.length === missingRequiredKeys.length',
+        'true',
+      ),
+      'projectApplyReadiness',
+      trustedAvailabilityProjection,
+      'untrusted missing-key availability fixture',
+    ),
+    /must execute its locked direct statement exactly once/,
+  );
   const source = `
     function projectApplyReadiness() {
       // const availableFields = profile.fields.map((key) => ({ key, label: fieldLabels.get(key)! }));

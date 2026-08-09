@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '58eddae2a84dc546c22a796e30d523f5d15217ae4c50c9af830c843a7a9ef529';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '2887b2a84be27050af6884a80094b229cab6b258e656e1d45ca8bc0dc6485a01';
 
 const parsedSourceCache = new Map();
 
@@ -314,6 +314,37 @@ function gitOutput(repository, args, encoding = 'utf8') {
   }
 }
 
+const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
+  'contracts/trackly-apply-tools.json',
+  'contracts/trackly-plugin-tools.json',
+  'src/index.ts',
+  'src/mcp/server.ts',
+  'src/mcp/plugin-server.ts',
+  'src/mcp/plugin-router.ts',
+  'src/mcp/plugin-scopes.ts',
+  'src/mcp/mcp-scopes.ts',
+  'src/mcp/oauth-provider.ts',
+  'src/mcp/mcp-tokens.ts',
+  'src/services/job-brief.ts',
+  'src/services/trackly-access.ts',
+  'src/services/application-profile/apply-execution-contract.ts',
+  'src/services/application-profile/catalog.ts',
+  'src/services/application-profile/service.ts',
+  'src/routes/jobscout-filter-utils.ts',
+]);
+
+function assertMergeCommitPreservesPaths(repository, sourceCommit, mergeCommit, relativePaths) {
+  for (const relativePath of relativePaths) {
+    const sourceBytes = gitOutput(repository, ['show', `${sourceCommit}:${relativePath}`], null);
+    const mergedBytes = gitOutput(repository, ['show', `${mergeCommit}:${relativePath}`], null);
+    assert.equal(
+      sha256ExactBytes(mergedBytes),
+      sha256ExactBytes(sourceBytes),
+      `${relativePath} bytes at merge ${mergeCommit} must exactly preserve reviewed source ${sourceCommit}`,
+    );
+  }
+}
+
 function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
   const fixturePath = path.join(cliRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
   const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
@@ -342,28 +373,19 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     fixture.mergedRuntime.parents,
     `${mergeCommit} must have the recorded merge parents in order`,
   );
-  for (const relativePath of [
-    'contracts/trackly-apply-tools.json',
-    'contracts/trackly-plugin-tools.json',
-    'src/mcp/server.ts',
-    'src/mcp/plugin-server.ts',
-    'src/mcp/plugin-router.ts',
-    'src/mcp/plugin-scopes.ts',
-    'src/mcp/oauth-provider.ts',
-    'src/mcp/mcp-tokens.ts',
-    'src/services/job-brief.ts',
-    'src/services/trackly-access.ts',
-    'src/services/application-profile/apply-execution-contract.ts',
-    'src/services/application-profile/catalog.ts',
-    'src/services/application-profile/service.ts',
-    'src/routes/jobscout-filter-utils.ts',
-  ]) {
+  for (const relativePath of HOSTED_DEPLOYABLE_PATHS) {
     assert.equal(
       sha256ExactBytes(fs.readFileSync(path.join(backendRoot, relativePath))),
       sha256ExactBytes(gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null)),
       `${relativePath} working bytes must exactly match the reviewed runtime commit`,
     );
   }
+  assertMergeCommitPreservesPaths(
+    backendRoot,
+    sourceCommit,
+    mergeCommit,
+    HOSTED_DEPLOYABLE_PATHS,
+  );
   const lockedSources = {
     pluginServer: 'src/mcp/plugin-server.ts',
     pluginScopes: 'src/mcp/plugin-scopes.ts',
@@ -1339,6 +1361,204 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
   assert.equal(closeCall.arguments.length, 0);
 }
 
+function assertLivePluginRouterMount(
+  source,
+  routerBinding,
+  routerModule,
+  mountPath,
+  sourcePath,
+) {
+  assertImportBinding(source, 'default', routerBinding, routerModule, sourcePath);
+  const ast = parseFullSource(source, sourcePath);
+  const exportedFactories = ast.program.body.filter((statement) => (
+    statement.type === 'ExportNamedDeclaration'
+    && statement.declaration?.type === 'FunctionDeclaration'
+    && statement.declaration.id?.name === 'createApp'
+  ));
+  assert.equal(
+    exportedFactories.length,
+    1,
+    `${sourcePath} must export exactly one live createApp application factory`,
+  );
+  const factory = exportedFactories[0].declaration;
+  const appDeclarations = factory.body.body.flatMap((statement) => (
+    statement.type === 'VariableDeclaration'
+      ? statement.declarations.filter((declaration) => (
+        statement.kind === 'const'
+        && declaration.id?.type === 'Identifier'
+        && declaration.id.name === 'app'
+        && declaration.init?.type === 'CallExpression'
+        && babelCalleeName(declaration.init.callee) === 'express'
+        && declaration.init.arguments.length === 0
+      ))
+      : []
+  ));
+  assert.equal(
+    appDeclarations.length,
+    1,
+    `createApp in ${sourcePath} must bind exactly one immutable Express application`,
+  );
+  const shadowedRouters = factory.body.body.flatMap((statement) => (
+    statement.type === 'VariableDeclaration'
+      ? statement.declarations.filter((declaration) => (
+        declaration.id?.type === 'Identifier' && declaration.id.name === routerBinding
+      ))
+      : []
+  ));
+  assert.equal(
+    shadowedRouters.length,
+    0,
+    `createApp in ${sourcePath} must mount the imported ${routerBinding} binding without shadowing it`,
+  );
+  const routerReferences = [];
+  function visitRouterReferences(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitRouterReferences(child);
+      return;
+    }
+    if (node.type === 'Identifier' && node.name === routerBinding) routerReferences.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitRouterReferences(child);
+    }
+  }
+  visitRouterReferences(factory.body);
+  const mounts = factory.body.body.flatMap((statement) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== 'app.use') return [];
+    return call.arguments[0]?.type === 'StringLiteral'
+      && call.arguments[0].value === mountPath
+      && call.arguments[1]?.type === 'Identifier'
+      && call.arguments[1].name === routerBinding
+      && call.arguments.length === 2
+      ? [statement]
+      : [];
+  });
+  assert.equal(
+    mounts.length,
+    1,
+    `createApp in ${sourcePath} must directly mount imported ${routerBinding} exactly once at ${mountPath}`,
+  );
+  assert.deepEqual(
+    routerReferences,
+    [mounts[0].expression.arguments[1]],
+    `createApp in ${sourcePath} must not alias, escape, or mount ${routerBinding} outside its locked live path`,
+  );
+  const directReturns = factory.body.body.filter((statement) => statement.type === 'ReturnStatement');
+  assert.equal(
+    directReturns.length,
+    1,
+    `createApp in ${sourcePath} must directly return its mounted application exactly once`,
+  );
+  assert.equal(factory.body.body.at(-1), directReturns[0], `createApp in ${sourcePath} must end by returning its application`);
+  assert.equal(
+    directReturns[0].argument?.type === 'Identifier' ? directReturns[0].argument.name : null,
+    'app',
+    `createApp in ${sourcePath} must return the exact application receiving ${mountPath}`,
+  );
+  assert.ok(
+    factory.body.body.indexOf(mounts[0]) < factory.body.body.indexOf(directReturns[0]),
+    `createApp in ${sourcePath} must mount ${mountPath} before returning the application`,
+  );
+
+  const startServer = activeNamedDefinitionAst(source, 'startServer', sourcePath);
+  assert.equal(startServer.body?.type, 'BlockStatement', `startServer in ${sourcePath} must use a block body`);
+  const liveAppStatements = startServer.body.body.filter((statement) => (
+    statement.type === 'VariableDeclaration' && statement.kind === 'const'
+      && statement.declarations.some((declaration) => (
+        declaration.id?.type === 'Identifier'
+        && declaration.id.name === 'app'
+        && declaration.init?.type === 'CallExpression'
+        && babelCalleeName(declaration.init.callee) === 'createApp'
+        && declaration.init.arguments.length === 0
+      ))
+  ));
+  assert.equal(
+    liveAppStatements.length,
+    1,
+    `startServer in ${sourcePath} must instantiate the exact exported createApp application`,
+  );
+  const liveListens = startServer.body.body.filter((statement) => (
+    statement.type === 'ExpressionStatement'
+    && statement.expression?.type === 'CallExpression'
+    && babelCalleeName(statement.expression.callee) === 'app.listen'
+  ));
+  assert.equal(liveListens.length, 1, `startServer in ${sourcePath} must listen on the exact createApp result`);
+  assert.equal(
+    startServer.body.body.indexOf(liveListens[0]),
+    startServer.body.body.indexOf(liveAppStatements[0]) + 1,
+    `startServer in ${sourcePath} must immediately listen on the exact createApp result`,
+  );
+  assertActiveTopLevelStatementAst(
+    source,
+    `if (require.main === module) {
+      startServer();
+    }`,
+    sourcePath,
+  );
+}
+
+function assertMcpScopeHelperSemantics(source, sourcePath) {
+  assertActiveVariableInitializerAst(
+    source,
+    'MCP_SCOPE_DEFINITIONS',
+    `{
+      'jobs:read': 'Search and view jobs, companies, contacts, and discovery preferences',
+      'tracking:read': 'View your saved jobs and application status',
+      'tracking:write': 'Update your job tracking status and discovery preferences',
+      'profile:read': 'View your application profile and Apply readiness',
+      'profile:write': 'Save user-approved application answers',
+      'sensitive:read': 'Read consented sensitive application answers needed for form filling',
+      'sensitive:write': 'Grant or revoke encrypted storage consent for sensitive application answers',
+      'apply:read': 'View your Apply queue, work, and value-free progress',
+      'apply:write': 'Read and update your application profile and prepare user-approved applications',
+    } as const`,
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(
+    source,
+    'MCP_SUPPORTED_SCOPES',
+    'Object.freeze(Object.keys(MCP_SCOPE_DEFINITIONS) as McpScope[])',
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(
+    source,
+    'MCP_SUPPORTED_SCOPE_SET',
+    'new Set<string>(MCP_SUPPORTED_SCOPES)',
+    sourcePath,
+  );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'normalizeMcpScopes',
+    `function normalizeMcpScopes(
+      values: readonly string[] | undefined,
+      defaultToAll = false,
+    ): McpScope[] {
+      const candidate = values && values.length > 0
+        ? values
+        : (defaultToAll ? MCP_SUPPORTED_SCOPES : []);
+      if (candidate.length === 0 || candidate.some((scope) => !MCP_SUPPORTED_SCOPE_SET.has(scope))) {
+        throw new Error('Unsupported or empty MCP scope request');
+      }
+      return [...new Set(candidate)] as McpScope[];
+    }`,
+    sourcePath,
+  );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'isScopeSubset',
+    `function isScopeSubset(
+      candidate: readonly string[],
+      allowed: readonly string[],
+    ): boolean {
+      const allowedSet = new Set(allowed);
+      return candidate.every((scope) => allowedSet.has(scope));
+    }`,
+    sourcePath,
+  );
+}
+
 function registrationArgumentSources(source, registration, sourcePath) {
   assert.ok(
     registration?.call?.arguments?.length >= 3,
@@ -1737,6 +1957,36 @@ function wrappedHandlerReturnedObjectProperties(registration, sourcePath) {
     return staticBabelObjectProperties(handler.body, `${registration.name} output projection`);
   }
   return wrappedHandlerReturnProperties(registration, sourcePath);
+}
+
+function functionSoleReturnObjectProperties(source, functionName, sourcePath) {
+  const definition = activeNamedDefinitionAst(source, functionName, sourcePath);
+  assert.equal(definition.body?.type, 'BlockStatement', `${functionName} in ${sourcePath} must use a block body`);
+  const returns = [];
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (
+      node !== definition
+      && ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration'].includes(node.type)
+    ) return;
+    if (node.type === 'ReturnStatement') returns.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child);
+    }
+  }
+  visit(definition);
+  assert.equal(returns.length, 1, `${functionName} in ${sourcePath} must have exactly one reachable projection return`);
+  assert.equal(
+    definition.body.body.at(-1),
+    returns[0],
+    `${functionName} in ${sourcePath} must end with its sole bounded projection return`,
+  );
+  return staticBabelObjectProperties(returns[0].argument, `${functionName} output projection`);
 }
 
 function assertWrappedHandlerDirectStatementAst(registration, expectedStatement, sourcePath) {
@@ -2830,6 +3080,8 @@ const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-pl
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
 const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
 const hostedPluginScopesPath = path.join(backendRoot, 'src', 'mcp', 'plugin-scopes.ts');
+const hostedMcpScopesPath = path.join(backendRoot, 'src', 'mcp', 'mcp-scopes.ts');
+const hostedApplicationPath = path.join(backendRoot, 'src', 'index.ts');
 const hostedOAuthProviderPath = path.join(backendRoot, 'src', 'mcp', 'oauth-provider.ts');
 const hostedMcpTokensPath = path.join(backendRoot, 'src', 'mcp', 'mcp-tokens.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
@@ -2870,6 +3122,8 @@ if (
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
+const hostedMcpScopesSource = fs.readFileSync(hostedMcpScopesPath, 'utf8');
+const hostedApplicationSource = fs.readFileSync(hostedApplicationPath, 'utf8');
 const hostedOAuthProviderSource = fs.readFileSync(hostedOAuthProviderPath, 'utf8');
 const hostedMcpTokensSource = fs.readFileSync(hostedMcpTokensPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
@@ -2880,6 +3134,13 @@ const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationP
 const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
 
 verifyHostedSnapshotGitProvenance(cliRoot, backendRoot);
+assertLivePluginRouterMount(
+  hostedApplicationSource,
+  'tracklyPluginMcpRoutes',
+  './mcp/plugin-router',
+  '/api/plugin/trackly/mcp',
+  hostedApplicationPath,
+);
 assertCommonJsDestructuredRequire(
   localServerSource,
   'registerApplyTools',
@@ -3491,6 +3752,7 @@ const executableScopeContract = staticStringArrayMap(
   'TRACKLY_PLUGIN_TOOL_SCOPES',
   hostedPluginScopesPath,
 );
+assertMcpScopeHelperSemantics(hostedMcpScopesSource, hostedMcpScopesPath);
 assertImportBinding(
   hostedPluginScopesSource,
   'APPLICATION_FIELD_BY_KEY',
@@ -4277,9 +4539,90 @@ assertExactSchemaProperties(
   profileFieldReferenceContract,
   'profileFieldReferenceSchema',
 );
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'readinessRecord',
+  `function readinessRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'readinessSchemaAvailable',
+  `function readinessSchemaAvailable(value: unknown): value is Record<string, unknown> {
+    if (!readinessRecord(value)
+      || readinessVersion(value.schemaVersion) === null
+      || !Array.isArray(value.fields)
+      || value.fields.length > 1_000
+      || !Array.isArray(value.screens)
+      || value.screens.length > 100) return false;
+    const validLabelField = (field: unknown) => {
+      if (!readinessRecord(field)) return false;
+      return typeof field.key === 'string'
+        && field.key.length >= 1
+        && field.key.length <= 200
+        && typeof field.label === 'string'
+        && field.label.length >= 1
+        && field.label.length <= 1_000;
+    };
+    if (!value.fields.every(validLabelField)) return false;
+    if (value.educationFields === undefined) return true;
+    return Array.isArray(value.educationFields)
+      && value.educationFields.length <= 100
+      && value.educationFields.every(validLabelField);
+  }`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'readinessProfileAvailable',
+  `function readinessProfileAvailable(value: unknown): value is Record<string, unknown> {
+    if (!readinessRecord(value)
+      || readinessCount(value.revision) === null
+      || !(value.confirmedAt === null
+        || (typeof value.confirmedAt === 'string'
+          && value.confirmedAt.length >= 1
+          && value.confirmedAt.length <= 100))
+      || !readinessRecord(value.sensitiveStorage)
+      || typeof value.sensitiveStorage.consented !== 'boolean'
+      || !(value.defaultResume === null || readinessRecord(value.defaultResume))
+      || !readinessRecord(value.completeness)
+      || !readinessRecord(value.fields)) return false;
+    const completed = readinessCount(value.completeness.completed);
+    const total = readinessCount(value.completeness.total);
+    const percent = readinessCount(value.completeness.percent);
+    const expectedPercent = total === 0 ? 100 : Math.round((Number(completed) / Number(total)) * 100);
+    if (completed === null
+      || total === null
+      || percent === null
+      || percent > 100
+      || completed > total
+      || percent !== expectedPercent
+      || !Array.isArray(value.completeness.missingKeys)
+      || value.completeness.missingKeys.length > 100
+      || !value.completeness.missingKeys.every((key) => (
+        typeof key === 'string' && key.length <= 200 && CANONICAL_PROFILE_KEY.test(key)
+      ))) return false;
+    const fields = Object.entries(value.fields);
+    return fields.length <= 1_000 && fields.every(([key, field]) => (
+      key.length <= 200
+      && CANONICAL_PROFILE_KEY.test(key)
+      && readinessRecord(field)
+      && typeof field.state === 'string'
+      && (field.state === 'unknown' || RESOLVED_PROFILE_STATES.has(field.state))
+    ));
+  }`,
+  hostedPluginSourcePath,
+);
 for (const statement of [
+  `const schemaProjectionAvailable = availability.schema && readinessSchemaAvailable(schema);`,
+  `const safeSchema: any = schemaProjectionAvailable ? schema : undefined;`,
+  `const rawProfile = profileResponse?.profile;`,
+  `const profileBodyAvailable = availability.profile && readinessProfileAvailable(rawProfile);`,
+  `const profile: any = profileBodyAvailable ? rawProfile : undefined;`,
   `const fieldLabels = new Map(
-    (Array.isArray(schema?.fields) ? schema.fields : []).flatMap((field: unknown) => {
+    (Array.isArray(safeSchema?.fields) ? safeSchema.fields : []).flatMap((field: unknown) => {
       if (!field || typeof field !== 'object' || Array.isArray(field)) return [];
       const value = field as Record<string, unknown>;
       return typeof value.key === 'string' && typeof value.label === 'string'
@@ -4287,21 +4630,26 @@ for (const statement of [
         : [];
     }),
   );`,
-  `for (const field of Array.isArray(schema?.educationFields) ? schema.educationFields : []) {
+  `for (const field of Array.isArray(safeSchema?.educationFields) ? safeSchema.educationFields : []) {
     if (!field || typeof field !== 'object' || Array.isArray(field)) continue;
     const value = field as Record<string, unknown>;
     if (typeof value.key === 'string' && typeof value.label === 'string') {
       fieldLabels.set(\`education.\${value.key}\`, value.label);
     }
   }`,
-  `fieldLabels.set('documents.default_resume', 'Default resume');`,
-  `const missingRequired = Array.isArray(profile?.completeness?.missingKeys)
-    ? profile.completeness.missingKeys.flatMap((key: unknown) => (
+  `const missingRequiredKeys = Array.isArray(profile?.completeness?.missingKeys)
+    ? (profile.completeness.missingKeys as unknown[]).flatMap((key): string[] => (
       typeof key === 'string' && key.length <= 200 && CANONICAL_PROFILE_KEY.test(key)
-        ? [{ key, label: fieldLabels.get(key) ?? 'Required profile field' }]
+        ? [key]
         : []
     )).slice(0, 100)
     : [];`,
+  `const missingRequired = missingRequiredKeys.flatMap((key) => (
+    fieldLabels.has(key) ? [{ key, label: fieldLabels.get(key)! }] : []
+  ));`,
+  `const profileProjectionAvailable = schemaProjectionAvailable
+    && profileBodyAvailable
+    && missingRequired.length === missingRequiredKeys.length;`,
   `const availableFields = profile?.fields
     && typeof profile.fields === 'object'
     && !Array.isArray(profile.fields)
@@ -4327,6 +4675,52 @@ for (const statement of [
     hostedPluginSourcePath,
   );
 }
+
+const readinessProjectionProperties = functionSoleReturnObjectProperties(
+  hostedPluginSource,
+  'projectApplyReadiness',
+  hostedPluginSourcePath,
+);
+const readinessProfileProjectionProperties = staticBabelObjectProperties(
+  readinessProjectionProperties.profile,
+  'projectApplyReadiness profile projection',
+);
+assertBabelPropertyExpression(
+  readinessProfileProjectionProperties,
+  'missingRequired',
+  'missingRequired',
+  'projectApplyReadiness profile projection',
+);
+const readinessAvailability = readinessProjectionProperties.availability;
+assert.equal(
+  readinessAvailability?.type,
+  'ObjectExpression',
+  'projectApplyReadiness availability must be a bounded object projection',
+);
+assert.equal(
+  readinessAvailability.properties.length,
+  3,
+  'projectApplyReadiness availability must preserve base status plus locked schema/profile availability',
+);
+assert.equal(readinessAvailability.properties[0]?.type, 'SpreadElement');
+assert.equal(readinessAvailability.properties[0]?.argument?.type, 'Identifier');
+assert.equal(readinessAvailability.properties[0]?.argument?.name, 'availability');
+const readinessAvailabilityProperties = staticBabelObjectProperties(
+  { ...readinessAvailability, properties: readinessAvailability.properties.slice(1) },
+  'projectApplyReadiness availability projection',
+);
+assertBabelPropertyExpression(
+  readinessAvailabilityProperties,
+  'schema',
+  'schemaProjectionAvailable',
+  'projectApplyReadiness availability projection',
+);
+assertBabelPropertyExpression(
+  readinessAvailabilityProperties,
+  'profile',
+  'profileProjectionAvailable',
+  'projectApplyReadiness availability projection',
+);
 
 const applyOutputProperties = schemaObjectPropertyAsts(
   hostedPluginSource,
@@ -4905,6 +5299,9 @@ module.exports = {
   assertActiveFunctionDirectStatementAst,
   assertActiveTopLevelStatementAst,
   assertActiveFunctionDefinitionAst,
+  assertLivePluginRouterMount,
+  assertMcpScopeHelperSemantics,
+  assertMergeCommitPreservesPaths,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,

@@ -1,18 +1,18 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-08-09T04:45:00-07:00",
+  "capturedAt": "2026-08-09T16:45:00-07:00",
   "sourceRuntime": {
-    "commit": "ba8ace9acc6524b78915fc796090d331c79ae66a",
-    "parent": "1c99166ca2b5d0c58205273258a361dcb658cce2",
-    "committedAt": "2026-08-09T04:12:23-07:00"
+    "commit": "fbc9235db9cd6b0ebb3fa9cea33c3d8a23362cc7",
+    "parent": "492b65b57bf213866217015d5a923f1e4c200c54",
+    "committedAt": "2026-08-09T16:33:18-07:00"
   },
   "mergedRuntime": {
-    "commit": "2705259db9b5099aa9e75862c0a337b481d9d39e",
+    "commit": "f58202456d247f4c7e9f172e06997268854de45d",
     "parents": [
-      "cf73f8f2085866466f4cc2f1f383476180b5a854",
-      "ba8ace9acc6524b78915fc796090d331c79ae66a"
+      "8240fd95bd7da89b89f7d5e91b27eaef7b6853fa",
+      "fbc9235db9cd6b0ebb3fa9cea33c3d8a23362cc7"
     ],
-    "committedAt": "2026-08-09T04:29:47-07:00"
+    "committedAt": "2026-08-09T16:44:09-07:00"
   },
   "applyContractVersion": "3.6.2",
   "pluginContractVersion": "1.0.0",
@@ -86,7 +86,7 @@
     "trackly_chat"
   ],
   "sourceSha256": {
-    "pluginServer": "0bc3b138eb9652d62fbda54340c65f3eba4835508d9e6960f6ab5f409b8704c4",
+    "pluginServer": "8828b038dd2dc554ea952264aae615bccc0607b9816608447ba3266481fbb17a",
     "pluginScopes": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
     "jobBriefService": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b"
   }
