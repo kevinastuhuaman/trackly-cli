@@ -83,6 +83,26 @@ test('executable digest normalization preserves literal contents and removes onl
     'line terminators in automatic-semicolon-insertion-sensitive positions must affect digests',
   );
   assert.notEqual(
+    normalizeJavaScriptTrivia('a\n++b;'),
+    normalizeJavaScriptTrivia('a++\nb;'),
+    'line terminators must distinguish prefix from postfix increment expressions',
+  );
+  assert.notEqual(
+    normalizeJavaScriptTrivia('a\n--b;'),
+    normalizeJavaScriptTrivia('a--\nb;'),
+    'line terminators must distinguish prefix from postfix decrement expressions',
+  );
+  assert.notEqual(
+    normalizeJavaScriptTrivia('a\n++b;'),
+    normalizeJavaScriptTrivia('a ++b;'),
+    'a line terminator before an update operator must remain digest-significant',
+  );
+  assert.notEqual(
+    normalizeJavaScriptTrivia('a++\nb;'),
+    normalizeJavaScriptTrivia('a++ b;'),
+    'a line terminator after an update operator must remain digest-significant',
+  );
+  assert.notEqual(
     sha256ExecutableSource(compact),
     sha256ExecutableSource(compact.replace('two words', 'twowords')),
     'spaces inside quoted literals must affect executable digests',
@@ -349,6 +369,7 @@ test('submission fixtures cover six positive and three negative cases', () => {
   assert.equal(new Set([...fixtures.positive, ...fixtures.negative].map((item) => item.id)).size, 9);
   assert.match(fixtures.reviewEnvironment.account, /synthetic reviewer account/i);
   assert.match(fixtures.reviewEnvironment.submissionPolicy, /No fixture may submit/);
+  assert.doesNotMatch(JSON.stringify(fixtures), /\b(?:Kevin|Astuhuaman)\b/i, 'submission fixtures must not leak a real reviewer identity');
   for (const item of fixtures.positive) {
     assert.ok(item.fixture);
     assert.ok(item.expectedResultShape.length > 0);
@@ -366,9 +387,12 @@ test('submission fixtures cover six positive and three negative cases', () => {
   assert.ok(applyToReview.expected.includes('trackly_get_job'));
   assert.deepEqual(applyToReview.turns.map((turn) => turn.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
   assert.match(applyToReview.turns[2].content, /attached the intended resume.*filename/s);
+  assert.match(applyToReview.turns[2].content, /Synthetic-Reviewer-0001-Resume\.pdf/);
   assert.match(applyToReview.turns[4].content, /exact complete application.*truthful/s);
   assert.ok(applyToReview.turns.slice(0, 5).every((turn) => !(turn.expected || []).includes('trackly_certify_review_ready')));
-  assert.deepEqual(applyToReview.turns[5].expected, ['trackly_certify_review_ready']);
+  assert.deepEqual(applyToReview.turns[5].expected, ['trackly_certify_review_ready', 'trackly_get_apply_work']);
+  assert.match(applyToReview.turns[5].content, /immediately refetch.*only after the refetch verifies the durable review-ready handoff/s);
+  assert.deepEqual(applyToReview.expected.slice(-2), ['trackly_certify_review_ready', 'trackly_get_apply_work']);
   assert.deepEqual(
     applyToReview.expectedResultShape,
     [

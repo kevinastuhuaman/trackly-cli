@@ -43,9 +43,16 @@ function normalizeJavaScriptTrivia(source) {
     if (/\s/.test(char) || source.startsWith('//', index) || source.startsWith('/*', index)) {
       const triviaStart = index;
       index = skipTrivia(index);
+      const previousToken = tokens.at(-1);
+      const nextTokenIsUpdateOperator = source.startsWith('++', index) || source.startsWith('--', index);
       if (
         /[\n\r\u2028\u2029]/.test(source.slice(triviaStart, index))
-        && lineTerminatorSensitiveTokens.has(tokens.at(-1))
+        && (
+          lineTerminatorSensitiveTokens.has(previousToken)
+          || previousToken === '++'
+          || previousToken === '--'
+          || nextTokenIsUpdateOperator
+        )
       ) {
         tokens.push('<LINE_TERMINATOR>');
       }
