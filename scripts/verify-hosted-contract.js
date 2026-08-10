@@ -315,6 +315,8 @@ function gitOutput(repository, args, encoding = 'utf8') {
 }
 
 const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
+  'package.json',
+  'package-lock.json',
   'contracts/trackly-apply-tools.json',
   'contracts/trackly-plugin-tools.json',
   'src/index.ts',
@@ -1761,6 +1763,140 @@ function assertImmutablePluginScopeFreeMethods(source, sourcePath) {
   );
 }
 
+function collectBindingReferences(ast, name, excludedReference) {
+  const references = [];
+  function visit(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, parent, parentKey);
+      return;
+    }
+    const isStaticMemberName = parent?.type === 'MemberExpression'
+      && parentKey === 'property' && !parent.computed;
+    const isStaticObjectKey = parent?.type === 'ObjectProperty'
+      && parentKey === 'key' && !parent.computed && !parent.shorthand;
+    if (node.type === 'Identifier'
+      && node.name === name
+      && !isStaticMemberName
+      && !isStaticObjectKey
+      && !excludedReference(node, parent, parentKey)) references.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child, node, key);
+    }
+  }
+  visit(ast);
+  return references;
+}
+
+function assertInstallProcessGuardsSemantics(
+  source,
+  sourcePath,
+  { functionAstSha256 = '2191522a7f9636c823b1f78f0cb8685985cb35c873ef3c7cd5e30cb296500409' } = {},
+) {
+  assertActiveFunctionAstSha256(source, 'installProcessGuards', functionAstSha256, sourcePath);
+  const definition = activeNamedDefinitionAst(source, 'installProcessGuards', sourcePath);
+  assert.equal(definition.body?.type, 'BlockStatement', `installProcessGuards in ${sourcePath} must use a block body`);
+  assert.deepEqual(
+    canonicalSchemaAst(definition.body.body.at(-1)),
+    canonicalSchemaAst(parseFullSource('interval.unref?.();', 'locked process-guard normal return').program.body[0]),
+    `installProcessGuards in ${sourcePath} must end by returning normally after unreferring its interval`,
+  );
+
+  const startServer = activeNamedDefinitionAst(source, 'startServer', sourcePath);
+  const invocation = startServer.body?.body?.[0]?.expression;
+  assert.equal(
+    invocation?.type === 'CallExpression'
+      && invocation.callee?.type === 'Identifier'
+      && invocation.callee.name === 'installProcessGuards'
+      && invocation.arguments.length === 0,
+    true,
+    `startServer in ${sourcePath} must begin with the sole installProcessGuards invocation`,
+  );
+  const ast = parseFullSource(source, sourcePath);
+  const references = collectBindingReferences(
+    ast,
+    'installProcessGuards',
+    () => false,
+  );
+  assert.deepEqual(
+    references,
+    [definition.id, invocation.callee],
+    `installProcessGuards in ${sourcePath} must be referenced only by its active definition and locked startServer invocation`,
+  );
+}
+
+function assertApplicationFieldByKeyReferenceSemantics(
+  catalogSource,
+  catalogSourcePath,
+  scopesSource,
+  scopesSourcePath,
+) {
+  const name = 'APPLICATION_FIELD_BY_KEY';
+  assertActiveVariableInitializerAst(
+    catalogSource,
+    name,
+    'new Map(APPLICATION_PROFILE_FIELDS.map((field) => [field.key, field]))',
+    catalogSourcePath,
+  );
+  const catalogDeclaration = activeVariableDeclarator(
+    catalogSource,
+    name,
+    catalogSourcePath,
+  ).declarator;
+  const catalogReferences = collectBindingReferences(
+    parseFullSource(catalogSource, catalogSourcePath),
+    name,
+    () => false,
+  );
+  assert.deepEqual(
+    catalogReferences,
+    [catalogDeclaration.id],
+    `${name} in ${catalogSourcePath} must not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration`,
+  );
+
+  const applicationFieldImport = assertImportBinding(
+    scopesSource,
+    name,
+    name,
+    '../services/application-profile/catalog.js',
+    scopesSourcePath,
+  );
+  const scopesAst = parseFullSource(scopesSource, scopesSourcePath);
+  const lookups = [];
+  function visitLookups(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitLookups(child);
+      return;
+    }
+    if (node.type === 'CallExpression'
+      && node.callee?.type === 'MemberExpression'
+      && !node.callee.computed
+      && node.callee.object?.type === 'Identifier'
+      && node.callee.object.name === name
+      && node.callee.property?.type === 'Identifier'
+      && node.callee.property.name === 'get'
+      && node.arguments.length === 1) lookups.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitLookups(child);
+    }
+  }
+  visitLookups(scopesAst);
+  assert.equal(lookups.length, 2, `${name} in ${scopesSourcePath} must have exactly two locked sensitivity lookups`);
+  const scopeReferences = collectBindingReferences(
+    scopesAst,
+    name,
+    (_node, parent, parentKey) => parent?.type === 'ImportSpecifier' && parentKey === 'imported',
+  );
+  assert.deepEqual(
+    scopeReferences,
+    [applicationFieldImport.local, ...lookups.map((lookup) => lookup.callee.object)],
+    `${name} in ${scopesSourcePath} must be referenced only by its import and two locked sensitivity lookups`,
+  );
+}
+
 function registrationArgumentSources(source, registration, sourcePath) {
   assert.ok(
     registration?.call?.arguments?.length >= 3,
@@ -2168,23 +2304,24 @@ function assertActiveTopLevelStatementAst(source, expectedStatement, sourcePath)
 }
 
 function assertImportBinding(source, importedName, localName, moduleName, sourcePath) {
-  const matches = parseFullSource(source, sourcePath).program.body.filter((statement) => (
-    statement.type === 'ImportDeclaration'
-    && statement.source.value === moduleName
-    && statement.specifiers.some((specifier) => {
-      if (importedName === 'default') {
-        return specifier.type === 'ImportDefaultSpecifier' && specifier.local?.name === localName;
-      }
-      return specifier.type === 'ImportSpecifier'
-        && specifier.imported?.name === importedName
-        && specifier.local?.name === localName;
-    })
+  const matches = parseFullSource(source, sourcePath).program.body.flatMap((statement) => (
+    statement.type === 'ImportDeclaration' && statement.source.value === moduleName
+      ? statement.specifiers.filter((specifier) => {
+        if (importedName === 'default') {
+          return specifier.type === 'ImportDefaultSpecifier' && specifier.local?.name === localName;
+        }
+        return specifier.type === 'ImportSpecifier'
+          && specifier.imported?.name === importedName
+          && specifier.local?.name === localName;
+      })
+      : []
   ));
   assert.equal(
     matches.length,
     1,
     `${sourcePath} must import ${importedName} as ${localName} exactly once from ${moduleName}`,
   );
+  return matches[0];
 }
 
 function assertDescriptorUsesTopLevelBinding(
@@ -3491,6 +3628,7 @@ assertLivePluginRouterMount(
   '/api/plugin/trackly/mcp',
   hostedApplicationPath,
 );
+assertInstallProcessGuardsSemantics(hostedApplicationSource, hostedApplicationPath);
 assertCommonJsDestructuredRequire(
   localServerSource,
   'registerApplyTools',
@@ -4400,13 +4538,6 @@ const executableScopeContract = staticStringArrayMap(
 );
 assertMcpScopeHelperSemantics(hostedMcpScopesSource, hostedMcpScopesPath);
 assertImmutablePluginScopeFreeMethods(hostedPluginScopesSource, hostedPluginScopesPath);
-assertImportBinding(
-  hostedPluginScopesSource,
-  'APPLICATION_FIELD_BY_KEY',
-  'APPLICATION_FIELD_BY_KEY',
-  '../services/application-profile/catalog.js',
-  hostedPluginScopesPath,
-);
 assertActiveVariableInitializerAst(
   hostedApplicationProfileCatalogSource,
   'APPLICATION_PROFILE_FIELDS',
@@ -4417,11 +4548,11 @@ assertActiveVariableInitializerAst(
   }))`,
   hostedApplicationProfileCatalogPath,
 );
-assertActiveVariableInitializerAst(
+assertApplicationFieldByKeyReferenceSemantics(
   hostedApplicationProfileCatalogSource,
-  'APPLICATION_FIELD_BY_KEY',
-  'new Map(APPLICATION_PROFILE_FIELDS.map((field) => [field.key, field]))',
   hostedApplicationProfileCatalogPath,
+  hostedPluginScopesSource,
+  hostedPluginScopesPath,
 );
 const applicationFieldSensitivityMap = staticApplicationFieldSensitivityMap(
   hostedApplicationProfileCatalogSource,
@@ -6090,7 +6221,9 @@ module.exports = {
   HOSTED_DEPLOYABLE_PATHS,
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertApplicationFieldByKeyReferenceSemantics,
   assertInternalSecretCompatibility,
+  assertInstallProcessGuardsSemantics,
   assertPluginManualSubmissionRouteSemantics,
   assertPluginUiContractSemantics,
   assertCommonJsDestructuredRequire,

@@ -13,7 +13,9 @@ const shrinkwrap = require('../npm-shrinkwrap.json');
 const {
   HOSTED_DEPLOYABLE_PATHS,
   activeNamedDefinitionAst,
+  assertApplicationFieldByKeyReferenceSemantics,
   assertInternalSecretCompatibility,
+  assertInstallProcessGuardsSemantics,
   assertPluginManualSubmissionRouteSemantics,
   assertPluginUiContractSemantics,
   assertActiveFunctionDefinitionAst,
@@ -174,6 +176,8 @@ test('release manifests stay on one package version', () => {
 test('hosted provenance covers plugin UI, resource identity, and auth-epoch runtime sources', () => {
   assert.equal(new Set(HOSTED_DEPLOYABLE_PATHS).size, HOSTED_DEPLOYABLE_PATHS.length);
   for (const runtimePath of [
+    'package.json',
+    'package-lock.json',
     'src/mcp/plugin-ui.ts',
     'src/mcp/mcp-tokens.ts',
     'src/mcp/hosted-auth-context.ts',
@@ -189,6 +193,109 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
       `${runtimePath} must be preserved byte-for-byte from reviewed source through merge`,
     );
   }
+});
+
+test('hosted process guards lock active semantics, invocation inventory, and normal return', () => {
+  const source = `
+    function installProcessGuards(): void {
+      process.on('unhandledRejection', handleRejection);
+      const interval = setInterval(checkMemory, 30000);
+      interval.unref?.();
+    }
+    function startServer() {
+      installProcessGuards();
+      const app = createApp();
+      app.listen(PORT);
+    }
+  `;
+  const options = {
+    functionAstSha256: activeFunctionDigest(source, 'installProcessGuards', 'process guard fixture'),
+  };
+  assert.doesNotThrow(() => assertInstallProcessGuardsSemantics(
+    source,
+    'process guard fixture',
+    options,
+  ));
+  assert.throws(
+    () => assertInstallProcessGuardsSemantics(
+      source.replace("process.on('unhandledRejection', handleRejection);", "process.once('unhandledRejection', handleRejection);"),
+      'drifted process guard fixture',
+      options,
+    ),
+    /locked active semantic AST/,
+  );
+  assert.throws(
+    () => assertInstallProcessGuardsSemantics(
+      source.replace('interval.unref?.();', 'return interval;'),
+      'abrupt process guard fixture',
+      {
+        functionAstSha256: activeFunctionDigest(
+          source.replace('interval.unref?.();', 'return interval;'),
+          'installProcessGuards',
+          'abrupt process guard fixture',
+        ),
+      },
+    ),
+    /must end by returning normally after unreferring its interval/,
+  );
+  assert.throws(
+    () => assertInstallProcessGuardsSemantics(
+      `${source}\ninstallProcessGuards();`,
+      'extra process guard invocation fixture',
+      options,
+    ),
+    /must be referenced only by its active definition and locked startServer invocation/,
+  );
+});
+
+test('hosted application sensitivity map rejects mutation, reassignment, and reference drift', () => {
+  const catalogSource = `
+    const APPLICATION_PROFILE_FIELDS = [];
+    export const APPLICATION_FIELD_BY_KEY = new Map(
+      APPLICATION_PROFILE_FIELDS.map((field) => [field.key, field]),
+    );
+  `;
+  const scopesSource = `
+    import { APPLICATION_FIELD_BY_KEY } from '../services/application-profile/catalog.js';
+    function requiredScopesForPluginToolCall(key: string, otherKey: string) {
+      const write = APPLICATION_FIELD_BY_KEY.get(key)?.sensitivity !== 'standard';
+      const read = APPLICATION_FIELD_BY_KEY.get(otherKey)?.sensitivity !== 'standard';
+      return { write, read };
+    }
+  `;
+  assert.doesNotThrow(() => assertApplicationFieldByKeyReferenceSemantics(
+    catalogSource,
+    'catalog fixture',
+    scopesSource,
+    'scope fixture',
+  ));
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      `${catalogSource}\nAPPLICATION_FIELD_BY_KEY.set('extra', {});`,
+      'mutated catalog fixture',
+      scopesSource,
+      'scope fixture',
+    ),
+    /must (?:never be assigned or updated after declaration|not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration)/,
+  );
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      `${catalogSource}\nAPPLICATION_FIELD_BY_KEY = new Map();`,
+      'reassigned catalog fixture',
+      scopesSource,
+      'scope fixture',
+    ),
+    /must (?:never be assigned or updated after declaration|not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration)/,
+  );
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      catalogSource,
+      'catalog fixture',
+      scopesSource.replace('return { write, read };', 'consume(APPLICATION_FIELD_BY_KEY); return { write, read };'),
+      'escaped scope fixture',
+    ),
+    /must be referenced only by its import and two locked sensitivity lookups/,
+  );
 });
 
 test('hosted UI semantic lock rejects MIME, metadata, tool-output, and HTML drift', () => {
