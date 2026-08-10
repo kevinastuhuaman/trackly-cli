@@ -320,6 +320,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/index.ts',
   'src/mcp/server.ts',
   'src/mcp/plugin-server.ts',
+  'src/mcp/plugin-ui.ts',
   'src/mcp/plugin-router.ts',
   'src/mcp/plugin-scopes.ts',
   'src/mcp/mcp-scopes.ts',
@@ -1464,6 +1465,9 @@ function assertLivePluginRouterMount(
 
   const startServer = activeNamedDefinitionAst(source, 'startServer', sourcePath);
   assert.equal(startServer.body?.type, 'BlockStatement', `startServer in ${sourcePath} must use a block body`);
+  assert.equal(startServer.async, false, `startServer in ${sourcePath} must remain synchronous`);
+  assert.equal(startServer.generator, false, `startServer in ${sourcePath} must not defer execution as a generator`);
+  assert.equal(startServer.params.length, 0, `startServer in ${sourcePath} must not shadow createApp through parameters`);
   const liveAppStatements = startServer.body.body.filter((statement) => (
     statement.type === 'VariableDeclaration' && statement.kind === 'const'
       && statement.declarations.some((declaration) => (
@@ -1485,8 +1489,19 @@ function assertLivePluginRouterMount(
     && babelCalleeName(statement.expression.callee) === 'app.listen'
   ));
   assert.equal(liveListens.length, 1, `startServer in ${sourcePath} must listen on the exact createApp result`);
+  const liveListenIndex = startServer.body.body.indexOf(liveListens[0]);
   assert.equal(
-    startServer.body.body.indexOf(liveListens[0]),
+    startServer.body.body.indexOf(liveAppStatements[0]),
+    1,
+    `startServer in ${sourcePath} must create the live application immediately after its locked process-guard prelude`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(startServer.body.body[0]),
+    canonicalSchemaAst(parseFullSource('installProcessGuards();', 'locked startServer prelude').program.body[0]),
+    `startServer in ${sourcePath} must execute only installProcessGuards before creating the live application`,
+  );
+  assert.equal(
+    liveListenIndex,
     startServer.body.body.indexOf(liveAppStatements[0]) + 1,
     `startServer in ${sourcePath} must immediately listen on the exact createApp result`,
   );
@@ -1556,6 +1571,27 @@ function assertMcpScopeHelperSemantics(source, sourcePath) {
       return candidate.every((scope) => allowedSet.has(scope));
     }`,
     sourcePath,
+  );
+  const scopeSetReferences = [];
+  function visitScopeSetReferences(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitScopeSetReferences(child);
+      return;
+    }
+    if (node.type === 'Identifier' && node.name === 'MCP_SUPPORTED_SCOPE_SET') {
+      scopeSetReferences.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitScopeSetReferences(child);
+    }
+  }
+  visitScopeSetReferences(parseFullSource(source, sourcePath));
+  assert.equal(
+    scopeSetReferences.length,
+    2,
+    `MCP_SUPPORTED_SCOPE_SET in ${sourcePath} must be referenced only by its immutable declaration and locked membership check`,
   );
 }
 
@@ -5293,6 +5329,7 @@ console.log(
 
 module.exports = {
   CHECKED_IN_HOSTED_FIXTURE_SHA256,
+  HOSTED_DEPLOYABLE_PATHS,
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertCommonJsDestructuredRequire,

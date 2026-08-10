@@ -11,6 +11,7 @@ const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
 
 const {
+  HOSTED_DEPLOYABLE_PATHS,
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertCommonJsDestructuredRequire,
@@ -275,6 +276,10 @@ test('coordinated hosted provenance rejects a dirty reviewed-runtime checkout', 
 });
 
 test('coordinated hosted provenance rejects merge commits that alter reviewed deployable blobs', (t) => {
+  assert.ok(
+    HOSTED_DEPLOYABLE_PATHS.includes('src/mcp/plugin-ui.ts'),
+    'the hosted MCP App UI must be covered by exact reviewed-to-merged byte provenance',
+  );
   const repository = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-merge-provenance-'));
   t.after(() => fs.rmSync(repository, { recursive: true, force: true }));
   const git = (...args) => childProcess.execFileSync('git', ['-C', repository, ...args], {
@@ -380,6 +385,16 @@ test('OAuth scope normalization and subset checks stay fail-closed against the c
   assert.throws(
     () => assertMcpScopeHelperSemantics(
       source.replace(
+        'const MCP_SUPPORTED_SCOPE_SET = new Set<string>(MCP_SUPPORTED_SCOPES);',
+        "const MCP_SUPPORTED_SCOPE_SET = new Set<string>(MCP_SUPPORTED_SCOPES);\n    MCP_SUPPORTED_SCOPE_SET.add('admin:all');",
+      ),
+      'mutated scope set fixture',
+    ),
+    /must be referenced only by its immutable declaration and locked membership check/,
+  );
+  assert.throws(
+    () => assertMcpScopeHelperSemantics(
+      source.replace(
         "candidate.some((scope) => !MCP_SUPPORTED_SCOPE_SET.has(scope))",
         'false',
       ),
@@ -400,6 +415,7 @@ test('the exported plugin router must be mounted on the exact production applica
       return app;
     }
     function startServer() {
+      installProcessGuards();
       const app = createApp();
       app.listen(PORT);
     }
@@ -452,6 +468,29 @@ test('the exported plugin router must be mounted on the exact production applica
       'escaped application router fixture',
     ),
     /must not alias, escape, or mount tracklyPluginMcpRoutes outside its locked live path/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        'installProcessGuards();',
+        'process.exit(0);',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'unreachable application mount fixture',
+    ),
+    /must execute only installProcessGuards before creating the live application/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace('function startServer() {', 'function* startServer() {'),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'deferred application mount fixture',
+    ),
+    /must not defer execution as a generator/,
   );
 });
 
