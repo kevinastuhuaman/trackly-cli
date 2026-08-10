@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '241ceffbc70127c6dfa301f9ea45530d5f2e9b8cc21c079dedfc2d89de195bda';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '7a6532297dbed38048823d5d8a6f9cf753b6ae77a2c216612849d98998736e23';
 
 const parsedSourceCache = new Map();
 
@@ -335,7 +335,9 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/utils/auth-epoch.ts',
   'src/utils/azure-rehearsal-ip.ts',
   'src/utils/jwt.ts',
+  'src/utils/trackly-web-origin.ts',
   'src/middleware/channel-attribution.ts',
+  'src/middleware/maintenance-mode.ts',
   'src/services/job-brief.ts',
   'src/services/trackly-access.ts',
   'src/services/application-profile/apply-execution-contract.ts',
@@ -404,6 +406,8 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     pluginServer: 'src/mcp/plugin-server.ts',
     pluginScopes: 'src/mcp/plugin-scopes.ts',
     jobBriefService: 'src/services/job-brief.ts',
+    backendUiRedirect: 'src/utils/trackly-web-origin.ts',
+    maintenanceMode: 'src/middleware/maintenance-mode.ts',
   };
   for (const [lockName, relativePath] of Object.entries(lockedSources)) {
     const committedBytes = gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null);
@@ -1454,12 +1458,11 @@ function staticExpressPathCovers(candidatePath, mountPath, method) {
   const normalizedMount = mountPath.length > 1
     ? mountPath.replace(/\/+$/, '').toLowerCase()
     : mountPath.toLowerCase();
-  const wildcardIndex = normalizedCandidate.search(/[*:({]/);
-  if (wildcardIndex !== -1) {
-    const staticPrefix = normalizedCandidate.slice(0, wildcardIndex).replace(/\/+$/, '');
+  const patternIndex = normalizedCandidate.search(/[^a-z0-9/_-]/);
+  if (patternIndex !== -1) {
+    const staticPrefix = normalizedCandidate.slice(0, patternIndex).replace(/\/+$/, '');
     return staticPrefix === ''
-      || normalizedMount === staticPrefix
-      || normalizedMount.startsWith(`${staticPrefix}/`);
+      || normalizedMount.startsWith(staticPrefix);
   }
   if (method === 'use') {
     return normalizedCandidate === '/'
@@ -1494,7 +1497,25 @@ function assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePat
   assert.equal(factory.body?.type, 'BlockStatement', `createApp in ${sourcePath} must use a block body`);
   const canonicalMount = canonicalPluginMount(factory, routerBinding, mountPath, sourcePath);
   const canonicalCall = canonicalMount.expression;
-  const routeMethods = new Set(['use', 'all', 'get', 'post', 'put', 'patch', 'delete', 'options', 'head']);
+  const routeMethods = new Set([
+    'use', 'all',
+    'acl', 'bind', 'checkout', 'connect', 'copy', 'delete', 'get', 'head', 'link', 'lock',
+    'm-search', 'merge', 'mkactivity', 'mkcalendar', 'mkcol', 'move', 'notify', 'options',
+    'patch', 'post', 'propfind', 'proppatch', 'purge', 'put', 'query', 'rebind', 'report',
+    'search', 'source', 'subscribe', 'trace', 'unbind', 'unlink', 'unlock', 'unsubscribe',
+  ]);
+  const reviewedGlobalMiddlewareCallDigests = [
+    'c9c8443c9a480263e54218e603a7ed927d1e4e411c7a4542e80206cb5b3ddecd',
+    '81d41aba94334a95d3a6002fd6ced8069b9739cd52c6679c6293e01c3f547f75',
+    '0c55d2f0a6f768bafaa9a8e8a8d5d52280734c68e9902a93e63d57441599b967',
+    '12def47c0dc1628a891b9045ed9c275af25dd73660929d528943f95a98c34855',
+    'bc0d7d12f97ab6e9e79b00fa3701899806387b16353d9575628545a06644b2e9',
+    'd63cf7bbc1fae45f475807325f4178283bfea854bf4aeecaf7754f66e509e0a5',
+    'd79c16521f24347d7114358baafc46d77bbe47fe2034506bf941521e9e66737f',
+    '971bb5b2a58a45df2caf26342572fcc3221e86544e0335be81a86cb22a30e284',
+  ];
+  const reviewedGlobalMiddlewareCallDigestSet = new Set(reviewedGlobalMiddlewareCallDigests);
+  const encounteredReviewedGlobalMiddlewareDigests = [];
   const earlierCoveringHandlers = [];
   function staticMemberName(member) {
     if (member?.type !== 'MemberExpression') return null;
@@ -1574,15 +1595,15 @@ function assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePat
         if (knownDisjointLegalRedirectPaths) {
           verifyLegalRedirectPaths(pathArgument, method);
         }
-        const pathlessUse = method === 'use'
-          && node.arguments.length === 1
-          && (pathArgument?.type === 'CallExpression'
-            || pathArgument?.type === 'FunctionExpression'
-            || pathArgument?.type === 'ArrowFunctionExpression'
-            || pathArgument?.type === 'Identifier');
+        const globalMiddlewareDigest = directAppCall && method === 'use' && node.arguments.length === 1
+          ? sha256ExactBytes(JSON.stringify(canonicalSchemaAst(node)))
+          : null;
+        const reviewedGlobalMiddleware = globalMiddlewareDigest !== null
+          && reviewedGlobalMiddlewareCallDigestSet.has(globalMiddlewareDigest);
+        if (reviewedGlobalMiddleware) encounteredReviewedGlobalMiddlewareDigests.push(globalMiddlewareDigest);
         const covers = pathArgument?.type === 'StringLiteral'
           ? staticExpressPathCovers(pathArgument.value, mountPath, method)
-          : !pathlessUse && !knownDisjointLegalRedirectPaths;
+          : !knownDisjointLegalRedirectPaths && !reviewedGlobalMiddleware;
         if (covers) earlierCoveringHandlers.push(node);
       }
     }
@@ -1592,6 +1613,13 @@ function assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePat
     }
   }
   visitEarlierRoutes(factory.body);
+  if (encounteredReviewedGlobalMiddlewareDigests.length > 0) {
+    assert.deepEqual(
+      encounteredReviewedGlobalMiddlewareDigests,
+      reviewedGlobalMiddlewareCallDigests,
+      `createApp in ${sourcePath} must preserve the complete ordered reviewed global middleware inventory before ${mountPath}`,
+    );
+  }
   assert.equal(
     earlierCoveringHandlers.length,
     0,
@@ -3721,11 +3749,15 @@ function verifyCheckedInHostedContractFixture(
     pluginServer: lock.publicExecutableContract.pluginServerSha256,
     pluginScopes: lock.publicExecutableContract.pluginScopesSha256,
     jobBriefService: lock.publicExecutableContract.jobBriefServiceSha256,
+    backendUiRedirect: lock.publicExecutableContract.backendUiRedirectSha256,
+    maintenanceMode: lock.publicExecutableContract.maintenanceModeSha256,
   }, `${fixturePath} hosted source snapshot drifted from the packaged executable lock`);
   for (const digest of [
     lock.publicExecutableContract.pluginServerSha256,
     lock.publicExecutableContract.pluginScopesSha256,
     lock.publicExecutableContract.jobBriefServiceSha256,
+    lock.publicExecutableContract.backendUiRedirectSha256,
+    lock.publicExecutableContract.maintenanceModeSha256,
     ...Object.values(lock.publicExecutableContract.descriptorSha256),
     ...Object.values(lock.publicExecutableContract.handlerSha256),
   ]) assert.match(digest, /^[a-f0-9]{64}$/);
@@ -5056,6 +5088,16 @@ assert.equal(
   sha256ExactBytes(hostedJobBriefServiceSource),
   pluginLock.publicExecutableContract.jobBriefServiceSha256,
   'Hosted public job-brief date validation drifted from the packaged whole-source digest lock',
+);
+assert.equal(
+  sha256ExactBytes(fs.readFileSync(path.join(backendRoot, 'src', 'utils', 'trackly-web-origin.ts'))),
+  pluginLock.publicExecutableContract.backendUiRedirectSha256,
+  'Hosted backend UI redirect middleware semantics drifted from the packaged whole-source digest lock',
+);
+assert.equal(
+  sha256ExactBytes(fs.readFileSync(path.join(backendRoot, 'src', 'middleware', 'maintenance-mode.ts'))),
+  pluginLock.publicExecutableContract.maintenanceModeSha256,
+  'Hosted maintenance middleware semantics drifted from the packaged whole-source digest lock',
 );
 
 const executableSchemaDigests = Object.fromEntries(

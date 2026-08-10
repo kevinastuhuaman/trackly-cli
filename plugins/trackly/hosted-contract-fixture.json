@@ -88,6 +88,8 @@
   "sourceSha256": {
     "pluginServer": "c28ca52e53cc4d56e0c5bebb942b4774c2fc7f46ef64d862b0dc22703436b07c",
     "pluginScopes": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
-    "jobBriefService": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b"
+    "jobBriefService": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
+    "backendUiRedirect": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
+    "maintenanceMode": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe"
   }
 }
