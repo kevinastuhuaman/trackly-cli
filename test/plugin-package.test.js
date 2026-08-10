@@ -23,9 +23,11 @@ const {
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
   assertImmutablePluginScopeFreeMethods,
+  assertImmutablePluginToolScopesSemantics,
   assertLivePluginRouterMount,
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
+  assertHostedCommitTimestamps,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerAssignedRequestEndpoint,
   assertWrappedHandlerGuardedBlockAst,
@@ -313,6 +315,43 @@ test('coordinated hosted provenance rejects merge commits that alter reviewed de
   );
 });
 
+test('coordinated hosted provenance binds fixture timestamps to exact Git commit metadata', (t) => {
+  const repository = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-timestamp-provenance-'));
+  t.after(() => fs.rmSync(repository, { recursive: true, force: true }));
+  const git = (...args) => childProcess.execFileSync('git', ['-C', repository, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  git('init');
+  git('config', 'user.name', 'Trackly Test');
+  git('config', 'user.email', 'test@usetrackly.app');
+  fs.writeFileSync(path.join(repository, 'runtime.ts'), 'export const reviewed = true;\n');
+  git('add', 'runtime.ts');
+  git('commit', '-m', 'reviewed runtime');
+  const sourceCommit = git('rev-parse', 'HEAD');
+  git('commit', '--allow-empty', '-m', 'merged runtime');
+  const mergeCommit = git('rev-parse', 'HEAD');
+  const fixture = {
+    sourceRuntime: {
+      commit: sourceCommit,
+      committedAt: git('show', '-s', '--format=%cI', sourceCommit),
+    },
+    mergedRuntime: {
+      commit: mergeCommit,
+      committedAt: git('show', '-s', '--format=%cI', mergeCommit),
+    },
+  };
+  assert.doesNotThrow(() => assertHostedCommitTimestamps(repository, fixture));
+  for (const runtimeKey of ['sourceRuntime', 'mergedRuntime']) {
+    const drifted = structuredClone(fixture);
+    drifted[runtimeKey].committedAt = '2099-01-01T00:00:00-08:00';
+    assert.throws(
+      () => assertHostedCommitTimestamps(repository, drifted),
+      /must equal its exact Git committer timestamp/,
+    );
+  }
+});
+
 test('scope extraction ignores stale commented mappings and rejects dynamic object members', () => {
   const source = `
     const TRACKLY_PLUGIN_TOOL_SCOPES = {
@@ -333,6 +372,38 @@ test('scope extraction ignores stale commented mappings and rejects dynamic obje
     ),
     /only static properties \(no spreads or methods\)/,
   );
+});
+
+test('plugin tool scope map rejects mutation, reassignment, aliasing, and escape', () => {
+  const source = `
+    const TRACKLY_PLUGIN_TOOL_SCOPES = {
+      trackly_active: ['jobs:read', 'tracking:read'],
+    } as const satisfies Record<string, readonly string[]>;
+    const TRACKLY_PLUGIN_TOOL_NAMES = Object.freeze(
+      Object.keys(TRACKLY_PLUGIN_TOOL_SCOPES),
+    );
+    function requiredScopesForPluginTool(toolName: string): string[] | null {
+      if (!Object.hasOwn(TRACKLY_PLUGIN_TOOL_SCOPES, toolName)) return null;
+      return [
+        ...TRACKLY_PLUGIN_TOOL_SCOPES[
+          toolName as keyof typeof TRACKLY_PLUGIN_TOOL_SCOPES
+        ],
+      ];
+    }
+  `;
+  assert.doesNotThrow(() => assertImmutablePluginToolScopesSemantics(source, 'scope-map fixture'));
+  for (const mutation of [
+    "TRACKLY_PLUGIN_TOOL_SCOPES.trackly_active.length = 0;",
+    "TRACKLY_PLUGIN_TOOL_SCOPES.trackly_active.push('profile:write');",
+    'const aliasedScopes = TRACKLY_PLUGIN_TOOL_SCOPES;',
+    'consumeScopes(TRACKLY_PLUGIN_TOOL_SCOPES);',
+    'TRACKLY_PLUGIN_TOOL_SCOPES = {};',
+  ]) {
+    assert.throws(
+      () => assertImmutablePluginToolScopesSemantics(`${source}\n${mutation}`, 'mutated scope-map fixture'),
+      /must (?:not be reassigned, mutated, aliased, escaped, or referenced outside its locked names catalog and requiredScopesForPluginTool|never be assigned or updated after declaration)/,
+    );
+  }
 });
 
 test('OAuth scope normalization and subset checks stay fail-closed against the canonical scope catalog', () => {
@@ -3104,6 +3175,7 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.match(lock.publicExecutableContract.jobBriefServiceSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.backendUiRedirectSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.maintenanceModeSha256, /^[a-f0-9]{64}$/);
+  assert.match(lock.publicExecutableContract.databaseBindingSha256, /^[a-f0-9]{64}$/);
   assert.ok(Object.values(lock.publicExecutableContract.schemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.transitiveSchemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.namedApplySchemaSha256).flatMap(Object.values).every((digest) => /^[a-f0-9]{64}$/.test(digest)));

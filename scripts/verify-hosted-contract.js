@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '7a6532297dbed38048823d5d8a6f9cf753b6ae77a2c216612849d98998736e23';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'e51f47b791ae111291c44182c89b8d22768aa61ed4f445044a2945ba17feaac9';
 
 const parsedSourceCache = new Map();
 
@@ -322,6 +322,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'contracts/trackly-plugin-tools.json',
   'src/index.ts',
   'src/__tests__/cors-origins.integration.test.ts',
+  'src/config/database.ts',
   'src/mcp/server.ts',
   'src/mcp/plugin-server.ts',
   'src/mcp/__tests__/plugin-server.test.ts',
@@ -361,6 +362,19 @@ function assertMergeCommitPreservesPaths(repository, sourceCommit, mergeCommit, 
   }
 }
 
+function assertHostedCommitTimestamps(repository, fixture) {
+  for (const [runtimeName, runtime] of [
+    ['sourceRuntime', fixture.sourceRuntime],
+    ['mergedRuntime', fixture.mergedRuntime],
+  ]) {
+    assert.equal(
+      runtime.committedAt,
+      gitOutput(repository, ['show', '-s', '--format=%cI', runtime.commit]).trim(),
+      `${runtimeName} ${runtime.commit} committedAt must equal its exact Git committer timestamp`,
+    );
+  }
+}
+
 function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
   const fixturePath = path.join(cliRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
   const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
@@ -389,6 +403,7 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     fixture.mergedRuntime.parents,
     `${mergeCommit} must have the recorded merge parents in order`,
   );
+  assertHostedCommitTimestamps(backendRoot, fixture);
   for (const relativePath of HOSTED_DEPLOYABLE_PATHS) {
     assert.equal(
       sha256ExactBytes(fs.readFileSync(path.join(backendRoot, relativePath))),
@@ -408,6 +423,7 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     jobBriefService: 'src/services/job-brief.ts',
     backendUiRedirect: 'src/utils/trackly-web-origin.ts',
     maintenanceMode: 'src/middleware/maintenance-mode.ts',
+    databaseBinding: 'src/config/database.ts',
   };
   for (const [lockName, relativePath] of Object.entries(lockedSources)) {
     const committedBytes = gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null);
@@ -1997,6 +2013,50 @@ function assertImmutablePluginScopeFreeMethods(source, sourcePath) {
     references,
     [declaration.id, membershipCalls[0].callee.object],
     `${name} in ${sourcePath} must not be aliased, escaped, mutated, or used outside its locked membership check`,
+  );
+}
+
+function assertImmutablePluginToolScopesSemantics(source, sourcePath) {
+  const name = 'TRACKLY_PLUGIN_TOOL_SCOPES';
+  const namesBinding = 'TRACKLY_PLUGIN_TOOL_NAMES';
+  assertActiveVariableInitializerAst(
+    source,
+    namesBinding,
+    'Object.freeze(Object.keys(TRACKLY_PLUGIN_TOOL_SCOPES))',
+    sourcePath,
+  );
+  const ast = parseFullSource(source, sourcePath);
+  const declaration = activeVariableDeclarator(source, name, sourcePath).declarator;
+  const namesDeclaration = activeVariableDeclarator(source, namesBinding, sourcePath).declarator;
+  const namesReferences = collectBindingReferences(
+    namesDeclaration.init,
+    name,
+    () => false,
+  );
+  assert.equal(
+    namesReferences.length,
+    1,
+    `${namesBinding} in ${sourcePath} must enumerate ${name} exactly once`,
+  );
+  const requiredScopesFunction = activeNamedDefinitionAst(
+    source,
+    'requiredScopesForPluginTool',
+    sourcePath,
+  );
+  const lockedFunctionReferences = collectBindingReferences(
+    requiredScopesFunction,
+    name,
+    () => false,
+  );
+  assert.ok(
+    lockedFunctionReferences.length > 0,
+    `requiredScopesForPluginTool in ${sourcePath} must read ${name}`,
+  );
+  const references = collectBindingReferences(ast, name, () => false);
+  assert.deepEqual(
+    references,
+    [declaration.id, ...namesReferences, ...lockedFunctionReferences],
+    `${name} in ${sourcePath} must not be reassigned, mutated, aliased, escaped, or referenced outside its locked names catalog and requiredScopesForPluginTool`,
   );
 }
 
@@ -3751,6 +3811,7 @@ function verifyCheckedInHostedContractFixture(
     jobBriefService: lock.publicExecutableContract.jobBriefServiceSha256,
     backendUiRedirect: lock.publicExecutableContract.backendUiRedirectSha256,
     maintenanceMode: lock.publicExecutableContract.maintenanceModeSha256,
+    databaseBinding: lock.publicExecutableContract.databaseBindingSha256,
   }, `${fixturePath} hosted source snapshot drifted from the packaged executable lock`);
   for (const digest of [
     lock.publicExecutableContract.pluginServerSha256,
@@ -3758,6 +3819,7 @@ function verifyCheckedInHostedContractFixture(
     lock.publicExecutableContract.jobBriefServiceSha256,
     lock.publicExecutableContract.backendUiRedirectSha256,
     lock.publicExecutableContract.maintenanceModeSha256,
+    lock.publicExecutableContract.databaseBindingSha256,
     ...Object.values(lock.publicExecutableContract.descriptorSha256),
     ...Object.values(lock.publicExecutableContract.handlerSha256),
   ]) assert.match(digest, /^[a-f0-9]{64}$/);
@@ -4780,6 +4842,7 @@ const executableScopeContract = staticStringArrayMap(
 );
 assertMcpScopeHelperSemantics(hostedMcpScopesSource, hostedMcpScopesPath);
 assertImmutablePluginScopeFreeMethods(hostedPluginScopesSource, hostedPluginScopesPath);
+assertImmutablePluginToolScopesSemantics(hostedPluginScopesSource, hostedPluginScopesPath);
 assertActiveVariableInitializerAst(
   hostedApplicationProfileCatalogSource,
   'APPLICATION_PROFILE_FIELDS',
@@ -5098,6 +5161,11 @@ assert.equal(
   sha256ExactBytes(fs.readFileSync(path.join(backendRoot, 'src', 'middleware', 'maintenance-mode.ts'))),
   pluginLock.publicExecutableContract.maintenanceModeSha256,
   'Hosted maintenance middleware semantics drifted from the packaged whole-source digest lock',
+);
+assert.equal(
+  sha256ExactBytes(fs.readFileSync(path.join(backendRoot, 'src', 'config', 'database.ts'))),
+  pluginLock.publicExecutableContract.databaseBindingSha256,
+  'Hosted production database binding drifted from the packaged whole-source digest lock',
 );
 
 const executableSchemaDigests = Object.fromEntries(
@@ -6487,8 +6555,10 @@ module.exports = {
   assertActiveFunctionAstSha256,
   assertLivePluginRouterMount,
   assertImmutablePluginScopeFreeMethods,
+  assertImmutablePluginToolScopesSemantics,
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
+  assertHostedCommitTimestamps,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,

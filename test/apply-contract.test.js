@@ -196,6 +196,7 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
     'package.json',
     'package-lock.json',
     'src/index.ts',
+    'src/config/database.ts',
     'src/__tests__/cors-origins.integration.test.ts',
     'src/mcp/plugin-router.ts',
     'src/mcp/__tests__/plugin-server.test.ts',
