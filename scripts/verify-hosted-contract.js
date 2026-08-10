@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '62a0725e8212fb12bf973e8fa8d3801ea8bc4f88f6c8d7bfca47b37e75c8ac9b';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '45d49334717eaa02edcabff2c7ce47b52a96e9e39d0b42f05730c6835979f122';
 
 const parsedSourceCache = new Map();
 
@@ -1604,6 +1604,11 @@ function assertPluginRoutePrecedence(
   assert.equal(factory.body?.type, 'BlockStatement', `createApp in ${sourcePath} must use a block body`);
   const canonicalMount = canonicalPluginMount(factory, routerBinding, mountPath, sourcePath);
   const canonicalCall = canonicalMount.expression;
+  const directCreateAppCalls = new Set(factory.body.body.flatMap((statement) => (
+    statement.type === 'ExpressionStatement' && statement.expression?.type === 'CallExpression'
+      ? [statement.expression]
+      : []
+  )));
   const routeMethods = EXPRESS_ROUTE_CALL_METHODS;
   const reviewedGlobalMiddlewareCallDigestSet = new Set(reviewedGlobalMiddlewareCallDigests);
   const encounteredReviewedGlobalMiddlewareDigests = [];
@@ -1684,7 +1689,8 @@ function assertPluginRoutePrecedence(
           ? sha256ExactBytes(JSON.stringify(canonicalSchemaAst(node)))
           : null;
         const reviewedGlobalMiddleware = globalMiddlewareDigest !== null
-          && reviewedGlobalMiddlewareCallDigestSet.has(globalMiddlewareDigest);
+          && reviewedGlobalMiddlewareCallDigestSet.has(globalMiddlewareDigest)
+          && directCreateAppCalls.has(node);
         if (reviewedGlobalMiddleware) encounteredReviewedGlobalMiddlewareDigests.push(globalMiddlewareDigest);
         const covers = pathArgument?.type === 'StringLiteral'
           ? staticExpressPathCovers(pathArgument.value, mountPath, method)
@@ -2512,6 +2518,54 @@ function assertPluginUiContractSemantics(
 
 function assertPluginManualSubmissionRouteSemantics(source, sourcePath, expectedStatement) {
   assertActiveTopLevelStatementAst(source, expectedStatement, sourcePath);
+}
+
+function assertExactHostedSourceSha256(source, expectedSha256, sourcePath) {
+  assert.equal(
+    sha256ExactBytes(source),
+    expectedSha256,
+    `${sourcePath} must preserve its exact reviewed source bytes`,
+  );
+}
+
+function assertPluginReviewReadyPersistenceSemantics(
+  routeSource,
+  serviceSource,
+  routeSourcePath,
+  serviceSourcePath,
+  expectedRouteStatement,
+  {
+    routeAstSha256 = 'a4b0a5ba28a0c80c2ddbc438b3cde25f61a7bb092ead4efe1813384f9e7d46ec',
+    certifyAstSha256 = '6c0c19a3c05794b0fa8e1ed7917fa9de4322e32ecef1006869e026394cb90ffd',
+  } = {},
+) {
+  if (expectedRouteStatement !== undefined) {
+    assertActiveTopLevelStatementAst(routeSource, expectedRouteStatement, routeSourcePath);
+  } else {
+    const routeStatements = parseFullSource(routeSource, routeSourcePath).program.body.filter((statement) => (
+      statement.type === 'ExpressionStatement'
+      && statement.expression?.type === 'CallExpression'
+      && babelCalleeName(statement.expression.callee) === 'router.post'
+      && statement.expression.arguments[0]?.type === 'StringLiteral'
+      && statement.expression.arguments[0].value === '/jobscout/apply/runs/:id/plugin-review-ready'
+    ));
+    assert.equal(
+      routeStatements.length,
+      1,
+      `${routeSourcePath} must define exactly one active plugin review-ready route`,
+    );
+    assert.equal(
+      sha256ExactBytes(JSON.stringify(canonicalSchemaAst(routeStatements[0]))),
+      routeAstSha256,
+      `plugin review-ready route in ${routeSourcePath} must preserve its locked active semantic AST`,
+    );
+  }
+  assertActiveFunctionAstSha256(
+    serviceSource,
+    'certifyPluginReviewReady',
+    certifyAstSha256,
+    serviceSourcePath,
+  );
 }
 
 function assertInternalSecretCompatibility(
@@ -3923,6 +3977,7 @@ function verifyCheckedInHostedContractFixture(
     maintenanceMode: lock.publicExecutableContract.maintenanceModeSha256,
     databaseBinding: lock.publicExecutableContract.databaseBindingSha256,
     reviewIdentity: lock.publicExecutableContract.reviewIdentitySha256,
+    azureRateLimitOptions: lock.publicExecutableContract.azureRateLimitOptionsSha256,
   }, `${fixturePath} hosted source snapshot drifted from the packaged executable lock`);
   for (const digest of [
     lock.publicExecutableContract.pluginServerSha256,
@@ -3932,6 +3987,7 @@ function verifyCheckedInHostedContractFixture(
     lock.publicExecutableContract.maintenanceModeSha256,
     lock.publicExecutableContract.databaseBindingSha256,
     lock.publicExecutableContract.reviewIdentitySha256,
+    lock.publicExecutableContract.azureRateLimitOptionsSha256,
     ...Object.values(lock.publicExecutableContract.descriptorSha256),
     ...Object.values(lock.publicExecutableContract.handlerSha256),
   ]) assert.match(digest, /^[a-f0-9]{64}$/);
@@ -3979,6 +4035,7 @@ const hostedMcpTokensPath = path.join(backendRoot, 'src', 'mcp', 'mcp-tokens.ts'
 const hostedAuthContextPath = path.join(backendRoot, 'src', 'mcp', 'hosted-auth-context.ts');
 const hostedPluginUiPath = path.join(backendRoot, 'src', 'mcp', 'plugin-ui.ts');
 const hostedAuthEpochPath = path.join(backendRoot, 'src', 'utils', 'auth-epoch.ts');
+const hostedAzureRehearsalIpPath = path.join(backendRoot, 'src', 'utils', 'azure-rehearsal-ip.ts');
 const hostedJwtPath = path.join(backendRoot, 'src', 'utils', 'jwt.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
 const hostedReviewIdentityPath = path.join(backendRoot, 'src', 'services', 'review-identity.ts');
@@ -4027,6 +4084,7 @@ const hostedMcpTokensSource = fs.readFileSync(hostedMcpTokensPath, 'utf8');
 const hostedAuthContextSource = fs.readFileSync(hostedAuthContextPath, 'utf8');
 const hostedPluginUiSource = fs.readFileSync(hostedPluginUiPath, 'utf8');
 const hostedAuthEpochSource = fs.readFileSync(hostedAuthEpochPath, 'utf8');
+const hostedAzureRehearsalIpSource = fs.readFileSync(hostedAzureRehearsalIpPath, 'utf8');
 const hostedJwtSource = fs.readFileSync(hostedJwtPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
 const hostedReviewIdentitySource = fs.readFileSync(hostedReviewIdentityPath, 'utf8');
@@ -4047,6 +4105,11 @@ assertLivePluginRouterMount(
 );
 assertServerListenSemantics(hostedApplicationSource, hostedApplicationPath);
 assertInstallProcessGuardsSemantics(hostedApplicationSource, hostedApplicationPath);
+assertExactHostedSourceSha256(
+  hostedAzureRehearsalIpSource,
+  pluginLock.publicExecutableContract.azureRateLimitOptionsSha256,
+  hostedAzureRehearsalIpPath,
+);
 assertCommonJsDestructuredRequire(
   localServerSource,
   'registerApplyTools',
@@ -6500,6 +6563,12 @@ assertWrappedHandlerAst(
   }`,
   hostedPluginSourcePath,
 );
+assertPluginReviewReadyPersistenceSemantics(
+  hostedTracklyApplySource,
+  hostedApplicationProfileServiceSource,
+  hostedTracklyApplyPath,
+  hostedApplicationProfileServicePath,
+);
 
 const reconcileRegistration = pluginToolRegistration('trackly_reconcile_manual_submission');
 const reconcileInputSchema = registrationDescriptorPropertyAst(
@@ -6671,9 +6740,11 @@ module.exports = {
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
   assertInstallProcessGuardsSemantics,
   assertPluginManualSubmissionRouteSemantics,
+  assertPluginReviewReadyPersistenceSemantics,
   assertPluginRoutePrecedence,
   assertPluginUiContractSemantics,
   assertServerListenSemantics,

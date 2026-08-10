@@ -15,11 +15,13 @@ const {
   HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
   assertInstallProcessGuardsSemantics,
   assertPluginRoutePrecedence: assertPluginRoutePrecedenceProduction,
   assertServerListenSemantics,
   assertPluginManualSubmissionRouteSemantics,
+  assertPluginReviewReadyPersistenceSemantics,
   assertPluginUiContractSemantics,
   assertActiveFunctionDefinitionAst,
   canonicalSchemaAst,
@@ -580,6 +582,71 @@ test('manual-submission route semantic lock rejects auth and transaction drift',
       routeStatement,
     ),
     /fail-closed top-level statement/,
+  );
+});
+
+test('review-ready persistence lock rejects route and atomic transaction drift', () => {
+  const routeStatement = `router.post('/review', requireAuth, requireApplyFeature, requireAccessibleExecutionFeature, async (req, res) => {
+    const result = await certifyPluginReviewReady(userId(req), req.body, caller(req));
+    res.json({ success: true, ...result });
+  });`;
+  const serviceSource = `export async function certifyPluginReviewReady(userId, input, authContext) {
+    return withAuthorizedApplyMutation(userId, authContext, async (client) => {
+      await recordApplyBatchCheckpoints(client, input);
+      await certifyApplyBatchTruth(client, input);
+      return recordApplyOutcome(client, input);
+    });
+  }`;
+  const options = {
+    certifyAstSha256: activeFunctionDigest(
+      serviceSource,
+      'certifyPluginReviewReady',
+      'review-ready service fixture',
+    ),
+  };
+  assert.doesNotThrow(() => assertPluginReviewReadyPersistenceSemantics(
+    routeStatement,
+    serviceSource,
+    'review-ready route fixture',
+    'review-ready service fixture',
+    routeStatement,
+    options,
+  ));
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeStatement.replace(', requireAccessibleExecutionFeature', ''),
+      serviceSource,
+      'drifted review-ready route fixture',
+      'review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeStatement,
+      serviceSource.replace('await certifyApplyBatchTruth(client, input);', ''),
+      'review-ready route fixture',
+      'drifted review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /certifyPluginReviewReady.*locked active semantic AST/,
+  );
+});
+
+test('Azure shared limiter helper source is exact-byte locked', () => {
+  const source = 'export function azureRehearsalRateLimitOptions() { return {}; }\n';
+  const digest = sha256ExactBytes(source);
+  assert.doesNotThrow(() => assertExactHostedSourceSha256(source, digest, 'Azure limiter fixture'));
+  assert.throws(
+    () => assertExactHostedSourceSha256(
+      source.replace('return {};', 'return { skip: () => true };'),
+      digest,
+      'drifted Azure limiter fixture',
+    ),
+    /must preserve its exact reviewed source bytes/,
   );
 });
 

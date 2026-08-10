@@ -583,6 +583,43 @@ test('the exported plugin router must be mounted on the exact production applica
     ),
     /must preserve the complete ordered reviewed global middleware inventory/,
   );
+  const reviewedMiddlewareSource = source.replace(
+    "app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);",
+    "app.use(reviewedMiddleware);\n      app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);",
+  );
+  const reviewedMiddlewareCall = activeNamedDefinitionAst(
+    reviewedMiddlewareSource,
+    'createApp',
+    'reviewed middleware fixture',
+  ).body.body.find((statement) => (
+    statement.type === 'ExpressionStatement'
+    && statement.expression?.arguments?.[0]?.name === 'reviewedMiddleware'
+  )).expression;
+  const reviewedMiddlewareDigest = sha256ExactBytes(JSON.stringify(
+    canonicalSchemaAst(reviewedMiddlewareCall),
+  ));
+  assert.doesNotThrow(() => assertLivePluginRouterMount(
+    reviewedMiddlewareSource,
+    'tracklyPluginMcpRoutes',
+    './mcp/plugin-router',
+    '/api/plugin/trackly/mcp',
+    'reviewed middleware fixture',
+    { reviewedGlobalMiddlewareCallDigests: [reviewedMiddlewareDigest] },
+  ));
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      reviewedMiddlewareSource.replace(
+        'app.use(reviewedMiddleware);',
+        'if (false) { app.use(reviewedMiddleware); }',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'unreachable reviewed middleware fixture',
+      { reviewedGlobalMiddlewareCallDigests: [reviewedMiddlewareDigest] },
+    ),
+    /must preserve the complete ordered reviewed global middleware inventory/,
+  );
   assert.throws(
     () => assertLivePluginRouterMount(
       source.replace(
