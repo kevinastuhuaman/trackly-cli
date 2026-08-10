@@ -1382,6 +1382,9 @@ function assertLivePluginRouterMount(
     `${sourcePath} must export exactly one live createApp application factory`,
   );
   const factory = exportedFactories[0].declaration;
+  assert.equal(factory.async, false, `createApp in ${sourcePath} must remain synchronous`);
+  assert.equal(factory.generator, false, `createApp in ${sourcePath} must not return a generator`);
+  assert.equal(factory.params.length, 0, `createApp in ${sourcePath} must not accept shadowing parameters`);
   const appDeclarations = factory.body.body.flatMap((statement) => (
     statement.type === 'VariableDeclaration'
       ? statement.declarations.filter((declaration) => (
@@ -1482,6 +1485,11 @@ function assertLivePluginRouterMount(
     liveAppStatements.length,
     1,
     `startServer in ${sourcePath} must instantiate the exact exported createApp application`,
+  );
+  assert.equal(
+    liveAppStatements[0].declarations.length,
+    1,
+    `startServer in ${sourcePath} must isolate createApp in one side-effect-free declaration`,
   );
   const liveListens = startServer.body.body.filter((statement) => (
     statement.type === 'ExpressionStatement'

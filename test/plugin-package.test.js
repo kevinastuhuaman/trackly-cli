@@ -492,6 +492,29 @@ test('the exported plugin router must be mounted on the exact production applica
     ),
     /must not defer execution as a generator/,
   );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace('export function createApp() {', 'export function* createApp() {'),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'generator application factory fixture',
+    ),
+    /must not return a generator/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        'installProcessGuards();\n      const app = createApp();',
+        'installProcessGuards();\n      const app = createApp(), dead = process.exit(0);',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'multi-declarator application mount fixture',
+    ),
+    /must isolate createApp in one side-effect-free declaration/,
+  );
 });
 
 test('registration extraction ignores commented tools and binds the active published schema', () => {
