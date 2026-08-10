@@ -3664,9 +3664,14 @@ test('submission fixtures cover six positive and three negative cases', () => {
 
 test('registered app binding and public submission remain explicit release gates', () => {
   const gates = read('plugins/trackly/RELEASE-GATES.md');
+  const provenance = json('plugins/trackly/assets/brand-source.json');
   assert.match(gates, /Do not invent or pre-allocate an ID/);
   assert.match(gates, /HTTP 200 response from `https:\/\/usetrackly\.app\/plugins\/trackly`/);
   assert.match(gates, /approved PNG/);
+  assert.ok(
+    gates.includes(`SHA-256 \`${provenance.visualApproval.approvedPackagedSha256}\``),
+    'release gates must cite the exact approved packaged logo digest from brand provenance',
+  );
   assert.match(gates, /Kevin must approve/);
   assert.match(gates, /ask Kevin again before selecting Publish/);
 });
