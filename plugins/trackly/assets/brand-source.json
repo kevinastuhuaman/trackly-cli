@@ -10,5 +10,11 @@
   "pixelIdenticalToSource": false,
   "visualApprovalRequired": true,
   "approvalRequirement": "Kevin must compare the packaged SVG with the approved PNG and explicitly approve it before OpenAI submission.",
+  "visualApproval": {
+    "approvedBy": "Kevin Astuhuaman",
+    "approvedDatePacific": "2026-08-10",
+    "approvedPackagedSha256": "1bd52951de41a49bb87813207884797619390a82c0992ad5a1ea2d447daee21c",
+    "scope": "OpenAI listing logo only; does not authorize OpenAI Submit or Publish"
+  },
   "forbiddenReplacement": "Purple Orb composer icon"
 }
