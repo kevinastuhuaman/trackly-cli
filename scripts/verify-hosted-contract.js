@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'af77edd423a0a1c350be5276465955a3353f408b75d77f3c24b49b1771c4cd04';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '1d6fef8a715a691c7a320a18a286874f4ca10e16c5ad775fe6f2411bfbd1f36d';
 
 const parsedSourceCache = new Map();
 
@@ -326,6 +326,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/mcp/mcp-scopes.ts',
   'src/mcp/oauth-provider.ts',
   'src/mcp/mcp-tokens.ts',
+  'src/mcp/hosted-auth-context.ts',
   'src/utils/auth-epoch.ts',
   'src/middleware/channel-attribution.ts',
   'src/services/job-brief.ts',
@@ -3294,6 +3295,7 @@ const hostedMcpScopesPath = path.join(backendRoot, 'src', 'mcp', 'mcp-scopes.ts'
 const hostedApplicationPath = path.join(backendRoot, 'src', 'index.ts');
 const hostedOAuthProviderPath = path.join(backendRoot, 'src', 'mcp', 'oauth-provider.ts');
 const hostedMcpTokensPath = path.join(backendRoot, 'src', 'mcp', 'mcp-tokens.ts');
+const hostedAuthContextPath = path.join(backendRoot, 'src', 'mcp', 'hosted-auth-context.ts');
 const hostedPluginUiPath = path.join(backendRoot, 'src', 'mcp', 'plugin-ui.ts');
 const hostedAuthEpochPath = path.join(backendRoot, 'src', 'utils', 'auth-epoch.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
@@ -3338,6 +3340,7 @@ const hostedMcpScopesSource = fs.readFileSync(hostedMcpScopesPath, 'utf8');
 const hostedApplicationSource = fs.readFileSync(hostedApplicationPath, 'utf8');
 const hostedOAuthProviderSource = fs.readFileSync(hostedOAuthProviderPath, 'utf8');
 const hostedMcpTokensSource = fs.readFileSync(hostedMcpTokensPath, 'utf8');
+const hostedAuthContextSource = fs.readFileSync(hostedAuthContextPath, 'utf8');
 const hostedPluginUiSource = fs.readFileSync(hostedPluginUiPath, 'utf8');
 const hostedAuthEpochSource = fs.readFileSync(hostedAuthEpochPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
@@ -3630,6 +3633,20 @@ assertActiveFunctionDefinitionAst(
 assertImportBinding(hostedMcpTokensSource, 'default', 'jwt', 'jsonwebtoken', hostedMcpTokensPath);
 assertImportBinding(
   hostedMcpTokensSource,
+  'verifiedHostedMcpOAuthContext',
+  'verifiedHostedMcpOAuthContext',
+  './hosted-auth-context.js',
+  hostedMcpTokensPath,
+);
+assertImportBinding(
+  hostedAuthContextSource,
+  'normalizeMcpScopes',
+  'normalizeMcpScopes',
+  './mcp-scopes.js',
+  hostedAuthContextPath,
+);
+assertImportBinding(
+  hostedMcpTokensSource,
   'normalizeAuthEpoch',
   'normalizeAuthEpoch',
   '../utils/auth-epoch.js',
@@ -3725,6 +3742,80 @@ assertActiveFunctionDefinitionAst(
       : null;
   }`,
   hostedAuthEpochPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedMcpTokensSource,
+  'generateInternalToken',
+  `function generateInternalToken(
+    user: McpTokenUser,
+    hostedMcpOAuth?: VerifiedHostedMcpOAuthContext,
+  ): string {
+    return jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        name: user.name || '',
+        authEpoch: authEpochForMcpToken(user),
+        ...(hostedMcpOAuth
+          ? {
+            hostedMcpOAuth: verifiedHostedMcpOAuthContext({
+              clientId: hostedMcpOAuth.clientId,
+              grantId: hostedMcpOAuth.grantId,
+              scopes: hostedMcpOAuth.scopes,
+            }),
+          }
+          : {}),
+      },
+      INTERNAL_SECRET,
+      { expiresIn: '5m' },
+    );
+  }`,
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(
+  hostedAuthContextSource,
+  'HOSTED_MCP_AUTH_CONTEXT_VERSION',
+  '1 as const',
+  hostedAuthContextPath,
+);
+assertActiveVariableInitializerAst(
+  hostedAuthContextSource,
+  'OAUTH_CLIENT_ID',
+  '/^[^\\u0000-\\u001f\\u007f]{1,512}$/',
+  hostedAuthContextPath,
+);
+assertActiveVariableInitializerAst(
+  hostedAuthContextSource,
+  'OAUTH_GRANT_ID',
+  '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
+  hostedAuthContextPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedAuthContextSource,
+  'verifiedHostedMcpOAuthContext',
+  `function verifiedHostedMcpOAuthContext(input: {
+    clientId: unknown;
+    grantId: unknown;
+    scopes: unknown;
+  }): VerifiedHostedMcpOAuthContext {
+    if (typeof input.clientId !== 'string' || !OAUTH_CLIENT_ID.test(input.clientId)) {
+      throw new Error('Invalid hosted MCP OAuth client identifier');
+    }
+    if (typeof input.grantId !== 'string' || !OAUTH_GRANT_ID.test(input.grantId)) {
+      throw new Error('Invalid hosted MCP OAuth grant identifier');
+    }
+    if (!Array.isArray(input.scopes) || input.scopes.some((scope) => typeof scope !== 'string')) {
+      throw new Error('Invalid hosted MCP OAuth scopes');
+    }
+    return {
+      kind: 'hosted_mcp_oauth',
+      version: HOSTED_MCP_AUTH_CONTEXT_VERSION,
+      clientId: input.clientId,
+      grantId: input.grantId,
+      scopes: normalizeMcpScopes(input.scopes),
+    };
+  }`,
+  hostedAuthContextPath,
 );
 assertActiveFunctionDefinitionAst(
   hostedMcpTokensSource,
@@ -3920,6 +4011,12 @@ assertActiveFunctionDefinitionAst(
   }`,
   hostedPluginSourcePath,
 );
+assertActiveVariableInitializerAst(
+  hostedPluginSource,
+  'MAX_API_RESPONSE_BYTES',
+  '10 * 1024 * 1024',
+  hostedPluginSourcePath,
+);
 assertActiveFunctionDefinitionAst(
   hostedPluginSource,
   'apiRequest',
@@ -3932,6 +4029,17 @@ assertActiveFunctionDefinitionAst(
     timeoutMs = 60_000,
   ): Promise<any> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const resolveOnce = (value: any) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
       const url = new URL(path, BASE_URL);
       const bodyString = body === undefined ? null : JSON.stringify(body);
       const request = https.request({
@@ -3950,15 +4058,38 @@ assertActiveFunctionDefinitionAst(
       }, (response) => {
         response.setEncoding('utf8');
         let data = '';
-        response.on('data', (chunk) => { data += chunk; });
+        let responseBytes = 0;
+        response.on('error', rejectOnce);
+        response.on('aborted', () => {
+          if (settled) return;
+          rejectOnce(Object.assign(
+            new Error('trackly response was aborted'),
+            { code: 'TRACKLY_RESPONSE_ABORTED' },
+          ));
+        });
+        response.on('data', (chunk) => {
+          if (settled) return;
+          responseBytes += Buffer.byteLength(chunk);
+          if (responseBytes > MAX_API_RESPONSE_BYTES) {
+            const error = Object.assign(
+              new Error('trackly response exceeded 10 MiB limit'),
+              { code: 'TRACKLY_RESPONSE_TOO_LARGE' },
+            );
+            request.destroy(error);
+            rejectOnce(error);
+            return;
+          }
+          data += chunk;
+        });
         response.on('end', () => {
+          if (settled) return;
           const statusCode = response.statusCode || 500;
           let parsed: any;
           try {
             parsed = data ? JSON.parse(data) : {};
           } catch {
             if (statusCode >= 200 && statusCode < 300) {
-              reject(new Error('trackly returned an invalid response'));
+              rejectOnce(new Error('trackly returned an invalid response'));
               return;
             }
             parsed = {};
@@ -3972,17 +4103,108 @@ assertActiveFunctionDefinitionAst(
               ? parsed.code
               : (typeof parsed?.error === 'string' ? parsed.error : undefined);
             error.responseBody = parsed;
-            reject(error);
+            rejectOnce(error);
             return;
           }
-          resolve(parsed);
+          resolveOnce(parsed);
         });
       });
-      request.on('error', reject);
+      request.on('error', rejectOnce);
       request.setTimeout(timeoutMs, () => request.destroy(new Error('trackly request timed out')));
       if (bodyString) request.write(bodyString);
       request.end();
     });
+  }`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'resultContent',
+  `function resultContent(value: unknown, includeStructuredContent = false) {
+    const content = {
+      content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }],
+    };
+    if (!includeStructuredContent) return content;
+    const structuredContent = value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : { value };
+    return { ...content, structuredContent };
+  }`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'errorContent',
+  `function errorContent(error: any, fallback: string) {
+    const body = error?.responseBody;
+    const payload: Record<string, unknown> = {
+      error: typeof error?.message === 'string' ? error.message : fallback,
+    };
+    if (Number.isInteger(error?.status)) payload.status = error.status;
+    if (typeof error?.code === 'string') payload.code = error.code;
+    if (error?.status === 409 && body?.confirmation) {
+      payload.confirmation = body.confirmation;
+    }
+    if (error?.status === 409 && body?.conflictCode) {
+      payload.conflictCode = body.conflictCode;
+    }
+    if (Number.isSafeInteger(body?.currentRevision) && body.currentRevision >= 0) {
+      payload.currentRevision = body.currentRevision;
+    }
+    if (Array.isArray(body?.changedKeys)) {
+      payload.changedKeys = body.changedKeys
+        .filter((key: unknown): key is string => typeof key === 'string' && key.length <= 200)
+        .slice(0, 100);
+    }
+    if (typeof body?.retryable === 'boolean') payload.retryable = body.retryable;
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+      isError: true,
+    };
+  }`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'projectApplyStartResult',
+  `function projectApplyStartResult(
+    response: any,
+    requestedTarget: number,
+    options: { resumed: boolean; started: boolean; targetMismatch: boolean },
+  ) {
+    const execution = response?.execution;
+    const activeTarget = readinessCount(execution?.targetCount ?? execution?.target);
+    return {
+      view: 'apply' as const,
+      success: response?.success !== false,
+      active: response?.active === true
+        || execution?.status === 'running'
+        || execution?.status === 'target_reached',
+      resumed: options.resumed,
+      started: options.started,
+      targetMismatch: options.targetMismatch,
+      target: activeTarget ?? readinessCount(requestedTarget),
+      requestedTarget: readinessCount(requestedTarget),
+      activeTarget,
+      executionId: readinessCount(execution?.id),
+      revision: readinessCount(execution?.revision),
+      status: safeExecutionStatus(execution?.status),
+      batchId: null,
+      memberIds: [],
+      nextAction: options.targetMismatch ? 'use_active_target' as const : 'advance_or_refresh' as const,
+      noSubmit: true as const,
+    };
+  }`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'safeReviewStatus',
+  `function safeReviewStatus(value: unknown): (typeof APPLY_REVIEW_STATUS_VALUES)[number] | null {
+    return typeof value === 'string'
+      && (APPLY_REVIEW_STATUS_VALUES as readonly string[]).includes(value)
+      ? value as (typeof APPLY_REVIEW_STATUS_VALUES)[number]
+      : null;
   }`,
   hostedPluginSourcePath,
 );
@@ -5203,7 +5425,7 @@ assertBabelPropertyExpression(
       required: z.boolean().optional(),
       minLength: z.number().int().min(0).max(20_000).optional(),
       maxLength: z.number().int().min(1).max(20_000).optional(),
-    }).strict()).min(1).max(20),
+    }).strict()).min(1).max(1),
   }).strict()`,
   'trackly_lint_application_text descriptor',
 );

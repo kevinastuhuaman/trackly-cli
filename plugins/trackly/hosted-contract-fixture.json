@@ -1,18 +1,18 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-08-09T21:00:29-07:00",
+  "capturedAt": "2026-08-09T23:23:41-07:00",
   "sourceRuntime": {
-    "commit": "3f1763375194f0cc90558846fbc621881a3a44b3",
-    "parent": "b47d120ea7e12a94bce24db03500d6e05ac1a018",
-    "committedAt": "2026-08-09T20:38:37-07:00"
+    "commit": "b60d73955038f807ce4d095d2ad54f9788184377",
+    "parent": "0766c6dab5996d684ef1a430388c91ea9e34b203",
+    "committedAt": "2026-08-09T23:08:32-07:00"
   },
   "mergedRuntime": {
-    "commit": "1e40719316a0efb6d3ff00210bb935a18c61affb",
+    "commit": "fce7cb34bb6fd489b74859bb48b81265a2f9d927",
     "parents": [
-      "0d9c371448736d5a5de7279d9153b0dc6aed8846",
-      "3f1763375194f0cc90558846fbc621881a3a44b3"
+      "139a0070c38887621f1efaf47299e5d008b62daf",
+      "b60d73955038f807ce4d095d2ad54f9788184377"
     ],
-    "committedAt": "2026-08-09T20:51:44-07:00"
+    "committedAt": "2026-08-09T23:21:12-07:00"
   },
   "applyContractVersion": "3.6.2",
   "pluginContractVersion": "1.0.0",
@@ -23,7 +23,7 @@
     ["trackly_get_job_brief", "c64829b0bc2f0c0347f440f9261dca16675a886adc045f6dca7c56e22dcb0725", "462d7c379bfea90f3cff8030b68b22830ba4db2f5952531fa7230db7b625639f"],
     ["trackly_get_preferences", "3a848d9864eaa749a6964ae05a3520ccfb755d93cad85540ec16c7f3761935b4", "359dae5b5485dee12788f054413d1690f2527dfc6472202f9e75682c1dbdf8ac"],
     ["trackly_get_apply_readiness", "caabb74d6a0c20632054e6c1710ec4bc680e08da46b66bbc49ef71697eb5c296", "c11c7a316c231c0918acd693e546a61de8c66b742d246d3c2ead7f374e694528"],
-    ["trackly_lint_application_text", "2a70ae33072ce8ae39df28014ba63dd8cfd8ebfea2ffe37d21d93ad29df0c4bc", "d5b72e6d57bd43e291c8d1495a0eba06f08b09d2eb65059e289b08246fb4b3ad"],
+    ["trackly_lint_application_text", "4291951a0bccc03706083872c1b8fb3d62e4241a18f63f1f5d6dd14963bfe955", "d5b72e6d57bd43e291c8d1495a0eba06f08b09d2eb65059e289b08246fb4b3ad"],
     ["trackly_update_status", "c9725177eda04b00aa6ab944086f96dbef62f27b0f20fb5658b391fa0c4d9c8b", "10538a74b15f1fbc60a2152dfea3e5822ccd6d26225b555bc9e379ea559dcc74"],
     ["trackly_save_application_answers", "93c7cbb504621e317c8c81ee2ceb1ee276acf563a74ac0b08eada2479d5da0ab", "441c563c75a323165cf87a323134ff210314dd91d5c392047dfaba1cca756df2"],
     ["trackly_grant_sensitive_storage_consent", "f5d873f8f2a7c36e3e1bcc2ce15cd8534d77a60f287fa7cef2cfde4788fc980f", "77c53b12516d4b05f7853ba7a326c667e95be8a718dcebb77fc54f806dec4f84"],
@@ -86,7 +86,7 @@
     "trackly_chat"
   ],
   "sourceSha256": {
-    "pluginServer": "5a0ea947a886b10c3b2357f9f5ba3cf3d05c391bfaab5128124f71e8ba09ffc5",
+    "pluginServer": "c28ca52e53cc4d56e0c5bebb942b4774c2fc7f46ef64d862b0dc22703436b07c",
     "pluginScopes": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
     "jobBriefService": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b"
   }

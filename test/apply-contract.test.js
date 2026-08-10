@@ -165,6 +165,7 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
   for (const runtimePath of [
     'src/mcp/plugin-ui.ts',
     'src/mcp/mcp-tokens.ts',
+    'src/mcp/hosted-auth-context.ts',
     'src/utils/auth-epoch.ts',
     'src/middleware/channel-attribution.ts',
     'src/routes/jobscout-tracker.ts',
