@@ -802,6 +802,23 @@ test('local Apply registrations are bound to the helper reached by createServer'
 });
 
 test('plugin registration proof accepts only unconditional calls in the exported server factory', () => {
+  const uiResourceLoop = `
+      for (const view of Object.keys(TRACKLY_PLUGIN_UI) as Array<keyof typeof TRACKLY_PLUGIN_UI>) {
+        const uri = TRACKLY_PLUGIN_UI[view];
+        server.registerResource(\`trackly-\${view}-card\`, uri, {
+          title: \`trackly \${view} card\`,
+          description: 'Private trackly Apply status UI. The user always submits manually.',
+          mimeType: TRACKLY_PLUGIN_UI_MIME_TYPE,
+        }, async () => ({
+          contents: [{
+            uri,
+            mimeType: TRACKLY_PLUGIN_UI_MIME_TYPE,
+            text: tracklyPluginUiHtml(view),
+            _meta: TRACKLY_PLUGIN_UI_RESOURCE_META,
+          }],
+        }));
+      }
+  `;
   const factoryFixture = (body, returnedServer = 'server') => `
     import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
     export function createTracklyPluginMcpServer(
@@ -841,6 +858,28 @@ test('plugin registration proof accepts only unconditional calls in the exported
       'server factory fixture',
     ).map(({ name }) => name),
     ['trackly_one', 'trackly_two'],
+  );
+  assert.doesNotThrow(() => directToolRegistrationsInExportedFunction(
+    factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      ${uiResourceLoop}
+    `),
+    'createTracklyPluginMcpServer',
+    'registerPluginTool',
+    'required UI resource fixture',
+    { requireUiResourceLoop: true },
+  ));
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(
+      factoryFixture(`
+        registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+      `),
+      'createTracklyPluginMcpServer',
+      'registerPluginTool',
+      'missing UI resource fixture',
+      { requireUiResourceLoop: true },
+    ),
+    /must contain exactly one locked plugin UI resource loop/,
   );
   assert.throws(
     () => directToolRegistrationsInExportedFunction(factoryFixture(`

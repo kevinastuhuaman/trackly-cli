@@ -714,6 +714,7 @@ function directToolRegistrationsInExportedFunction(
   expectedFunction,
   expectedCallee,
   sourcePath,
+  { requireUiResourceLoop = false } = {},
 ) {
   assertImportBinding(
     source,
@@ -988,10 +989,18 @@ function directToolRegistrationsInExportedFunction(
     JSON.stringify(canonicalSchemaAst(statement))
       === JSON.stringify(canonicalSchemaAst(expectedUiResourceLoop))
   ));
-  assert.ok(
-    uiResourceLoops.length <= 1,
-    `${expectedFunction} in ${sourcePath} may contain at most one exact locked plugin UI resource loop`,
-  );
+  if (requireUiResourceLoop) {
+    assert.equal(
+      uiResourceLoops.length,
+      1,
+      `${expectedFunction} in ${sourcePath} must contain exactly one locked plugin UI resource loop`,
+    );
+  } else {
+    assert.ok(
+      uiResourceLoops.length <= 1,
+      `${expectedFunction} in ${sourcePath} may contain at most one exact locked plugin UI resource loop`,
+    );
+  }
   const uiResourceReceiver = uiResourceLoops[0]?.body?.body?.[1]?.expression?.callee?.object;
   const allowedServerReferences = [
     serverBindings[0].id,
@@ -3928,6 +3937,7 @@ const executablePluginRegistrations = directToolRegistrationsInExportedFunction(
   'createTracklyPluginMcpServer',
   'registerPluginTool',
   hostedPluginSourcePath,
+  { requireUiResourceLoop: true },
 );
 const executablePluginTools = executablePluginRegistrations.map((registration) => registration.name);
 const sortedExecutablePluginTools = [...executablePluginTools].sort();
