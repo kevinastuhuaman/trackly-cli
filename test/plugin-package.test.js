@@ -1473,6 +1473,17 @@ test('plugin registration proof binds the exported factory to the live POST rout
   );
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace(
+        'router.post(',
+        "const openRouter = router;\n    openRouter.post('/', openHandler);\n    router.post(",
+      ),
+      'createTracklyPluginMcpServer',
+      'aliased router fixture',
+    ),
+    /router.*must not be aliased, escaped, mutated, or referenced outside its locked route registrations and default export/,
+  );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
       routerSource.replace('export default router;', 'export default decoyRouter;'),
       'createTracklyPluginMcpServer',
       'decoy default export fixture',

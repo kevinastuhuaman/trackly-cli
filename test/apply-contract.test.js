@@ -12,6 +12,7 @@ const packageLock = require('../package-lock.json');
 const shrinkwrap = require('../npm-shrinkwrap.json');
 const {
   HOSTED_DEPLOYABLE_PATHS,
+  HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   assertApplicationFieldByKeyReferenceSemantics,
   assertInternalSecretCompatibility,
@@ -405,9 +406,12 @@ test('hosted listener locks active PORT binding and exact listen callback semant
 test('hosted Git provenance reads outputs larger than the synchronous default buffer', () => {
   const repository = path.join(__dirname, '..');
   const packageLockBytes = fs.readFileSync(path.join(repository, 'package-lock.json'));
-  const repeatedSpecs = Array.from({ length: 32 }, () => 'HEAD:package-lock.json');
+  const defaultMaxBuffer = 1024 * 1024;
+  const repetitionCount = Math.ceil((defaultMaxBuffer + 1) / packageLockBytes.length);
+  const repeatedSpecs = Array.from({ length: repetitionCount }, () => 'HEAD:package-lock.json');
   const output = gitOutput(repository, ['show', ...repeatedSpecs], null);
-  assert.ok(output.length > 1024 * 1024);
+  assert.ok(output.length > defaultMaxBuffer);
+  assert.ok(output.length < HOSTED_GIT_MAX_BUFFER);
   assert.equal(output.length, packageLockBytes.length * repeatedSpecs.length);
 });
 
@@ -449,6 +453,15 @@ test('hosted application sensitivity map rejects mutation, reassignment, and ref
       'scope fixture',
     ),
     /must (?:never be assigned or updated after declaration|not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration)/,
+  );
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      `${catalogSource}\nconst applicationFieldAlias = APPLICATION_FIELD_BY_KEY;`,
+      'aliased catalog fixture',
+      scopesSource,
+      'scope fixture',
+    ),
+    /must not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration/,
   );
   assert.throws(
     () => assertApplicationFieldByKeyReferenceSemantics(

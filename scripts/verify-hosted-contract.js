@@ -302,11 +302,13 @@ function assertCommonJsDestructuredRequire(source, importedName, moduleName, sou
   );
 }
 
+const HOSTED_GIT_MAX_BUFFER = 16 * 1024 * 1024;
+
 function gitOutput(repository, args, encoding = 'utf8') {
   try {
     return childProcess.execFileSync('git', ['-C', repository, ...args], {
       encoding,
-      maxBuffer: 16 * 1024 * 1024,
+      maxBuffer: HOSTED_GIT_MAX_BUFFER,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -1142,6 +1144,30 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     competingRoutes.length,
     0,
     `${sourcePath} must not register an earlier router mount that could cover POST / ahead of the authenticated route`,
+  );
+  const routerDeclaration = ast.program.body.flatMap((statement) => (
+    statement.type === 'VariableDeclaration'
+      ? statement.declarations.filter((declaration) => (
+        declaration.id?.type === 'Identifier' && declaration.id.name === 'router'
+      ))
+      : []
+  ))[0];
+  const lockedRouteReceivers = ast.program.body.flatMap((statement) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    const callee = unwrapTransparentExpression(call?.callee);
+    if (callee?.type !== 'MemberExpression') return [];
+    const receiver = unwrapTransparentExpression(callee.object);
+    const method = staticMemberName(callee);
+    return receiver?.type === 'Identifier'
+      && receiver.name === 'router'
+      && (method === 'route' || EXPRESS_ROUTE_CALL_METHODS.has(method))
+      ? [receiver]
+      : [];
+  });
+  assert.deepEqual(
+    collectBindingReferences(ast, 'router', () => false),
+    [routerDeclaration.id, ...lockedRouteReceivers, exportedRouters[0].declaration],
+    `router in ${sourcePath} must not be aliased, escaped, mutated, or referenced outside its locked route registrations and default export`,
   );
   const handler = postRoutes[0].arguments.at(-1);
   assert.ok(
@@ -6641,6 +6667,7 @@ console.log(
 module.exports = {
   CHECKED_IN_HOSTED_FIXTURE_SHA256,
   HOSTED_DEPLOYABLE_PATHS,
+  HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertApplicationFieldByKeyReferenceSemantics,
