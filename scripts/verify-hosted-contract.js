@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '1d6fef8a715a691c7a320a18a286874f4ca10e16c5ad775fe6f2411bfbd1f36d';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '241ceffbc70127c6dfa301f9ea45530d5f2e9b8cc21c079dedfc2d89de195bda';
 
 const parsedSourceCache = new Map();
 
@@ -306,6 +306,7 @@ function gitOutput(repository, args, encoding = 'utf8') {
   try {
     return childProcess.execFileSync('git', ['-C', repository, ...args], {
       encoding,
+      maxBuffer: 16 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (error) {
@@ -320,8 +321,10 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'contracts/trackly-apply-tools.json',
   'contracts/trackly-plugin-tools.json',
   'src/index.ts',
+  'src/__tests__/cors-origins.integration.test.ts',
   'src/mcp/server.ts',
   'src/mcp/plugin-server.ts',
+  'src/mcp/__tests__/plugin-server.test.ts',
   'src/mcp/plugin-ui.ts',
   'src/mcp/plugin-router.ts',
   'src/mcp/plugin-scopes.ts',
@@ -330,6 +333,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/mcp/mcp-tokens.ts',
   'src/mcp/hosted-auth-context.ts',
   'src/utils/auth-epoch.ts',
+  'src/utils/azure-rehearsal-ip.ts',
   'src/utils/jwt.ts',
   'src/middleware/channel-attribution.ts',
   'src/services/job-brief.ts',
@@ -1133,9 +1137,9 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
       middleware.type === 'Identifier' ? middleware.name : null
     )),
     [
+      'ipLimiter',
       'requirePluginEnabled',
       'validateOrigin',
-      'ipLimiter',
       'bearerAuth',
       'enforcePluginResource',
       'requireTracklyAccess',
@@ -1152,6 +1156,7 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     ['MCP_PLUGIN_RESOURCE', 'MCP_PLUGIN_RESOURCE', './mcp-tokens.js'],
     ['enforceTracklyPluginScope', 'enforceTracklyPluginScope', './plugin-scopes.js'],
     ['requireTracklyAccess', 'requireTracklyAccess', '../services/trackly-access.js'],
+    ['azureRehearsalRateLimitOptions', 'azureRehearsalRateLimitOptions', '../utils/azure-rehearsal-ip.js'],
   ]) {
     assertImportBinding(source, importedName, localName, moduleName, sourcePath);
   }
@@ -1243,6 +1248,7 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
       standardHeaders: true,
       legacyHeaders: false,
       message: { error: 'Too many trackly plugin requests. Try again later.' },
+      ...azureRehearsalRateLimitOptions(),
     })`,
     sourcePath,
   );
@@ -1441,6 +1447,155 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
   assert.equal(closeCall.arguments.length, 0);
 }
 
+function staticExpressPathCovers(candidatePath, mountPath, method) {
+  const normalizedCandidate = candidatePath.length > 1
+    ? candidatePath.replace(/\/+$/, '').toLowerCase()
+    : candidatePath.toLowerCase();
+  const normalizedMount = mountPath.length > 1
+    ? mountPath.replace(/\/+$/, '').toLowerCase()
+    : mountPath.toLowerCase();
+  if (method === 'use') {
+    return normalizedCandidate === '/'
+      || normalizedMount === normalizedCandidate
+      || normalizedMount.startsWith(`${normalizedCandidate}/`);
+  }
+  if (normalizedCandidate === normalizedMount || normalizedCandidate === '*') return true;
+  const wildcardIndex = normalizedCandidate.search(/[*:(]/);
+  if (wildcardIndex === -1) return false;
+  const staticPrefix = normalizedCandidate.slice(0, wildcardIndex).replace(/\/+$/, '');
+  return staticPrefix === ''
+    || normalizedMount === staticPrefix
+    || normalizedMount.startsWith(`${staticPrefix}/`);
+}
+
+function canonicalPluginMount(factory, routerBinding, mountPath, sourcePath) {
+  const mounts = factory.body.body.filter((statement) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    return call?.type === 'CallExpression'
+      && babelCalleeName(call.callee) === 'app.use'
+      && call.arguments[0]?.type === 'StringLiteral'
+      && call.arguments[0].value === mountPath
+      && call.arguments[1]?.type === 'Identifier'
+      && call.arguments[1].name === routerBinding
+      && call.arguments.length === 2;
+  });
+  assert.equal(
+    mounts.length,
+    1,
+    `createApp in ${sourcePath} must directly mount imported ${routerBinding} exactly once at ${mountPath}`,
+  );
+  return mounts[0];
+}
+
+function assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePath, resolvedFactory = null) {
+  const factory = resolvedFactory || activeNamedDefinitionAst(source, 'createApp', sourcePath);
+  assert.equal(factory.body?.type, 'BlockStatement', `createApp in ${sourcePath} must use a block body`);
+  const canonicalMount = canonicalPluginMount(factory, routerBinding, mountPath, sourcePath);
+  const canonicalCall = canonicalMount.expression;
+  const routeMethods = new Set(['use', 'all', 'get', 'post', 'put', 'patch', 'delete', 'options', 'head']);
+  const earlierCoveringHandlers = [];
+  function visitEarlierRoutes(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitEarlierRoutes(child);
+      return;
+    }
+    if (node.type === 'CallExpression'
+      && node.start < canonicalCall.start
+      && node.callee?.type === 'MemberExpression'
+      && !node.callee.computed
+      && node.callee.object?.type === 'Identifier'
+      && node.callee.object.name === 'app'
+      && node.callee.property?.type === 'Identifier'
+      && routeMethods.has(node.callee.property.name)) {
+      const method = node.callee.property.name;
+      const pathArgument = node.arguments[0];
+      const knownDisjointLegalRedirectPaths = pathArgument?.type === 'Identifier'
+        && pathArgument.name === 'LEGAL_REDIRECT_PATHS';
+      if (knownDisjointLegalRedirectPaths) {
+        const declarations = factory.body.body.filter((statement) => (
+          statement.type === 'VariableDeclaration'
+          && statement.declarations.length === 1
+          && statement.declarations[0].id?.type === 'Identifier'
+          && statement.declarations[0].id.name === 'LEGAL_REDIRECT_PATHS'
+        ));
+        assert.equal(
+          declarations.length,
+          1,
+          `createApp in ${sourcePath} must declare LEGAL_REDIRECT_PATHS exactly once`,
+        );
+        assert.equal(declarations[0].kind, 'const', `LEGAL_REDIRECT_PATHS in ${sourcePath} must be immutable`);
+        const initializer = declarations[0].declarations[0].init;
+        assert.equal(initializer?.type, 'ArrayExpression', `LEGAL_REDIRECT_PATHS in ${sourcePath} must be a static array`);
+        assert.ok(initializer.elements.length > 0, `LEGAL_REDIRECT_PATHS in ${sourcePath} must not be empty`);
+        for (const element of initializer.elements) {
+          assert.equal(element?.type, 'StringLiteral', `LEGAL_REDIRECT_PATHS in ${sourcePath} must contain only static paths`);
+          assert.equal(
+            staticExpressPathCovers(element.value, mountPath, method),
+            false,
+            `LEGAL_REDIRECT_PATHS in ${sourcePath} must remain disjoint from ${mountPath}`,
+          );
+        }
+      }
+      const pathlessUse = method === 'use'
+        && (node.arguments.length === 1
+          || pathArgument?.type === 'CallExpression'
+          || pathArgument?.type === 'FunctionExpression'
+          || pathArgument?.type === 'ArrowFunctionExpression');
+      const covers = pathArgument?.type === 'StringLiteral'
+        ? staticExpressPathCovers(pathArgument.value, mountPath, method)
+        : !pathlessUse && !knownDisjointLegalRedirectPaths;
+      if (covers) earlierCoveringHandlers.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitEarlierRoutes(child);
+    }
+  }
+  visitEarlierRoutes(factory.body);
+  assert.equal(
+    earlierCoveringHandlers.length,
+    0,
+    `createApp in ${sourcePath} must not have an earlier Express route or path-scoped middleware covering ${mountPath}`,
+  );
+  return canonicalMount;
+}
+
+function assertServerListenSemantics(
+  source,
+  sourcePath,
+  { listenAstSha256 = '791d37989e4e894d2abd4634ce723c795fb8611cdc8dd865c0534d9ee97bbfe7' } = {},
+) {
+  assertActiveVariableInitializerAst(source, 'PORT', 'process.env.PORT || 3000', sourcePath);
+  const startServer = activeNamedDefinitionAst(source, 'startServer', sourcePath);
+  const liveListens = startServer.body.body.filter((statement) => (
+    statement.type === 'ExpressionStatement'
+    && statement.expression?.type === 'CallExpression'
+    && babelCalleeName(statement.expression.callee) === 'app.listen'
+  ));
+  assert.equal(liveListens.length, 1, `startServer in ${sourcePath} must have exactly one app.listen statement`);
+  const listenCall = liveListens[0].expression;
+  assert.equal(listenCall.arguments.length, 2, `app.listen in ${sourcePath} must receive exactly PORT and its callback`);
+  assert.equal(
+    listenCall.arguments[0]?.type === 'Identifier' ? listenCall.arguments[0].name : null,
+    'PORT',
+    `app.listen in ${sourcePath} must bind the active canonical PORT`,
+  );
+  assert.equal(
+    listenCall.arguments[1]?.type,
+    'ArrowFunctionExpression',
+    `app.listen in ${sourcePath} must use the canonical startup callback`,
+  );
+  assert.equal(listenCall.arguments[1].params.length, 0, `app.listen callback in ${sourcePath} must not accept parameters`);
+  assert.equal(listenCall.arguments[1].body?.type, 'BlockStatement', `app.listen callback in ${sourcePath} must use a block body`);
+  assert.equal(
+    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(liveListens[0]))),
+    listenAstSha256,
+    `app.listen in ${sourcePath} must preserve its locked active semantic AST`,
+  );
+  return liveListens[0];
+}
+
 function assertLivePluginRouterMount(
   source,
   routerBinding,
@@ -1527,22 +1682,8 @@ function assertLivePluginRouterMount(
     }
   }
   visitRouterReferences(ast);
-  const mounts = factory.body.body.flatMap((statement) => {
-    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
-    if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== 'app.use') return [];
-    return call.arguments[0]?.type === 'StringLiteral'
-      && call.arguments[0].value === mountPath
-      && call.arguments[1]?.type === 'Identifier'
-      && call.arguments[1].name === routerBinding
-      && call.arguments.length === 2
-      ? [statement]
-      : [];
-  });
-  assert.equal(
-    mounts.length,
-    1,
-    `createApp in ${sourcePath} must directly mount imported ${routerBinding} exactly once at ${mountPath}`,
-  );
+  const mounts = [canonicalPluginMount(factory, routerBinding, mountPath, sourcePath)];
+  assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePath, factory);
   assert.deepEqual(
     routerReferences,
     [routerImport[0].local, mounts[0].expression.arguments[1]],
@@ -3628,6 +3769,7 @@ assertLivePluginRouterMount(
   '/api/plugin/trackly/mcp',
   hostedApplicationPath,
 );
+assertServerListenSemantics(hostedApplicationSource, hostedApplicationPath);
 assertInstallProcessGuardsSemantics(hostedApplicationSource, hostedApplicationPath);
 assertCommonJsDestructuredRequire(
   localServerSource,
@@ -6225,7 +6367,9 @@ module.exports = {
   assertInternalSecretCompatibility,
   assertInstallProcessGuardsSemantics,
   assertPluginManualSubmissionRouteSemantics,
+  assertPluginRoutePrecedence,
   assertPluginUiContractSemantics,
+  assertServerListenSemantics,
   assertCommonJsDestructuredRequire,
   assertActiveFunctionDirectStatementAst,
   assertActiveTopLevelStatementAst,
@@ -6253,6 +6397,7 @@ module.exports = {
   directToolRegistrationsInNamedFactory,
   directToolRegistrationsInNamedParameterFunction,
   exactSchemaDefinition,
+  gitOutput,
   parseSchemaExpression,
   referencedConstantIdentifiers,
   referencedFreeIdentifiers,

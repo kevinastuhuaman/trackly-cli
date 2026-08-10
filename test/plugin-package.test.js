@@ -1231,6 +1231,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
     import { MCP_PLUGIN_RESOURCE } from './mcp-tokens.js';
     import { enforceTracklyPluginScope } from './plugin-scopes.js';
     import { requireTracklyAccess } from '../services/trackly-access.js';
+    import { azureRehearsalRateLimitOptions } from '../utils/azure-rehearsal-ip.js';
     import { createTracklyPluginMcpServer } from './plugin-server.js';
     import { generateHostedOAuthInternalToken } from './server.js';
     const router = Router();
@@ -1285,6 +1286,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
       standardHeaders: true,
       legacyHeaders: false,
       message: { error: 'Too many trackly plugin requests. Try again later.' },
+      ...azureRehearsalRateLimitOptions(),
     });
     const identityLimiter = rateLimit({
       windowMs: 60_000,
@@ -1302,9 +1304,9 @@ test('plugin registration proof binds the exported factory to the live POST rout
     ${routeWrapperStart}
     router.post(
       '/',
+      ipLimiter,
       requirePluginEnabled,
       validateOrigin,
-      ipLimiter,
       bearerAuth,
       enforcePluginResource,
       requireTracklyAccess,

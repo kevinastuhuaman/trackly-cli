@@ -16,11 +16,14 @@ const {
   assertApplicationFieldByKeyReferenceSemantics,
   assertInternalSecretCompatibility,
   assertInstallProcessGuardsSemantics,
+  assertPluginRoutePrecedence,
+  assertServerListenSemantics,
   assertPluginManualSubmissionRouteSemantics,
   assertPluginUiContractSemantics,
   assertActiveFunctionDefinitionAst,
   canonicalSchemaAst,
   exactSchemaDefinition,
+  gitOutput,
   parseSchemaExpression,
   sha256ExactBytes,
   verifyHostedContract,
@@ -30,6 +33,20 @@ function activeFunctionDigest(sourceText, name, sourcePath) {
   return sha256ExactBytes(JSON.stringify(
     canonicalSchemaAst(activeNamedDefinitionAst(sourceText, name, sourcePath)),
   ));
+}
+
+function startServerListenDigest(sourceText, sourcePath) {
+  const startServer = activeNamedDefinitionAst(sourceText, 'startServer', sourcePath);
+  const listenStatement = startServer.body.body.find((statement) => (
+    statement.type === 'ExpressionStatement'
+    && statement.expression?.type === 'CallExpression'
+    && statement.expression.callee?.type === 'MemberExpression'
+    && statement.expression.callee.object?.type === 'Identifier'
+    && statement.expression.callee.object.name === 'app'
+    && statement.expression.callee.property?.type === 'Identifier'
+    && statement.expression.callee.property.name === 'listen'
+  ));
+  return sha256ExactBytes(JSON.stringify(canonicalSchemaAst(listenStatement)));
 }
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), 'utf8');
@@ -178,10 +195,15 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
   for (const runtimePath of [
     'package.json',
     'package-lock.json',
+    'src/index.ts',
+    'src/__tests__/cors-origins.integration.test.ts',
+    'src/mcp/plugin-router.ts',
+    'src/mcp/__tests__/plugin-server.test.ts',
     'src/mcp/plugin-ui.ts',
     'src/mcp/mcp-tokens.ts',
     'src/mcp/hosted-auth-context.ts',
     'src/utils/auth-epoch.ts',
+    'src/utils/azure-rehearsal-ip.ts',
     'src/utils/jwt.ts',
     'src/middleware/channel-attribution.ts',
     'src/routes/trackly-apply.ts',
@@ -246,6 +268,101 @@ test('hosted process guards lock active semantics, invocation inventory, and nor
     ),
     /must be referenced only by its active definition and locked startServer invocation/,
   );
+});
+
+test('hosted plugin route rejects earlier Express handlers covering its canonical mount', () => {
+  const source = `
+    export function createApp() {
+      const app = express();
+      app.use('/api/health', healthRoutes);
+      app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);
+      app.use('/api', laterRoutes);
+      return app;
+    }
+  `;
+  assert.doesNotThrow(() => assertPluginRoutePrecedence(
+    source,
+    'tracklyPluginMcpRoutes',
+    '/api/plugin/trackly/mcp',
+    'plugin route fixture',
+  ));
+  const legalRedirectSource = source.replace(
+    "app.use('/api/health', healthRoutes);",
+    "const LEGAL_REDIRECT_PATHS = ['/privacy', '/terms']; app.get(LEGAL_REDIRECT_PATHS, legalRedirect);",
+  );
+  assert.doesNotThrow(() => assertPluginRoutePrecedence(
+    legalRedirectSource,
+    'tracklyPluginMcpRoutes',
+    '/api/plugin/trackly/mcp',
+    'legal redirect fixture',
+  ));
+  assert.throws(
+    () => assertPluginRoutePrecedence(
+      legalRedirectSource.replace("'/privacy'", "'/api/plugin/trackly/mcp'"),
+      'tracklyPluginMcpRoutes',
+      '/api/plugin/trackly/mcp',
+      'covering legal redirect fixture',
+    ),
+    /LEGAL_REDIRECT_PATHS in covering legal redirect fixture must remain disjoint/,
+  );
+  for (const earlierHandler of [
+    "app.use('/api', earlierRoutes);",
+    "app.use('/API', earlierRoutes);",
+    "app.use('/api/plugin', earlierRoutes);",
+    "app.all('/api/plugin/trackly/mcp', earlierHandler);",
+    "app.use(/\\/api\\/.*/, earlierRoutes);",
+    'app.use(dynamicPath, earlierRoutes);',
+    "if (enabled) { app.use('/api', earlierRoutes); }",
+  ]) {
+    assert.throws(
+      () => assertPluginRoutePrecedence(
+        source.replace("app.use('/api/health', healthRoutes);", earlierHandler),
+        'tracklyPluginMcpRoutes',
+        '/api/plugin/trackly/mcp',
+        'shadowed plugin route fixture',
+      ),
+      /must not have an earlier Express route or path-scoped middleware covering \/api\/plugin\/trackly\/mcp/,
+    );
+  }
+});
+
+test('hosted listener locks active PORT binding and exact listen callback semantics', () => {
+  const source = `
+    const PORT = process.env.PORT || 3000;
+    function startServer() {
+      const app = createApp();
+      app.listen(PORT, () => {
+        logger.info('startup', 'Server started successfully', { port: PORT });
+      });
+    }
+  `;
+  const options = { listenAstSha256: startServerListenDigest(source, 'listener fixture') };
+  assert.doesNotThrow(() => assertServerListenSemantics(source, 'listener fixture', options));
+  assert.throws(
+    () => assertServerListenSemantics(
+      source.replace('process.env.PORT || 3000', 'process.env.PORT || 8080'),
+      'drifted port fixture',
+      options,
+    ),
+    /PORT in drifted port fixture must preserve its locked executable definition/,
+  );
+  assert.throws(
+    () => assertServerListenSemantics(
+      source.replace("logger.info('startup', 'Server started successfully', { port: PORT });", "logger.info('startup', 'Server started');"),
+      'drifted listener fixture',
+      options,
+    ),
+    /app\.listen in drifted listener fixture must preserve its locked active semantic AST/,
+  );
+});
+
+test('hosted Git provenance reads outputs larger than the synchronous default buffer', () => {
+  const repository = path.join(__dirname, '..');
+  const packageLockBytes = fs.readFileSync(path.join(repository, 'package-lock.json'));
+  const repeatedSpecs = Array.from({ length: 32 }, () => 'HEAD:package-lock.json');
+  const output = gitOutput(repository, ['show', ...repeatedSpecs], null);
+  assert.ok(output.length > 1024 * 1024);
+  assert.equal(output.length, packageLockBytes.length * repeatedSpecs.length);
 });
 
 test('hosted application sensitivity map rejects mutation, reassignment, and reference drift', () => {
