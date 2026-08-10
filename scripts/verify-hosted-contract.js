@@ -943,6 +943,67 @@ function directToolRegistrationsInExportedFunction(
     0,
     `${expectedFunction} in ${sourcePath} must not use dynamic server member access that could bypass the verified ${expectedCallee} helper`,
   );
+  const serverReferences = [];
+  function visitServerReferences(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitServerReferences(child, parent, parentKey);
+      return;
+    }
+    const isStaticPropertyName = parent?.type === 'MemberExpression'
+      && parentKey === 'property' && !parent.computed;
+    const isStaticObjectKey = parent?.type === 'ObjectProperty'
+      && parentKey === 'key' && !parent.computed;
+    if (node.type === 'Identifier'
+      && node.name === 'server'
+      && !isStaticPropertyName
+      && !isStaticObjectKey) serverReferences.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitServerReferences(child, node, key);
+    }
+  }
+  visitServerReferences(factory);
+  const expectedUiResourceLoop = parseFullSource(
+    [
+      'for (const view of Object.keys(TRACKLY_PLUGIN_UI) as Array<keyof typeof TRACKLY_PLUGIN_UI>) {',
+      '  const uri = TRACKLY_PLUGIN_UI[view];',
+      '  server.registerResource(`trackly-${view}-card`, uri, {',
+      '    title: `trackly ${view} card`,',
+      "    description: 'Private trackly Apply status UI. The user always submits manually.',",
+      '    mimeType: TRACKLY_PLUGIN_UI_MIME_TYPE,',
+      '  }, async () => ({',
+      '    contents: [{',
+      '      uri,',
+      '      mimeType: TRACKLY_PLUGIN_UI_MIME_TYPE,',
+      '      text: tracklyPluginUiHtml(view),',
+      '      _meta: TRACKLY_PLUGIN_UI_RESOURCE_META,',
+      '    }],',
+      '  }));',
+      '}',
+    ].join('\n'),
+    'locked plugin UI resource registration',
+  ).program.body[0];
+  const uiResourceLoops = factory.body.body.filter((statement) => (
+    JSON.stringify(canonicalSchemaAst(statement))
+      === JSON.stringify(canonicalSchemaAst(expectedUiResourceLoop))
+  ));
+  assert.ok(
+    uiResourceLoops.length <= 1,
+    `${expectedFunction} in ${sourcePath} may contain at most one exact locked plugin UI resource loop`,
+  );
+  const uiResourceReceiver = uiResourceLoops[0]?.body?.body?.[1]?.expression?.callee?.object;
+  const allowedServerReferences = [
+    serverBindings[0].id,
+    helperReturnStatements[0].argument.callee.object,
+    ...(uiResourceReceiver ? [uiResourceReceiver] : []),
+    factoryReturns[0].argument,
+  ];
+  assert.deepEqual(
+    serverReferences,
+    allowedServerReferences,
+    `${expectedFunction} in ${sourcePath} must not alias, escape, or use its public facade server outside the verified registration helper, locked UI resource registration, and final return`,
+  );
   return registrations;
 }
 
@@ -1382,6 +1443,11 @@ function assertLivePluginRouterMount(
     `${sourcePath} must export exactly one live createApp application factory`,
   );
   const factory = exportedFactories[0].declaration;
+  assert.equal(
+    activeNamedDefinitionAst(source, 'createApp', sourcePath),
+    factory,
+    `createApp in ${sourcePath} must remain the immutable exported application factory`,
+  );
   assert.equal(factory.async, false, `createApp in ${sourcePath} must remain synchronous`);
   assert.equal(factory.generator, false, `createApp in ${sourcePath} must not return a generator`);
   assert.equal(factory.params.length, 0, `createApp in ${sourcePath} must not accept shadowing parameters`);
@@ -1414,20 +1480,35 @@ function assertLivePluginRouterMount(
     0,
     `createApp in ${sourcePath} must mount the imported ${routerBinding} binding without shadowing it`,
   );
+  const routerImport = ast.program.body.flatMap((statement) => (
+    statement.type === 'ImportDeclaration' && statement.source.value === routerModule
+      ? statement.specifiers.filter((specifier) => (
+        specifier.type === 'ImportDefaultSpecifier' && specifier.local?.name === routerBinding
+      ))
+      : []
+  ));
+  assert.equal(routerImport.length, 1);
   const routerReferences = [];
-  function visitRouterReferences(node) {
+  function visitRouterReferences(node, parent = null, parentKey = null) {
     if (node === null || typeof node !== 'object') return;
     if (Array.isArray(node)) {
-      for (const child of node) visitRouterReferences(child);
+      for (const child of node) visitRouterReferences(child, parent, parentKey);
       return;
     }
-    if (node.type === 'Identifier' && node.name === routerBinding) routerReferences.push(node);
+    const isStaticPropertyName = parent?.type === 'MemberExpression'
+      && parentKey === 'property' && !parent.computed;
+    const isStaticObjectKey = parent?.type === 'ObjectProperty'
+      && parentKey === 'key' && !parent.computed;
+    if (node.type === 'Identifier'
+      && node.name === routerBinding
+      && !isStaticPropertyName
+      && !isStaticObjectKey) routerReferences.push(node);
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'extra') continue;
-      visitRouterReferences(child);
+      visitRouterReferences(child, node, key);
     }
   }
-  visitRouterReferences(factory.body);
+  visitRouterReferences(ast);
   const mounts = factory.body.body.flatMap((statement) => {
     const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
     if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== 'app.use') return [];
@@ -1446,8 +1527,8 @@ function assertLivePluginRouterMount(
   );
   assert.deepEqual(
     routerReferences,
-    [mounts[0].expression.arguments[1]],
-    `createApp in ${sourcePath} must not alias, escape, or mount ${routerBinding} outside its locked live path`,
+    [routerImport[0].local, mounts[0].expression.arguments[1]],
+    `${sourcePath} must not alias, escape, or register ${routerBinding} outside its locked live application mount`,
   );
   const directReturns = factory.body.body.filter((statement) => statement.type === 'ReturnStatement');
   assert.equal(
@@ -1600,6 +1681,67 @@ function assertMcpScopeHelperSemantics(source, sourcePath) {
     scopeSetReferences.length,
     2,
     `MCP_SUPPORTED_SCOPE_SET in ${sourcePath} must be referenced only by its immutable declaration and locked membership check`,
+  );
+}
+
+function assertImmutablePluginScopeFreeMethods(source, sourcePath) {
+  const name = 'TRACKLY_PLUGIN_SCOPE_FREE_METHODS';
+  assertActiveVariableInitializerAst(
+    source,
+    name,
+    `new Set([
+      'initialize',
+      'ping',
+      'notifications/initialized',
+      'notifications/cancelled',
+      'tools/list',
+      'resources/list',
+      'resources/templates/list',
+      'resources/read',
+    ])`,
+    sourcePath,
+  );
+  const ast = parseFullSource(source, sourcePath);
+  const declaration = activeVariableDeclarator(source, name, sourcePath).declarator;
+  const membershipCalls = [];
+  const references = [];
+  function visit(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, parent, parentKey);
+      return;
+    }
+    if (node.type === 'CallExpression'
+      && node.callee?.type === 'MemberExpression'
+      && !node.callee.computed
+      && node.callee.object?.type === 'Identifier'
+      && node.callee.object.name === name
+      && node.callee.property?.type === 'Identifier'
+      && node.callee.property.name === 'has'
+      && node.arguments.length === 1) membershipCalls.push(node);
+    const isStaticPropertyName = parent?.type === 'MemberExpression'
+      && parentKey === 'property' && !parent.computed;
+    const isStaticObjectKey = parent?.type === 'ObjectProperty'
+      && parentKey === 'key' && !parent.computed;
+    if (node.type === 'Identifier'
+      && node.name === name
+      && !isStaticPropertyName
+      && !isStaticObjectKey) references.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child, node, key);
+    }
+  }
+  visit(ast);
+  assert.equal(
+    membershipCalls.length,
+    1,
+    `${name} in ${sourcePath} must have exactly one locked scope-bypass membership check`,
+  );
+  assert.deepEqual(
+    references,
+    [declaration.id, membershipCalls[0].callee.object],
+    `${name} in ${sourcePath} must not be aliased, escaped, mutated, or used outside its locked membership check`,
   );
 }
 
@@ -3808,6 +3950,7 @@ const executableScopeContract = staticStringArrayMap(
   hostedPluginScopesPath,
 );
 assertMcpScopeHelperSemantics(hostedMcpScopesSource, hostedMcpScopesPath);
+assertImmutablePluginScopeFreeMethods(hostedPluginScopesSource, hostedPluginScopesPath);
 assertImportBinding(
   hostedPluginScopesSource,
   'APPLICATION_FIELD_BY_KEY',
@@ -5418,6 +5561,7 @@ module.exports = {
   assertActiveFunctionDefinitionAst,
   assertActiveFunctionAstSha256,
   assertLivePluginRouterMount,
+  assertImmutablePluginScopeFreeMethods,
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
   assertBabelPropertyExpression,

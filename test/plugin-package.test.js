@@ -22,6 +22,7 @@ const {
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
+  assertImmutablePluginScopeFreeMethods,
   assertLivePluginRouterMount,
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
@@ -405,6 +406,46 @@ test('OAuth scope normalization and subset checks stay fail-closed against the c
   );
 });
 
+test('scope-free plugin methods are immutable and used only by the locked membership decision', () => {
+  const source = `
+    const TRACKLY_PLUGIN_SCOPE_FREE_METHODS = new Set([
+      'initialize',
+      'ping',
+      'notifications/initialized',
+      'notifications/cancelled',
+      'tools/list',
+      'resources/list',
+      'resources/templates/list',
+      'resources/read',
+    ]);
+    function enforce(message) {
+      if (TRACKLY_PLUGIN_SCOPE_FREE_METHODS.has(message.method)) return;
+      deny();
+    }
+  `;
+  assert.doesNotThrow(() => assertImmutablePluginScopeFreeMethods(source, 'scope-free fixture'));
+  for (const [label, drift] of [
+    ['mutated', "TRACKLY_PLUGIN_SCOPE_FREE_METHODS.add('tools/call');"],
+    ['aliased', 'const bypasses = TRACKLY_PLUGIN_SCOPE_FREE_METHODS;'],
+    ['reassigned', 'TRACKLY_PLUGIN_SCOPE_FREE_METHODS = new Set();'],
+  ]) {
+    assert.throws(
+      () => assertImmutablePluginScopeFreeMethods(
+        source.replace('function enforce', `${drift}\n    function enforce`),
+        `${label} scope-free fixture`,
+      ),
+      /must (?:not be aliased, escaped, mutated, or used outside its locked membership check|never be assigned or updated)/,
+    );
+  }
+  assert.throws(
+    () => assertImmutablePluginScopeFreeMethods(
+      source.replace("'resources/read',", "'resources/read', 'tools/call',"),
+      'widened scope-free fixture',
+    ),
+    /must preserve its locked executable definition/,
+  );
+});
+
 test('the exported plugin router must be mounted on the exact production application path', () => {
   const source = `
     import express from 'express';
@@ -468,7 +509,40 @@ test('the exported plugin router must be mounted on the exact production applica
       '/api/plugin/trackly/mcp',
       'escaped application router fixture',
     ),
-    /must not alias, escape, or mount tracklyPluginMcpRoutes outside its locked live path/,
+    /must not alias, escape, or register tracklyPluginMcpRoutes outside its locked live application mount/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        'const PORT = 3000;',
+        'const PORT = 3000;\n    const escapedRouter = tracklyPluginMcpRoutes;',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'top-level escaped application router fixture',
+    ),
+    /must not alias, escape, or register tracklyPluginMcpRoutes outside its locked live application mount/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      `${source}\ncreateApp = decoyCreateApp;`,
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'reassigned application factory fixture',
+    ),
+    /createApp.*must never be assigned or updated after its locked definition/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      `${source}\ncreateApp++;`,
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'updated application factory fixture',
+    ),
+    /createApp.*must never be assigned or updated after its locked definition/,
   );
   assert.throws(
     () => assertLivePluginRouterMount(
@@ -862,6 +936,25 @@ test('plugin registration proof accepts only unconditional calls in the exported
       server[registrationMethod]('trackly_submit', { inputSchema: z.object({}) }, submitHandler);
     `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'dynamic registrar fixture'),
     /must not use dynamic server member access that could bypass the verified registerPluginTool helper/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool(
+        'trackly_one',
+        { inputSchema: z.object({}) },
+        () => publishServer(server),
+      );
+    `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'escaped facade server fixture'),
+    /must not alias, escape, or use its public facade server outside the verified registration helper, locked UI resource registration, and final return/,
+  );
+  assert.throws(
+    () => directToolRegistrationsInExportedFunction(factoryFixture(`
+      registerPluginTool('trackly_one', { inputSchema: z.object({}) }, oneHandler);
+    `).replace(
+      'const registerPluginTool =',
+      'const escapedServer = server;\n      const registerPluginTool =',
+    ), 'createTracklyPluginMcpServer', 'registerPluginTool', 'aliased facade server fixture'),
+    /must contain only the verified server and registration-helper declarations before registering tools|must not alias, escape, or use its public facade server/,
   );
 });
 
