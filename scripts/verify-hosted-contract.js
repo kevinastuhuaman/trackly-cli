@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '2887b2a84be27050af6884a80094b229cab6b258e656e1d45ca8bc0dc6485a01';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'af77edd423a0a1c350be5276465955a3353f408b75d77f3c24b49b1771c4cd04';
 
 const parsedSourceCache = new Map();
 
@@ -326,12 +326,16 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/mcp/mcp-scopes.ts',
   'src/mcp/oauth-provider.ts',
   'src/mcp/mcp-tokens.ts',
+  'src/utils/auth-epoch.ts',
+  'src/middleware/channel-attribution.ts',
   'src/services/job-brief.ts',
   'src/services/trackly-access.ts',
   'src/services/application-profile/apply-execution-contract.ts',
   'src/services/application-profile/catalog.ts',
   'src/services/application-profile/service.ts',
   'src/routes/jobscout-filter-utils.ts',
+  'src/routes/jobscout-tracker.ts',
+  'src/routes/auth.ts',
 ]);
 
 function assertMergeCommitPreservesPaths(repository, sourceCommit, mergeCommit, relativePaths) {
@@ -3290,6 +3294,8 @@ const hostedMcpScopesPath = path.join(backendRoot, 'src', 'mcp', 'mcp-scopes.ts'
 const hostedApplicationPath = path.join(backendRoot, 'src', 'index.ts');
 const hostedOAuthProviderPath = path.join(backendRoot, 'src', 'mcp', 'oauth-provider.ts');
 const hostedMcpTokensPath = path.join(backendRoot, 'src', 'mcp', 'mcp-tokens.ts');
+const hostedPluginUiPath = path.join(backendRoot, 'src', 'mcp', 'plugin-ui.ts');
+const hostedAuthEpochPath = path.join(backendRoot, 'src', 'utils', 'auth-epoch.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
 const hostedTracklyAccessPath = path.join(backendRoot, 'src', 'services', 'trackly-access.ts');
 const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
@@ -3332,6 +3338,8 @@ const hostedMcpScopesSource = fs.readFileSync(hostedMcpScopesPath, 'utf8');
 const hostedApplicationSource = fs.readFileSync(hostedApplicationPath, 'utf8');
 const hostedOAuthProviderSource = fs.readFileSync(hostedOAuthProviderPath, 'utf8');
 const hostedMcpTokensSource = fs.readFileSync(hostedMcpTokensPath, 'utf8');
+const hostedPluginUiSource = fs.readFileSync(hostedPluginUiPath, 'utf8');
+const hostedAuthEpochSource = fs.readFileSync(hostedAuthEpochPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
 const hostedTracklyAccessSource = fs.readFileSync(hostedTracklyAccessPath, 'utf8');
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
@@ -3620,6 +3628,13 @@ assertActiveFunctionDefinitionAst(
   hostedTracklyAccessPath,
 );
 assertImportBinding(hostedMcpTokensSource, 'default', 'jwt', 'jsonwebtoken', hostedMcpTokensPath);
+assertImportBinding(
+  hostedMcpTokensSource,
+  'normalizeAuthEpoch',
+  'normalizeAuthEpoch',
+  '../utils/auth-epoch.js',
+  hostedMcpTokensPath,
+);
 assertActiveVariableInitializerAst(
   hostedMcpTokensSource,
   'isProduction',
@@ -3654,6 +3669,24 @@ assertActiveTopLevelStatementAst(
 assertActiveVariableInitializerAst(hostedMcpTokensSource, 'MCP_JWT_SECRET', "BASE_SECRET + '-mcp'", hostedMcpTokensPath);
 assertActiveVariableInitializerAst(
   hostedMcpTokensSource,
+  'MCP_ISSUER',
+  "process.env.MCP_ISSUER_URL || 'https://mcp.usetrackly.app'",
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
+  'MCP_LEGACY_RESOURCE',
+  '`${MCP_ISSUER}/api/mcp`',
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
+  'MCP_PLUGIN_RESOURCE',
+  '`${MCP_ISSUER}/api/plugin/trackly/mcp`',
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(
+  hostedMcpTokensSource,
   'MCP_ALLOWED_RESOURCES',
   `Object.freeze([
     MCP_LEGACY_RESOURCE,
@@ -3662,6 +3695,37 @@ assertActiveVariableInitializerAst(
   hostedMcpTokensPath,
 );
 assertActiveVariableInitializerAst(hostedMcpTokensSource, 'MCP_ACCESS_IDENTITY_VERSION', '1 as const', hostedMcpTokensPath);
+assertActiveFunctionDefinitionAst(
+  hostedMcpTokensSource,
+  'normalizeMcpResource',
+  `function normalizeMcpResource(resource?: string): string {
+    const candidate = resource || MCP_LEGACY_RESOURCE;
+    if (!MCP_ALLOWED_RESOURCES.includes(candidate)) {
+      throw new Error('Unsupported MCP resource');
+    }
+    return candidate;
+  }`,
+  hostedMcpTokensPath,
+);
+assertActiveVariableInitializerAst(hostedAuthEpochSource, 'MAX_AUTH_EPOCH', '2_147_483_647', hostedAuthEpochPath);
+assertActiveFunctionDefinitionAst(
+  hostedAuthEpochSource,
+  'normalizeAuthEpoch',
+  `function normalizeAuthEpoch(
+    value: unknown,
+    missingValue?: number,
+  ): number | null {
+    if (value === undefined || value === null) {
+      return missingValue === undefined ? null : missingValue;
+    }
+    return Number.isSafeInteger(value)
+      && Number(value) >= 0
+      && Number(value) <= MAX_AUTH_EPOCH
+      ? Number(value)
+      : null;
+  }`,
+  hostedAuthEpochPath,
+);
 assertActiveFunctionDefinitionAst(
   hostedMcpTokensSource,
   'verifyMcpAccessToken',
@@ -3813,6 +3877,26 @@ assertImportBinding(
   hostedPluginSourcePath,
 );
 assertActiveVariableInitializerAst(
+  hostedPluginUiSource,
+  'TRACKLY_PLUGIN_UI',
+  `Object.freeze({
+    readiness: 'ui://trackly/apply-readiness-v1.html',
+    apply: 'ui://trackly/apply-run-v1.html',
+    resume: 'ui://trackly/resume-handoff-v1.html',
+    review: 'ui://trackly/review-ready-v1.html',
+  })`,
+  hostedPluginUiPath,
+);
+for (const importedName of [
+  'TRACKLY_PLUGIN_UI',
+  'TRACKLY_PLUGIN_UI_MIME_TYPE',
+  'TRACKLY_PLUGIN_UI_RESOURCE_META',
+  'tracklyPluginToolUiMeta',
+  'tracklyPluginUiHtml',
+]) {
+  assertImportBinding(hostedPluginSource, importedName, importedName, './plugin-ui.js', hostedPluginSourcePath);
+}
+assertActiveVariableInitializerAst(
   hostedPluginSource,
   'BASE_URL',
   "process.env.BASE_URL || 'https://closeai.mba'",
@@ -3868,18 +3952,22 @@ assertActiveFunctionDefinitionAst(
         let data = '';
         response.on('data', (chunk) => { data += chunk; });
         response.on('end', () => {
+          const statusCode = response.statusCode || 500;
           let parsed: any;
           try {
             parsed = data ? JSON.parse(data) : {};
           } catch {
-            reject(new Error('trackly returned an invalid response'));
-            return;
+            if (statusCode >= 200 && statusCode < 300) {
+              reject(new Error('trackly returned an invalid response'));
+              return;
+            }
+            parsed = {};
           }
-          if ((response.statusCode || 500) >= 400) {
+          if (statusCode < 200 || statusCode >= 300) {
             const error = new Error(
-              typeof parsed?.error === 'string' ? parsed.error : \`trackly request failed (\${response.statusCode})\`,
+              typeof parsed?.error === 'string' ? parsed.error : \`trackly request failed (\${statusCode})\`,
             ) as Error & { status?: number; code?: string; responseBody?: any };
-            error.status = response.statusCode;
+            error.status = statusCode;
             error.code = typeof parsed?.code === 'string'
               ? parsed.code
               : (typeof parsed?.error === 'string' ? parsed.error : undefined);
@@ -4177,6 +4265,33 @@ const executableRegistrationArguments = Object.fromEntries(executablePluginTools
   const registration = pluginToolRegistration(name);
   return [name, registrationArgumentSources(hostedPluginSource, registration, hostedPluginSourcePath)];
 }));
+assertActiveVariableInitializerAst(
+  hostedPluginSource,
+  'readOnlyAnnotations',
+  `Object.freeze({
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  })`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedPluginSource,
+  'mutationAnnotations',
+  `function mutationAnnotations(
+    destructiveHint = false,
+    idempotentHint = false,
+  ) {
+    return {
+      readOnlyHint: false,
+      destructiveHint,
+      idempotentHint,
+      openWorldHint: false,
+    };
+  }`,
+  hostedPluginSourcePath,
+);
 const mutationAnnotationContract = {
   trackly_update_status: 'mutationAnnotations(false, false)',
   trackly_save_application_answers: 'mutationAnnotations(true, false)',
@@ -5435,13 +5550,21 @@ assertWrappedHandlerAst(
       binding,
       { 'Idempotency-Key': idempotencyKey },
     );
+    const outcomeRunId = readinessCount(response?.outcome?.runId);
+    const status = safeReviewStatus(response?.outcome?.status);
+    if (
+      response?.success !== true
+      || outcomeRunId !== runId
+      || response?.outcome?.applied !== false
+      || status !== 'awaiting_manual_submit'
+    ) {
+      throw new Error('Trackly did not persist the expected review-ready checkpoint');
+    }
     return {
       view: 'review' as const,
-      success: response?.success !== false,
-      reviewReady: response?.success !== false,
-      status: safeReviewStatus(
-        response?.outcome?.status ?? response?.status ?? response?.run?.status,
-      ),
+      success: true,
+      reviewReady: true,
+      status,
       noSubmit: true as const,
     };
   }`,

@@ -11,6 +11,7 @@ const serverManifest = require('../server.json');
 const packageLock = require('../package-lock.json');
 const shrinkwrap = require('../npm-shrinkwrap.json');
 const {
+  HOSTED_DEPLOYABLE_PATHS,
   assertActiveFunctionDefinitionAst,
   exactSchemaDefinition,
   parseSchemaExpression,
@@ -157,6 +158,23 @@ test('release manifests stay on one package version', () => {
   assert.equal(packageLock.packages[''].version, packageManifest.version);
   assert.equal(shrinkwrap.version, packageManifest.version);
   assert.equal(shrinkwrap.packages[''].version, packageManifest.version);
+});
+
+test('hosted provenance covers plugin UI, resource identity, and auth-epoch runtime sources', () => {
+  assert.equal(new Set(HOSTED_DEPLOYABLE_PATHS).size, HOSTED_DEPLOYABLE_PATHS.length);
+  for (const runtimePath of [
+    'src/mcp/plugin-ui.ts',
+    'src/mcp/mcp-tokens.ts',
+    'src/utils/auth-epoch.ts',
+    'src/middleware/channel-attribution.ts',
+    'src/routes/jobscout-tracker.ts',
+    'src/routes/auth.ts',
+  ]) {
+    assert.ok(
+      HOSTED_DEPLOYABLE_PATHS.includes(runtimePath),
+      `${runtimePath} must be preserved byte-for-byte from reviewed source through merge`,
+    );
+  }
 });
 
 test('named Apply contract aliases resolve to executed schema definitions', () => {

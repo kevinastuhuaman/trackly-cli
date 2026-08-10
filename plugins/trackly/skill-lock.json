@@ -109,11 +109,11 @@
       "trackly_get_apply_work": "bd78a4561bb04b3ecf40e11149c9e69551af0f0c67c1fe3788a2962b1fdba028",
       "trackly_report_apply_progress": "1acbc6cd4782177761ab1d5eb3a10d647459d3702a4b987d8913970f466c460c",
       "trackly_prepare_resume_artifact": "bcc1f89678a3cd53aed2864556a8afb056a94535a85051d39379e5b71e98d3ed",
-      "trackly_certify_review_ready": "04205b9250be5edcbc45b020156cd5a9bd99128e93712b1a0e622fb4ae9fb7f3",
+      "trackly_certify_review_ready": "7e875ca5fb20e3e746c79aa70a8c717b9d91f2183447497f258df31849fa82df",
       "trackly_reconcile_manual_submission": "32be19dadef3c8e3a1d9f320d3c1a9a0cde3845f930dac85641409f25a722b0a",
       "trackly_stop_apply": "8363bfe5eb7fb8ed4093b1f01bdaa9ebcb599ac35004fd13bab0ae6a2ab4f1ce"
     },
-    "pluginServerSha256": "8828b038dd2dc554ea952264aae615bccc0607b9816608447ba3266481fbb17a",
+    "pluginServerSha256": "5a0ea947a886b10c3b2357f9f5ba3cf3d05c391bfaab5128124f71e8ba09ffc5",
     "pluginScopesSha256": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
     "jobBriefServiceSha256": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
     "schemaSha256": {
