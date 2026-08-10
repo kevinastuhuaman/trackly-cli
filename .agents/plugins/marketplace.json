@@ -1,0 +1,20 @@
+{
+  "name": "trackly-cli",
+  "interface": {
+    "displayName": "trackly"
+  },
+  "plugins": [
+    {
+      "name": "trackly",
+      "source": {
+        "source": "local",
+        "path": "./plugins/trackly"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -10,6 +10,52 @@ const packageManifest = require('../package.json');
 const serverManifest = require('../server.json');
 const packageLock = require('../package-lock.json');
 const shrinkwrap = require('../npm-shrinkwrap.json');
+const {
+  HOSTED_DEPLOYABLE_PATHS,
+  HOSTED_GIT_MAX_BUFFER,
+  activeNamedDefinitionAst,
+  assertApplicationFieldByKeyReferenceSemantics,
+  assertExactHostedSourceSha256,
+  assertInternalSecretCompatibility,
+  assertInstallProcessGuardsSemantics,
+  assertPluginRoutePrecedence: assertPluginRoutePrecedenceProduction,
+  assertServerListenSemantics,
+  assertPluginManualSubmissionRouteSemantics,
+  assertPluginReviewReadyPersistenceSemantics,
+  assertPluginUiContractSemantics,
+  assertActiveFunctionDefinitionAst,
+  canonicalSchemaAst,
+  exactSchemaDefinition,
+  gitOutput,
+  parseSchemaExpression,
+  sha256ExactBytes,
+  verifyHostedContract,
+} = require('../scripts/verify-hosted-contract.js');
+
+const assertPluginRoutePrecedence = (...args) => assertPluginRoutePrecedenceProduction(
+  ...args,
+  { reviewedGlobalMiddlewareCallDigests: [] },
+);
+
+function activeFunctionDigest(sourceText, name, sourcePath) {
+  return sha256ExactBytes(JSON.stringify(
+    canonicalSchemaAst(activeNamedDefinitionAst(sourceText, name, sourcePath)),
+  ));
+}
+
+function startServerListenDigest(sourceText, sourcePath) {
+  const startServer = activeNamedDefinitionAst(sourceText, 'startServer', sourcePath);
+  const listenStatement = startServer.body.body.find((statement) => (
+    statement.type === 'ExpressionStatement'
+    && statement.expression?.type === 'CallExpression'
+    && statement.expression.callee?.type === 'MemberExpression'
+    && statement.expression.callee.object?.type === 'Identifier'
+    && statement.expression.callee.object.name === 'app'
+    && statement.expression.callee.property?.type === 'Identifier'
+    && statement.expression.callee.property.name === 'listen'
+  ));
+  return sha256ExactBytes(JSON.stringify(canonicalSchemaAst(listenStatement)));
+}
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
@@ -150,6 +196,559 @@ test('release manifests stay on one package version', () => {
   assert.equal(packageLock.packages[''].version, packageManifest.version);
   assert.equal(shrinkwrap.version, packageManifest.version);
   assert.equal(shrinkwrap.packages[''].version, packageManifest.version);
+});
+
+test('hosted provenance covers plugin UI, resource identity, and auth-epoch runtime sources', () => {
+  assert.equal(new Set(HOSTED_DEPLOYABLE_PATHS).size, HOSTED_DEPLOYABLE_PATHS.length);
+  for (const runtimePath of [
+    'package.json',
+    'package-lock.json',
+    'src/index.ts',
+    'src/config/database.ts',
+    'src/services/review-identity.ts',
+    'src/__tests__/cors-origins.integration.test.ts',
+    'src/mcp/plugin-router.ts',
+    'src/mcp/__tests__/plugin-server.test.ts',
+    'src/mcp/plugin-ui.ts',
+    'src/mcp/mcp-tokens.ts',
+    'src/mcp/hosted-auth-context.ts',
+    'src/utils/auth-epoch.ts',
+    'src/utils/azure-rehearsal-ip.ts',
+    'src/utils/jwt.ts',
+    'src/utils/trackly-web-origin.ts',
+    'src/middleware/channel-attribution.ts',
+    'src/middleware/maintenance-mode.ts',
+    'src/routes/trackly-apply.ts',
+    'src/routes/jobscout-tracker.ts',
+    'src/routes/auth.ts',
+  ]) {
+    assert.ok(
+      HOSTED_DEPLOYABLE_PATHS.includes(runtimePath),
+      `${runtimePath} must be preserved byte-for-byte from reviewed source through merge`,
+    );
+  }
+});
+
+test('hosted process guards lock active semantics, invocation inventory, and normal return', () => {
+  const source = `
+    function installProcessGuards(): void {
+      process.on('unhandledRejection', handleRejection);
+      const interval = setInterval(checkMemory, 30000);
+      interval.unref?.();
+    }
+    function startServer() {
+      installProcessGuards();
+      const app = createApp();
+      app.listen(PORT);
+    }
+  `;
+  const options = {
+    functionAstSha256: activeFunctionDigest(source, 'installProcessGuards', 'process guard fixture'),
+  };
+  assert.doesNotThrow(() => assertInstallProcessGuardsSemantics(
+    source,
+    'process guard fixture',
+    options,
+  ));
+  assert.throws(
+    () => assertInstallProcessGuardsSemantics(
+      source.replace("process.on('unhandledRejection', handleRejection);", "process.once('unhandledRejection', handleRejection);"),
+      'drifted process guard fixture',
+      options,
+    ),
+    /locked active semantic AST/,
+  );
+  assert.throws(
+    () => assertInstallProcessGuardsSemantics(
+      source.replace('interval.unref?.();', 'return interval;'),
+      'abrupt process guard fixture',
+      {
+        functionAstSha256: activeFunctionDigest(
+          source.replace('interval.unref?.();', 'return interval;'),
+          'installProcessGuards',
+          'abrupt process guard fixture',
+        ),
+      },
+    ),
+    /must end by returning normally after unreferring its interval/,
+  );
+  assert.throws(
+    () => assertInstallProcessGuardsSemantics(
+      `${source}\ninstallProcessGuards();`,
+      'extra process guard invocation fixture',
+      options,
+    ),
+    /must be referenced only by its active definition and locked startServer invocation/,
+  );
+});
+
+test('hosted plugin route rejects earlier Express handlers covering its canonical mount', () => {
+  const source = `
+    export function createApp() {
+      const app = express();
+      app.use('/api/health', healthRoutes);
+      app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);
+      app.use('/api', laterRoutes);
+      return app;
+    }
+  `;
+  assert.doesNotThrow(() => assertPluginRoutePrecedence(
+    source,
+    'tracklyPluginMcpRoutes',
+    '/api/plugin/trackly/mcp',
+    'plugin route fixture',
+  ));
+  const legalRedirectSource = source.replace(
+    "app.use('/api/health', healthRoutes);",
+    "const LEGAL_REDIRECT_PATHS = ['/privacy', '/terms']; app.get(LEGAL_REDIRECT_PATHS, legalRedirect);",
+  );
+  assert.doesNotThrow(() => assertPluginRoutePrecedence(
+    legalRedirectSource,
+    'tracklyPluginMcpRoutes',
+    '/api/plugin/trackly/mcp',
+    'legal redirect fixture',
+  ));
+  assert.throws(
+    () => assertPluginRoutePrecedence(
+      legalRedirectSource.replace("'/privacy'", "'/api/plugin/trackly/mcp'"),
+      'tracklyPluginMcpRoutes',
+      '/api/plugin/trackly/mcp',
+      'covering legal redirect fixture',
+    ),
+    /LEGAL_REDIRECT_PATHS in covering legal redirect fixture must remain disjoint/,
+  );
+  assert.throws(
+    () => assertPluginRoutePrecedence(
+      legalRedirectSource.replace(
+        "const LEGAL_REDIRECT_PATHS = ['/privacy', '/terms'];",
+        "const LEGAL_REDIRECT_PATHS = ['/privacy', '/terms']; LEGAL_REDIRECT_PATHS.push('/safe');",
+      ),
+      'tracklyPluginMcpRoutes',
+      '/api/plugin/trackly/mcp',
+      'mutated legal redirect fixture',
+    ),
+    /LEGAL_REDIRECT_PATHS in mutated legal redirect fixture must not be aliased, escaped, mutated, or used outside its locked route/,
+  );
+  for (const earlierHandler of [
+    "app.use('/api', earlierRoutes);",
+    "app.use('/API', earlierRoutes);",
+    "app.use('/api/plugin', earlierRoutes);",
+    "app.use('/api/{*splat}', earlierRoutes);",
+    "app.use('/api/plu?gin', earlierRoutes);",
+    "app.use('/api/plu+gin', earlierRoutes);",
+    "app.use('/api/pl[uy]gin', earlierRoutes);",
+    "app.all('/api/plugin/trackly/mcp', earlierHandler);",
+    "app.trace('/api/plugin/trackly/mcp', earlierHandler);",
+    "app['m-search']('/api/plugin/trackly/mcp', earlierHandler);",
+    "app['use']('/api', earlierRoutes);",
+    "app.route('/api/plugin/trackly/mcp').post(earlierHandler);",
+    "app.use(/\\/api\\/.*/, earlierRoutes);",
+    'app.use(dynamicPath, earlierRoutes);',
+    'app.use(getPath(), earlierRoutes);',
+    'app.use(earlierMiddleware);',
+    'app.use(() => earlyResponse);',
+    'app.use(createEarlyMiddleware());',
+    "if (enabled) { app.use('/api', earlierRoutes); }",
+  ]) {
+    assert.throws(
+      () => assertPluginRoutePrecedence(
+        source.replace("app.use('/api/health', healthRoutes);", earlierHandler),
+        'tracklyPluginMcpRoutes',
+        '/api/plugin/trackly/mcp',
+        'shadowed plugin route fixture',
+      ),
+      /must not have an earlier Express route or path-scoped middleware covering \/api\/plugin\/trackly\/mcp|must preserve straight-line setup/,
+    );
+  }
+});
+
+test('hosted listener locks active PORT binding and exact listen callback semantics', () => {
+  const source = `
+    const PORT = process.env.PORT || 3000;
+    function startServer() {
+      const app = createApp();
+      app.listen(PORT, () => {
+        logger.info('startup', 'Server started successfully', { port: PORT });
+      });
+    }
+  `;
+  const options = { listenAstSha256: startServerListenDigest(source, 'listener fixture') };
+  assert.doesNotThrow(() => assertServerListenSemantics(source, 'listener fixture', options));
+  assert.throws(
+    () => assertServerListenSemantics(
+      source.replace('process.env.PORT || 3000', 'process.env.PORT || 8080'),
+      'drifted port fixture',
+      options,
+    ),
+    /PORT in drifted port fixture must preserve its locked executable definition/,
+  );
+  assert.throws(
+    () => assertServerListenSemantics(
+      source.replace("logger.info('startup', 'Server started successfully', { port: PORT });", "logger.info('startup', 'Server started');"),
+      'drifted listener fixture',
+      options,
+    ),
+    /app\.listen in drifted listener fixture must preserve its locked active semantic AST/,
+  );
+  for (const extraListener of [
+    "if (enabled) app.listen(PORT, fallback);",
+    "app['listen'](PORT, fallback);",
+  ]) {
+    assert.throws(
+      () => assertServerListenSemantics(
+        source.replace('const app = createApp();', `const app = createApp(); ${extraListener}`),
+        'extra listener fixture',
+        options,
+      ),
+      /must have exactly one reachable app\.listen call and no nested or computed alternatives/,
+    );
+  }
+});
+
+test('hosted Git provenance reads outputs larger than the synchronous default buffer', () => {
+  const repository = path.join(__dirname, '..');
+  const packageLockBytes = fs.readFileSync(path.join(repository, 'package-lock.json'));
+  const defaultMaxBuffer = 1024 * 1024;
+  const repetitionCount = Math.ceil((defaultMaxBuffer + 1) / packageLockBytes.length);
+  const repeatedSpecs = Array.from({ length: repetitionCount }, () => 'HEAD:package-lock.json');
+  const output = gitOutput(repository, ['show', ...repeatedSpecs], null);
+  assert.ok(output.length > defaultMaxBuffer);
+  assert.ok(output.length < HOSTED_GIT_MAX_BUFFER);
+  assert.equal(output.length, packageLockBytes.length * repeatedSpecs.length);
+});
+
+test('hosted application sensitivity map rejects mutation, reassignment, and reference drift', () => {
+  const catalogSource = `
+    const APPLICATION_PROFILE_FIELDS = [];
+    export const APPLICATION_FIELD_BY_KEY = new Map(
+      APPLICATION_PROFILE_FIELDS.map((field) => [field.key, field]),
+    );
+  `;
+  const scopesSource = `
+    import { APPLICATION_FIELD_BY_KEY } from '../services/application-profile/catalog.js';
+    function requiredScopesForPluginToolCall(key: string, otherKey: string) {
+      const write = APPLICATION_FIELD_BY_KEY.get(key)?.sensitivity !== 'standard';
+      const read = APPLICATION_FIELD_BY_KEY.get(otherKey)?.sensitivity !== 'standard';
+      return { write, read };
+    }
+  `;
+  assert.doesNotThrow(() => assertApplicationFieldByKeyReferenceSemantics(
+    catalogSource,
+    'catalog fixture',
+    scopesSource,
+    'scope fixture',
+  ));
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      `${catalogSource}\nAPPLICATION_FIELD_BY_KEY.set('extra', {});`,
+      'mutated catalog fixture',
+      scopesSource,
+      'scope fixture',
+    ),
+    /must (?:never be assigned or updated after declaration|not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration)/,
+  );
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      `${catalogSource}\nAPPLICATION_FIELD_BY_KEY = new Map();`,
+      'reassigned catalog fixture',
+      scopesSource,
+      'scope fixture',
+    ),
+    /must (?:never be assigned or updated after declaration|not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration)/,
+  );
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      `${catalogSource}\nconst applicationFieldAlias = APPLICATION_FIELD_BY_KEY;`,
+      'aliased catalog fixture',
+      scopesSource,
+      'scope fixture',
+    ),
+    /must not be reassigned, mutated, aliased, escaped, or referenced outside its immutable declaration/,
+  );
+  assert.throws(
+    () => assertApplicationFieldByKeyReferenceSemantics(
+      catalogSource,
+      'catalog fixture',
+      scopesSource.replace('return { write, read };', 'consume(APPLICATION_FIELD_BY_KEY); return { write, read };'),
+      'escaped scope fixture',
+    ),
+    /must be referenced only by its import and two locked sensitivity lookups/,
+  );
+});
+
+test('hosted UI semantic lock rejects MIME, metadata, tool-output, and HTML drift', () => {
+  const uiSource = `
+    export const TRACKLY_PLUGIN_UI_MIME_TYPE = 'text/html;profile=mcp-app';
+    export const TRACKLY_PLUGIN_UI = Object.freeze({
+      readiness: 'ui://trackly/apply-readiness-v1.html',
+      apply: 'ui://trackly/apply-run-v1.html',
+      resume: 'ui://trackly/resume-handoff-v1.html',
+      review: 'ui://trackly/review-ready-v1.html',
+    });
+    const UI_DOMAIN = 'https://mcp.usetrackly.app';
+    export const TRACKLY_PLUGIN_UI_RESOURCE_META = Object.freeze({
+      ui: { prefersBorder: true, domain: UI_DOMAIN, csp: { connectDomains: [], resourceDomains: [] } },
+      'openai/widgetDescription': 'A private trackly Apply status card. Preparation stops before Submit.',
+      'openai/widgetPrefersBorder': true,
+      'openai/widgetDomain': UI_DOMAIN,
+      'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
+    });
+    export function tracklyPluginToolUiMeta(
+      view: TracklyPluginUiView,
+      invoking: string,
+      invoked: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const resourceUri = TRACKLY_PLUGIN_UI[view];
+      return {
+        ui: { resourceUri, visibility: ['model', 'app'] },
+        'openai/outputTemplate': resourceUri,
+        'openai/widgetAccessible': true,
+        'openai/toolInvocation/invoking': invoking,
+        'openai/toolInvocation/invoked': invoked,
+        ...extra,
+      };
+    }
+    export function tracklyPluginUiHtml(initialView) { return '<html>' + initialView + '</html>'; }
+  `;
+  const options = {
+    htmlAstSha256: activeFunctionDigest(uiSource, 'tracklyPluginUiHtml', 'plugin UI fixture'),
+  };
+  assert.doesNotThrow(() => assertPluginUiContractSemantics(uiSource, 'plugin UI fixture', options));
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace('text/html;profile=mcp-app', 'text/plain'),
+      'drifted plugin UI fixture',
+      options,
+    ),
+    /TRACKLY_PLUGIN_UI_MIME_TYPE.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace("visibility: ['model', 'app']", "visibility: ['model']"),
+      'drifted plugin UI output fixture',
+      options,
+    ),
+    /tracklyPluginToolUiMeta.*locked executable branch semantics/,
+  );
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace('prefersBorder: true', 'prefersBorder: false'),
+      'drifted plugin UI metadata fixture',
+      options,
+    ),
+    /TRACKLY_PLUGIN_UI_RESOURCE_META.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace("return '<html>' + initialView + '</html>';", "return '<body>' + initialView + '</body>';"),
+      'drifted plugin UI HTML fixture',
+      options,
+    ),
+    /tracklyPluginUiHtml.*locked active semantic AST/,
+  );
+});
+
+test('manual-submission route semantic lock rejects auth and transaction drift', () => {
+  const routeStatement = `router.post('/manual', requireAuth, requireApplyFeature, async (req, res) => {
+    const result = await reconcile(userId(req), req.body, caller(req));
+    res.json({ success: true, ...result });
+  });`;
+  assert.doesNotThrow(() => assertPluginManualSubmissionRouteSemantics(
+    routeStatement,
+    'manual route fixture',
+    routeStatement,
+  ));
+  assert.throws(
+    () => assertPluginManualSubmissionRouteSemantics(
+      routeStatement.replace(', requireAuth', ''),
+      'drifted manual route fixture',
+      routeStatement,
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertPluginManualSubmissionRouteSemantics(
+      routeStatement.replace('await reconcile(', 'await preview('),
+      'drifted manual transaction fixture',
+      routeStatement,
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertPluginManualSubmissionRouteSemantics(
+      routeStatement.replace('success: true', 'success: false'),
+      'drifted manual response fixture',
+      routeStatement,
+    ),
+    /fail-closed top-level statement/,
+  );
+});
+
+test('review-ready persistence lock rejects route and atomic transaction drift', () => {
+  const routeImport = "import { certifyPluginReviewReady } from '../services/application-profile/service';";
+  const routeStatement = `router.post('/review', requireAuth, requireApplyFeature, requireAccessibleExecutionFeature, async (req, res) => {
+    const result = await certifyPluginReviewReady(userId(req), req.body, caller(req));
+    res.json({ success: true, ...result });
+  });`;
+  const routeSource = `${routeImport}\n${routeStatement}`;
+  const serviceSource = `export async function withAuthorizedApplyMutation(userId, authContext, operation) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await operation(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  export async function certifyPluginReviewReady(userId, input, authContext) {
+    return withAuthorizedApplyMutation(userId, authContext, async (client) => {
+      await recordApplyBatchCheckpoints(client, input);
+      await certifyApplyBatchTruth(client, input);
+      return recordApplyOutcome(client, input);
+    });
+  }`;
+  const options = {
+    certifyAstSha256: activeFunctionDigest(
+      serviceSource,
+      'certifyPluginReviewReady',
+      'review-ready service fixture',
+    ),
+    serviceSourceSha256: sha256ExactBytes(serviceSource),
+  };
+  assert.doesNotThrow(() => assertPluginReviewReadyPersistenceSemantics(
+    routeSource,
+    serviceSource,
+    'review-ready route fixture',
+    'review-ready service fixture',
+    routeStatement,
+    options,
+  ));
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeSource.replace(', requireAccessibleExecutionFeature', ''),
+      serviceSource,
+      'drifted review-ready route fixture',
+      'review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeSource,
+      serviceSource.replace('await certifyApplyBatchTruth(client, input);', ''),
+      'review-ready route fixture',
+      'drifted review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /certifyPluginReviewReady.*locked active semantic AST/,
+  );
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeSource.replace(
+        "from '../services/application-profile/service'",
+        "from '../services/application-profile/decoy-service'",
+      ),
+      serviceSource,
+      'redirected review-ready import fixture',
+      'review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /must import certifyPluginReviewReady.*application-profile\/service/,
+  );
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeSource,
+      serviceSource.replace("await client.query('BEGIN');", "await client.query('SELECT 1');"),
+      'review-ready route fixture',
+      'non-atomic review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /must preserve its exact reviewed source bytes/,
+  );
+});
+
+test('Azure shared limiter helper source is exact-byte locked', () => {
+  const source = 'export function azureRehearsalRateLimitOptions() { return {}; }\n';
+  const digest = sha256ExactBytes(source);
+  assert.doesNotThrow(() => assertExactHostedSourceSha256(source, digest, 'Azure limiter fixture'));
+  assert.throws(
+    () => assertExactHostedSourceSha256(
+      source.replace('return {};', 'return { skip: () => true };'),
+      digest,
+      'drifted Azure limiter fixture',
+    ),
+    /must preserve its exact reviewed source bytes/,
+  );
+});
+
+test('internal proxy secret lock rejects minting and verification derivation drift', () => {
+  const mcpSource = `
+    const isProduction = process.env.NODE_ENV === 'production';
+    const jwtSecretFromEnv = (process.env.JWT_SECRET || '').trim();
+    const sessionSecretFromEnv = (process.env.SESSION_SECRET || '').trim();
+    const BASE_SECRET = jwtSecretFromEnv || sessionSecretFromEnv || (isProduction ? '' : 'local-dev-jwt-secret');
+    if (!BASE_SECRET) { throw new Error('[MCP Tokens] Missing JWT_SECRET or SESSION_SECRET in production.'); }
+    const INTERNAL_SECRET = BASE_SECRET;
+  `;
+  const jwtSource = `
+    const isProduction = process.env.NODE_ENV === 'production';
+    const jwtSecretFromEnv = (process.env.JWT_SECRET || '').trim();
+    const sessionSecretFromEnv = (process.env.SESSION_SECRET || '').trim();
+    const JWT_SECRET = jwtSecretFromEnv || sessionSecretFromEnv || (isProduction ? '' : 'local-dev-jwt-secret');
+    if (!JWT_SECRET) { throw new Error('[JWT] Missing JWT_SECRET or SESSION_SECRET in production.'); }
+    export function verifyToken(token) { return jwt.verify(token, JWT_SECRET); }
+  `;
+  const options = {
+    verifyTokenAstSha256: activeFunctionDigest(jwtSource, 'verifyToken', 'JWT fixture'),
+  };
+  assert.doesNotThrow(() => assertInternalSecretCompatibility(
+    mcpSource,
+    jwtSource,
+    'MCP token fixture',
+    'JWT fixture',
+    options,
+  ));
+  assert.throws(
+    () => assertInternalSecretCompatibility(
+      mcpSource.replace('const INTERNAL_SECRET = BASE_SECRET;', "const INTERNAL_SECRET = BASE_SECRET + '-internal';"),
+      jwtSource,
+      'drifted MCP token fixture',
+      'JWT fixture',
+      options,
+    ),
+    /INTERNAL_SECRET.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertInternalSecretCompatibility(
+      mcpSource,
+      jwtSource.replace('jwtSecretFromEnv || sessionSecretFromEnv', 'sessionSecretFromEnv || jwtSecretFromEnv'),
+      'MCP token fixture',
+      'drifted JWT fixture',
+      options,
+    ),
+    /JWT_SECRET.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertInternalSecretCompatibility(
+      mcpSource,
+      jwtSource.replace('jwt.verify(token, JWT_SECRET)', 'jwt.verify(token, REFRESH_SECRET)'),
+      'MCP token fixture',
+      'drifted JWT verification fixture',
+      options,
+    ),
+    /verifyToken.*locked active semantic AST/,
+  );
 });
 
 test('named Apply contract aliases resolve to executed schema definitions', () => {
@@ -509,23 +1108,219 @@ test('Apply observation contract accepts redacted browser scenario metadata', ()
 });
 
 test('hosted parity verifier compares execution disposition body, alias, and constants', () => {
-  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
+  const locked = 'const applyExecutionDispositionSchema = z.object({ source: z.literal("live") }).strict();';
+  assert.equal(
+    exactSchemaDefinition(locked, 'applyExecutionDispositionSchema', 'locked disposition fixture'),
+    locked,
+  );
+  assert.equal(
+    parseSchemaExpression(locked, 'applyExecutionDispositionSchema', 'locked disposition fixture').type,
+    'CallExpression',
+  );
+  assert.throws(
+    () => exactSchemaDefinition(
+      locked.replace('const ', 'let '),
+      'applyExecutionDispositionSchema',
+      'mutable disposition fixture',
+    ),
+    /must use an immutable const declaration/,
+  );
+  assert.throws(
+    () => exactSchemaDefinition(
+      `${locked} applyExecutionDispositionSchema = z.any();`,
+      'applyExecutionDispositionSchema',
+      'reassigned disposition fixture',
+    ),
+    /must never be assigned or updated after declaration/,
+  );
+});
 
-  assert.match(verifier, /'applyExecutionDispositionSchema'/);
-  assert.match(verifier, /trackly_record_apply_execution_dispositions schema alias drifted/);
-  assert.match(verifier, /trackly_lint_application_text/);
-  assert.match(verifier, /trackly_diagnose_local_path/);
-  assert.match(verifier, /must not be advertised by hosted MCP/);
-  assert.match(verifier, /must not be registered by hosted MCP/);
-  for (const constantName of [
-    'applyExecutionMaxTarget',
-    'applyBrowserSurfaces',
-    'applyAccessClassifications',
-    'applyExecutionDispositionSources',
-    'applyExecutionStopReasonCodes',
+test('hosted parity verifier proves published wrapper compatibility from parsed ASTs', () => {
+  const locked = `function projectPublishedSchema(schema) {
+    return schema.superRefine(validatePublishedInput);
+  }`;
+  assert.doesNotThrow(() => assertActiveFunctionDefinitionAst(
+    locked,
+    'projectPublishedSchema',
+    locked,
+    'published wrapper fixture',
+  ));
+  assert.throws(
+    () => assertActiveFunctionDefinitionAst(
+      locked.replace('validatePublishedInput', 'decoyValidator'),
+      'projectPublishedSchema',
+      locked,
+      'drifted published wrapper fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
+});
+
+test('coordinated hosted verifier executes disposition, wrapper, and lifecycle wiring end to end', () => {
+  const dispositionTool = 'z.object({ dispositions: z.array(applyExecutionDispositionSchema) }).strict()';
+  const localApplySource = `
+    const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
+    const startApplyRunInputSchema = z.object({ runId: z.number().int() }).strict();
+  `;
+  const hostedApplySource = `
+    const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
+    const startApplyRunSchema = z.object({ runId: z.number().int() }).strict()
+      .superRefine(validateStartApplyRun);
+  `;
+  const hostedPluginSource = `
+    function wrapTool(
+      handler: (params: any) => Promise<unknown>,
+      fallback: string,
+      includeStructuredContent = false,
+    ) {
+      return async (params: any) => {
+        try {
+          return resultContent(await handler(params), includeStructuredContent);
+        } catch (error) {
+          return errorContent(error, fallback);
+        }
+      };
+    }
+  `;
+  const fixture = {
+    localContract: { tools: { trackly_record_apply_execution_dispositions: dispositionTool } },
+    hostedContract: { tools: { trackly_record_apply_execution_dispositions: dispositionTool } },
+    localApplySource,
+    hostedApplySource,
+    hostedPluginContract: { lifecycle: { submissionBoundary: 'manual_only' } },
+    pluginLock: { publicLifecycleContract: { submissionBoundary: 'manual_only' } },
+    hostedPluginSource,
+  };
+  const verify = (candidate) => () => verifyHostedContract({ coordinatedFixture: candidate });
+
+  assert.doesNotThrow(verify(structuredClone(fixture)));
+  const dispositionDrift = structuredClone(fixture);
+  dispositionDrift.hostedApplySource = dispositionDrift.hostedApplySource.replace("z.literal('live')", "z.literal('shadow')");
+  assert.throws(verify(dispositionDrift), /applyExecutionDispositionSchema executable AST drifted/);
+  const wrapperDrift = structuredClone(fixture);
+  wrapperDrift.hostedPluginSource = wrapperDrift.hostedPluginSource.replace('resultContent(', 'shadowResult(');
+  assert.throws(verify(wrapperDrift), /wrapTool.*must preserve its locked executable branch semantics/);
+  const lifecycleDrift = structuredClone(fixture);
+  lifecycleDrift.hostedPluginContract.lifecycle.submissionBoundary = 'automatic';
+  assert.throws(verify(lifecycleDrift), /hosted plugin lifecycle drifted/);
+  const publishedWrapperDrift = structuredClone(fixture);
+  publishedWrapperDrift.localApplySource = publishedWrapperDrift.localApplySource.replace(
+    'runId: z.number().int()',
+    'runId: z.string()',
+  );
+  assert.throws(verify(publishedWrapperDrift), /startApplyRunInputSchema must equal the hosted published object/);
+});
+
+test('standalone hosted verifier executes tool, schema, and handler snapshot wiring end to end', (t) => {
+  const temporaryRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-hosted-fixture-'));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(temporaryRoot, 'contracts'), { recursive: true });
+  fs.mkdirSync(path.join(temporaryRoot, 'plugins', 'trackly'), { recursive: true });
+  for (const relativePath of [
+    ['contracts', 'trackly-apply-tools.json'],
+    ['plugins', 'trackly', 'skill-lock.json'],
+    ['plugins', 'trackly', 'hosted-contract-fixture.json'],
   ]) {
-    assert.match(verifier, new RegExp(`'${constantName}'`));
+    fs.copyFileSync(path.join(__dirname, '..', ...relativePath), path.join(temporaryRoot, ...relativePath));
   }
+  const fixturePath = path.join(temporaryRoot, 'plugins', 'trackly', 'hosted-contract-fixture.json');
+  const originalFixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+  const verifyFixture = (fixture) => {
+    const fixtureSource = `${JSON.stringify(fixture, null, 2)}\n`;
+    fs.writeFileSync(fixturePath, fixtureSource);
+    return () => verifyHostedContract({
+      cliRoot: temporaryRoot,
+      backendDir: null,
+      fixtureOptions: {
+        expectedFixtureSha256: sha256ExactBytes(fixtureSource),
+      },
+    });
+  };
+
+  assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
+  const renamed = structuredClone(originalFixture);
+  renamed.publicTools[0][0] = 'trackly_shadow_search';
+  assert.throws(verifyFixture(renamed), /public tool-name snapshot drifted/);
+  const schemaDrift = structuredClone(originalFixture);
+  schemaDrift.publicTools[0][1] = '0'.repeat(64);
+  assert.throws(verifyFixture(schemaDrift), /schema snapshot drifted/);
+  const handlerDrift = structuredClone(originalFixture);
+  handlerDrift.publicTools[0][2] = 'f'.repeat(64);
+  assert.throws(verifyFixture(handlerDrift), /handler snapshot drifted/);
+  const ancestryDrift = structuredClone(originalFixture);
+  ancestryDrift.mergedRuntime.parents[1] = 'a'.repeat(40);
+  assert.throws(verifyFixture(ancestryDrift), /must prove the reviewed runtime commit is a direct parent/);
+  const staleCapture = structuredClone(originalFixture);
+  staleCapture.capturedAt = '2026-08-11T04:45:00-07:00';
+  assert.throws(verifyFixture(staleCapture), /must be captured within 24 hours of its recorded runtime merge/);
+});
+
+test('hosted parity verifier fails clearly when the plugin contract has no tools object', () => {
+  const { spawnSync } = require('node:child_process');
+  const verifierPath = path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js');
+  const fakeBackendRoot = path.join('/tmp', 'trackly-malformed-hosted-contract');
+  const childScript = `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const originalExistsSync = fs.existsSync;
+    const originalReadFileSync = fs.readFileSync;
+    const backendRoot = ${JSON.stringify(fakeBackendRoot)};
+    const applyContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
+    const pluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
+    const applySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
+
+    fs.existsSync = (filePath) => (
+      filePath === applyContractPath
+      || filePath === pluginContractPath
+      || originalExistsSync(filePath)
+    );
+    fs.readFileSync = (filePath, ...args) => {
+      if (filePath === applyContractPath) return '{}';
+      if (filePath === pluginContractPath) return '{"contractVersion":"1.0.0"}';
+      if (filePath === applySourcePath) return '';
+      return originalReadFileSync(filePath, ...args);
+    };
+
+    require(${JSON.stringify(verifierPath)}).verifyHostedContract();
+  `;
+  const result = spawnSync(process.execPath, ['-e', childScript], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      TRACKLY_BACKEND_DIR: fakeBackendRoot,
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stderr,
+    /must contain a top-level "tools" JSON object before tool parity can be verified/,
+  );
+  assert.doesNotMatch(result.stderr, /TypeError/);
+});
+
+test('hosted parity verifier binds the public lifecycle promise to executable plugin schemas and handlers', () => {
+  const locked = `function projectLifecycle(value) {
+    return {
+      noSubmit: true,
+      nextAction: value.nextAction,
+    };
+  }`;
+  assert.doesNotThrow(() => assertActiveFunctionDefinitionAst(
+    locked,
+    'projectLifecycle',
+    locked,
+    'lifecycle projection fixture',
+  ));
+  assert.throws(
+    () => assertActiveFunctionDefinitionAst(
+      locked.replace('noSubmit: true', 'noSubmit: false'),
+      'projectLifecycle',
+      locked,
+      'unsafe lifecycle projection fixture',
+    ),
+    /must preserve its locked executable branch semantics/,
+  );
 });
 
 test('Apply MCP prompt gates resume preparation on the same browser binding', () => {
@@ -944,6 +1739,26 @@ test('Apply skill 4.4.2 uses compact snapshots, parked-member controls, local li
   assert.match(review, /at least once every 60 seconds/i);
   assert.match(upload, /file chooser/i);
   assert.match(upload, /fail closed/i);
+});
+
+test('public Apply skill completes every ready member in a bound wave before handoff', () => {
+  const skill = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  const handoff = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'references', 'review-handoff.md'),
+    'utf8',
+  );
+
+  assert.match(skill, /Before choosing a workflow-completion stop or user-facing handoff, process every ready mutable member in that wave/);
+  assert.match(skill, /If an authoritative blocker requires an immediate stop, obey it and preserve the entire wave for resumption/);
+  assert.match(skill, /never stop after the first review-ready sibling/);
+  assert.match(skill, /After every certification or reconciliation, refetch the current bound wave/);
+  assert.match(skill, /authoritative mutability, blockers, allowed operations, membership, and advance instruction/);
+  assert.match(skill, /Only then hand off all certified review tabs/);
+  assert.match(handoff, /Certification of one member is not permission to stop/);
+  assert.match(handoff, /never abandon ready siblings because one member certified or reconciled/);
 });
 
 test('Apply skill consumes server-owned onboarding screens and consistency rules with a legacy fallback', () => {

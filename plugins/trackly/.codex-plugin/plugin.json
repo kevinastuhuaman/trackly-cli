@@ -1,0 +1,46 @@
+{
+  "name": "trackly",
+  "version": "1.0.0",
+  "description": "Find openings as they appear and fill approved applications for your review.",
+  "author": {
+    "name": "trackly",
+    "email": "hello@usetrackly.app",
+    "url": "https://usetrackly.app"
+  },
+  "homepage": "https://usetrackly.app/plugins/trackly",
+  "repository": "https://github.com/trackly-app/trackly-cli/tree/main/plugins/trackly",
+  "license": "MIT",
+  "keywords": [
+    "jobs",
+    "job-search",
+    "applications",
+    "career",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "trackly",
+    "shortDescription": "Real-time job search and application filling",
+    "longDescription": "trackly finds openings as they appear. You decide what to pursue. trackly Apply fills approved applications for your review, and you always submit manually.",
+    "developerName": "trackly",
+    "category": "Productivity",
+    "capabilities": [
+      "Job search",
+      "Application filling",
+      "Manual review"
+    ],
+    "websiteURL": "https://usetrackly.app/plugins/trackly",
+    "privacyPolicyURL": "https://usetrackly.app/privacy",
+    "termsOfServiceURL": "https://usetrackly.app/terms",
+    "defaultPrompt": [
+      "Find the newest product roles that match my preferences.",
+      "Show the newest remote roles from companies trackly monitors.",
+      "Use trackly Apply to fill my next approved application, then stop before Submit."
+    ],
+    "brandColor": "#000000",
+    "composerIcon": "./assets/trackly-appicon.svg",
+    "logo": "./assets/trackly-appicon.svg",
+    "logoDark": "./assets/trackly-appicon.svg"
+  }
+}
