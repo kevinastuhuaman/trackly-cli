@@ -328,6 +328,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/mcp/mcp-tokens.ts',
   'src/mcp/hosted-auth-context.ts',
   'src/utils/auth-epoch.ts',
+  'src/utils/jwt.ts',
   'src/middleware/channel-attribution.ts',
   'src/services/job-brief.ts',
   'src/services/trackly-access.ts',
@@ -336,6 +337,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/services/application-profile/service.ts',
   'src/routes/jobscout-filter-utils.ts',
   'src/routes/jobscout-tracker.ts',
+  'src/routes/trackly-apply.ts',
   'src/routes/auth.ts',
 ]);
 
@@ -1893,6 +1895,133 @@ function assertActiveFunctionAstSha256(source, name, expectedSha256, sourcePath)
   );
 }
 
+function assertPluginUiContractSemantics(
+  source,
+  sourcePath,
+  { htmlAstSha256 = 'a5962f5687896272ef8ca365e93be831a0bde5e637d7ecb96e7437585362e3cc' } = {},
+) {
+  assertActiveVariableInitializerAst(
+    source,
+    'TRACKLY_PLUGIN_UI_MIME_TYPE',
+    "'text/html;profile=mcp-app'",
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(source, 'UI_DOMAIN', "'https://mcp.usetrackly.app'", sourcePath);
+  assertActiveVariableInitializerAst(
+    source,
+    'TRACKLY_PLUGIN_UI',
+    `Object.freeze({
+      readiness: 'ui://trackly/apply-readiness-v1.html',
+      apply: 'ui://trackly/apply-run-v1.html',
+      resume: 'ui://trackly/resume-handoff-v1.html',
+      review: 'ui://trackly/review-ready-v1.html',
+    })`,
+    sourcePath,
+  );
+  assertActiveVariableInitializerAst(
+    source,
+    'TRACKLY_PLUGIN_UI_RESOURCE_META',
+    `Object.freeze({
+      ui: {
+        prefersBorder: true,
+        domain: UI_DOMAIN,
+        csp: {
+          connectDomains: [],
+          resourceDomains: [],
+        },
+      },
+      'openai/widgetDescription': 'A private trackly Apply status card. Preparation stops before Submit.',
+      'openai/widgetPrefersBorder': true,
+      'openai/widgetDomain': UI_DOMAIN,
+      'openai/widgetCSP': {
+        connect_domains: [],
+        resource_domains: [],
+      },
+    })`,
+    sourcePath,
+  );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'tracklyPluginToolUiMeta',
+    `function tracklyPluginToolUiMeta(
+      view: TracklyPluginUiView,
+      invoking: string,
+      invoked: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const resourceUri = TRACKLY_PLUGIN_UI[view];
+      return {
+        ui: {
+          resourceUri,
+          visibility: ['model', 'app'],
+        },
+        'openai/outputTemplate': resourceUri,
+        'openai/widgetAccessible': true,
+        'openai/toolInvocation/invoking': invoking,
+        'openai/toolInvocation/invoked': invoked,
+        ...extra,
+      };
+    }`,
+    sourcePath,
+  );
+  assertActiveFunctionAstSha256(source, 'tracklyPluginUiHtml', htmlAstSha256, sourcePath);
+}
+
+function assertPluginManualSubmissionRouteSemantics(source, sourcePath, expectedStatement) {
+  assertActiveTopLevelStatementAst(source, expectedStatement, sourcePath);
+}
+
+function assertInternalSecretCompatibility(
+  mcpTokenSource,
+  jwtSource,
+  mcpTokenSourcePath,
+  jwtSourcePath,
+  { verifyTokenAstSha256 = '92ba92722519a3112f5c52bfa5cd779c3a396e2ae00ee7c3bf81933057991086' } = {},
+) {
+  const sharedSecretExpression = "jwtSecretFromEnv || sessionSecretFromEnv || (isProduction ? '' : 'local-dev-jwt-secret')";
+  for (const [source, sourcePath] of [
+    [mcpTokenSource, mcpTokenSourcePath],
+    [jwtSource, jwtSourcePath],
+  ]) {
+    assertActiveVariableInitializerAst(
+      source,
+      'isProduction',
+      "process.env.NODE_ENV === 'production'",
+      sourcePath,
+    );
+    assertActiveVariableInitializerAst(
+      source,
+      'jwtSecretFromEnv',
+      "(process.env.JWT_SECRET || '').trim()",
+      sourcePath,
+    );
+    assertActiveVariableInitializerAst(
+      source,
+      'sessionSecretFromEnv',
+      "(process.env.SESSION_SECRET || '').trim()",
+      sourcePath,
+    );
+  }
+  assertActiveVariableInitializerAst(mcpTokenSource, 'BASE_SECRET', sharedSecretExpression, mcpTokenSourcePath);
+  assertActiveVariableInitializerAst(mcpTokenSource, 'INTERNAL_SECRET', 'BASE_SECRET', mcpTokenSourcePath);
+  assertActiveVariableInitializerAst(jwtSource, 'JWT_SECRET', sharedSecretExpression, jwtSourcePath);
+  assertActiveTopLevelStatementAst(
+    mcpTokenSource,
+    `if (!BASE_SECRET) {
+      throw new Error('[MCP Tokens] Missing JWT_SECRET or SESSION_SECRET in production.');
+    }`,
+    mcpTokenSourcePath,
+  );
+  assertActiveTopLevelStatementAst(
+    jwtSource,
+    `if (!JWT_SECRET) {
+      throw new Error('[JWT] Missing JWT_SECRET or SESSION_SECRET in production.');
+    }`,
+    jwtSourcePath,
+  );
+  assertActiveFunctionAstSha256(jwtSource, 'verifyToken', verifyTokenAstSha256, jwtSourcePath);
+}
+
 function assertActiveClassMethodDefinitionAst(
   source,
   className,
@@ -3298,12 +3427,14 @@ const hostedMcpTokensPath = path.join(backendRoot, 'src', 'mcp', 'mcp-tokens.ts'
 const hostedAuthContextPath = path.join(backendRoot, 'src', 'mcp', 'hosted-auth-context.ts');
 const hostedPluginUiPath = path.join(backendRoot, 'src', 'mcp', 'plugin-ui.ts');
 const hostedAuthEpochPath = path.join(backendRoot, 'src', 'utils', 'auth-epoch.ts');
+const hostedJwtPath = path.join(backendRoot, 'src', 'utils', 'jwt.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
 const hostedTracklyAccessPath = path.join(backendRoot, 'src', 'services', 'trackly-access.ts');
 const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
 const hostedApplicationProfileCatalogPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'catalog.ts');
 const hostedApplicationProfileServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'service.ts');
 const hostedJobscoutFilterUtilsPath = path.join(backendRoot, 'src', 'routes', 'jobscout-filter-utils.ts');
+const hostedTracklyApplyPath = path.join(backendRoot, 'src', 'routes', 'trackly-apply.ts');
 const pluginLockPath = path.join(cliRoot, 'plugins', 'trackly', 'skill-lock.json');
 
 if (!fs.existsSync(hostedContractPath)) {
@@ -3343,12 +3474,14 @@ const hostedMcpTokensSource = fs.readFileSync(hostedMcpTokensPath, 'utf8');
 const hostedAuthContextSource = fs.readFileSync(hostedAuthContextPath, 'utf8');
 const hostedPluginUiSource = fs.readFileSync(hostedPluginUiPath, 'utf8');
 const hostedAuthEpochSource = fs.readFileSync(hostedAuthEpochPath, 'utf8');
+const hostedJwtSource = fs.readFileSync(hostedJwtPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
 const hostedTracklyAccessSource = fs.readFileSync(hostedTracklyAccessPath, 'utf8');
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
 const hostedApplicationProfileCatalogSource = fs.readFileSync(hostedApplicationProfileCatalogPath, 'utf8');
 const hostedApplicationProfileServiceSource = fs.readFileSync(hostedApplicationProfileServicePath, 'utf8');
 const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtilsPath, 'utf8');
+const hostedTracklyApplySource = fs.readFileSync(hostedTracklyApplyPath, 'utf8');
 
 verifyHostedSnapshotGitProvenance(cliRoot, backendRoot);
 assertLivePluginRouterMount(
@@ -3772,6 +3905,12 @@ assertActiveFunctionDefinitionAst(
   }`,
   hostedMcpTokensPath,
 );
+assertInternalSecretCompatibility(
+  hostedMcpTokensSource,
+  hostedJwtSource,
+  hostedMcpTokensPath,
+  hostedJwtPath,
+);
 assertActiveVariableInitializerAst(
   hostedAuthContextSource,
   'HOSTED_MCP_AUTH_CONTEXT_VERSION',
@@ -3967,17 +4106,7 @@ assertImportBinding(
   'node:https',
   hostedPluginSourcePath,
 );
-assertActiveVariableInitializerAst(
-  hostedPluginUiSource,
-  'TRACKLY_PLUGIN_UI',
-  `Object.freeze({
-    readiness: 'ui://trackly/apply-readiness-v1.html',
-    apply: 'ui://trackly/apply-run-v1.html',
-    resume: 'ui://trackly/resume-handoff-v1.html',
-    review: 'ui://trackly/review-ready-v1.html',
-  })`,
-  hostedPluginUiPath,
-);
+assertPluginUiContractSemantics(hostedPluginUiSource, hostedPluginUiPath);
 for (const importedName of [
   'TRACKLY_PLUGIN_UI',
   'TRACKLY_PLUGIN_UI_MIME_TYPE',
@@ -5874,6 +6003,57 @@ assertWrappedHandlerAst(
   )`,
   hostedPluginSourcePath,
 );
+assertPluginManualSubmissionRouteSemantics(
+  hostedTracklyApplySource,
+  hostedTracklyApplyPath,
+  `router.post('/jobscout/apply/runs/:id/plugin-manual-submission', requireAuth, requireApplyFeature, requireAccessibleExecutionFeature, async (req, res) => {
+    try {
+      assertPlainBodyKeys(req.body, [
+        'batchId', 'memberId', 'expectedMemberVersion', 'inspectionEpoch',
+        'browserBindingHash', 'evidenceFingerprint',
+        'confirmation', 'explicitUserConfirmed',
+      ], 'Plugin manual reconciliation accepts only current typed evidence and an explicit confirmation');
+      const confirmation = String(req.body?.confirmation || '');
+      if (!['success_page', 'user_confirmation'].includes(confirmation)) {
+        throw new ProfileValidationError('confirmation must be success_page or user_confirmation');
+      }
+      if (confirmation === 'user_confirmation' && req.body?.explicitUserConfirmed !== true) {
+        throw new ProfileValidationError('Explicit user confirmation is required');
+      }
+      if (confirmation === 'success_page' && req.body?.explicitUserConfirmed !== undefined) {
+        throw new ProfileValidationError(
+          'explicitUserConfirmed is accepted only for user_confirmation evidence',
+        );
+      }
+      const result = await reconcilePluginManualSubmission(userId(req)!, {
+        runId: positiveInteger(req.params.id, 'Apply run id'),
+        batchId: positiveInteger(req.body?.batchId, 'batchId'),
+        memberId: positiveInteger(req.body?.memberId, 'memberId'),
+        expectedMemberVersion: positiveInteger(
+          req.body?.expectedMemberVersion,
+          'expectedMemberVersion',
+        ),
+        inspectionEpoch: positiveInteger(req.body?.inspectionEpoch, 'inspectionEpoch'),
+        browserBindingHash: boundedMachineInput(
+          req.body?.browserBindingHash,
+          'browserBindingHash',
+          64,
+        ),
+        evidenceFingerprint: boundedMachineInput(
+          req.body?.evidenceFingerprint,
+          'evidenceFingerprint',
+          64,
+        ),
+        confirmation: confirmation as 'success_page' | 'user_confirmation',
+        ...(confirmation === 'user_confirmation' ? { explicitUserConfirmed: true as const } : {}),
+        idempotencyKey: applyIdempotencyKey(req),
+      }, applyRunCallerContext(req));
+      res.json({ success: true, ...result });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });`,
+);
 
 const stopRegistration = pluginToolRegistration('trackly_stop_apply');
 const stopDescriptorProperties = staticBabelObjectProperties(
@@ -5910,6 +6090,9 @@ module.exports = {
   HOSTED_DEPLOYABLE_PATHS,
   activeNamedDefinitionAst,
   activeToolRegistrations,
+  assertInternalSecretCompatibility,
+  assertPluginManualSubmissionRouteSemantics,
+  assertPluginUiContractSemantics,
   assertCommonJsDestructuredRequire,
   assertActiveFunctionDirectStatementAst,
   assertActiveTopLevelStatementAst,

@@ -12,12 +12,23 @@ const packageLock = require('../package-lock.json');
 const shrinkwrap = require('../npm-shrinkwrap.json');
 const {
   HOSTED_DEPLOYABLE_PATHS,
+  activeNamedDefinitionAst,
+  assertInternalSecretCompatibility,
+  assertPluginManualSubmissionRouteSemantics,
+  assertPluginUiContractSemantics,
   assertActiveFunctionDefinitionAst,
+  canonicalSchemaAst,
   exactSchemaDefinition,
   parseSchemaExpression,
   sha256ExactBytes,
   verifyHostedContract,
 } = require('../scripts/verify-hosted-contract.js');
+
+function activeFunctionDigest(sourceText, name, sourcePath) {
+  return sha256ExactBytes(JSON.stringify(
+    canonicalSchemaAst(activeNamedDefinitionAst(sourceText, name, sourcePath)),
+  ));
+}
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'server.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '..', 'mcp', 'apply-tools.js'), 'utf8');
@@ -167,7 +178,9 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
     'src/mcp/mcp-tokens.ts',
     'src/mcp/hosted-auth-context.ts',
     'src/utils/auth-epoch.ts',
+    'src/utils/jwt.ts',
     'src/middleware/channel-attribution.ts',
+    'src/routes/trackly-apply.ts',
     'src/routes/jobscout-tracker.ts',
     'src/routes/auth.ts',
   ]) {
@@ -176,6 +189,174 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
       `${runtimePath} must be preserved byte-for-byte from reviewed source through merge`,
     );
   }
+});
+
+test('hosted UI semantic lock rejects MIME, metadata, tool-output, and HTML drift', () => {
+  const uiSource = `
+    export const TRACKLY_PLUGIN_UI_MIME_TYPE = 'text/html;profile=mcp-app';
+    export const TRACKLY_PLUGIN_UI = Object.freeze({
+      readiness: 'ui://trackly/apply-readiness-v1.html',
+      apply: 'ui://trackly/apply-run-v1.html',
+      resume: 'ui://trackly/resume-handoff-v1.html',
+      review: 'ui://trackly/review-ready-v1.html',
+    });
+    const UI_DOMAIN = 'https://mcp.usetrackly.app';
+    export const TRACKLY_PLUGIN_UI_RESOURCE_META = Object.freeze({
+      ui: { prefersBorder: true, domain: UI_DOMAIN, csp: { connectDomains: [], resourceDomains: [] } },
+      'openai/widgetDescription': 'A private trackly Apply status card. Preparation stops before Submit.',
+      'openai/widgetPrefersBorder': true,
+      'openai/widgetDomain': UI_DOMAIN,
+      'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
+    });
+    export function tracklyPluginToolUiMeta(
+      view: TracklyPluginUiView,
+      invoking: string,
+      invoked: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const resourceUri = TRACKLY_PLUGIN_UI[view];
+      return {
+        ui: { resourceUri, visibility: ['model', 'app'] },
+        'openai/outputTemplate': resourceUri,
+        'openai/widgetAccessible': true,
+        'openai/toolInvocation/invoking': invoking,
+        'openai/toolInvocation/invoked': invoked,
+        ...extra,
+      };
+    }
+    export function tracklyPluginUiHtml(initialView) { return '<html>' + initialView + '</html>'; }
+  `;
+  const options = {
+    htmlAstSha256: activeFunctionDigest(uiSource, 'tracklyPluginUiHtml', 'plugin UI fixture'),
+  };
+  assert.doesNotThrow(() => assertPluginUiContractSemantics(uiSource, 'plugin UI fixture', options));
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace('text/html;profile=mcp-app', 'text/plain'),
+      'drifted plugin UI fixture',
+      options,
+    ),
+    /TRACKLY_PLUGIN_UI_MIME_TYPE.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace("visibility: ['model', 'app']", "visibility: ['model']"),
+      'drifted plugin UI output fixture',
+      options,
+    ),
+    /tracklyPluginToolUiMeta.*locked executable branch semantics/,
+  );
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace('prefersBorder: true', 'prefersBorder: false'),
+      'drifted plugin UI metadata fixture',
+      options,
+    ),
+    /TRACKLY_PLUGIN_UI_RESOURCE_META.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertPluginUiContractSemantics(
+      uiSource.replace("return '<html>' + initialView + '</html>';", "return '<body>' + initialView + '</body>';"),
+      'drifted plugin UI HTML fixture',
+      options,
+    ),
+    /tracklyPluginUiHtml.*locked active semantic AST/,
+  );
+});
+
+test('manual-submission route semantic lock rejects auth and transaction drift', () => {
+  const routeStatement = `router.post('/manual', requireAuth, requireApplyFeature, async (req, res) => {
+    const result = await reconcile(userId(req), req.body, caller(req));
+    res.json({ success: true, ...result });
+  });`;
+  assert.doesNotThrow(() => assertPluginManualSubmissionRouteSemantics(
+    routeStatement,
+    'manual route fixture',
+    routeStatement,
+  ));
+  assert.throws(
+    () => assertPluginManualSubmissionRouteSemantics(
+      routeStatement.replace(', requireAuth', ''),
+      'drifted manual route fixture',
+      routeStatement,
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertPluginManualSubmissionRouteSemantics(
+      routeStatement.replace('await reconcile(', 'await preview('),
+      'drifted manual transaction fixture',
+      routeStatement,
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertPluginManualSubmissionRouteSemantics(
+      routeStatement.replace('success: true', 'success: false'),
+      'drifted manual response fixture',
+      routeStatement,
+    ),
+    /fail-closed top-level statement/,
+  );
+});
+
+test('internal proxy secret lock rejects minting and verification derivation drift', () => {
+  const mcpSource = `
+    const isProduction = process.env.NODE_ENV === 'production';
+    const jwtSecretFromEnv = (process.env.JWT_SECRET || '').trim();
+    const sessionSecretFromEnv = (process.env.SESSION_SECRET || '').trim();
+    const BASE_SECRET = jwtSecretFromEnv || sessionSecretFromEnv || (isProduction ? '' : 'local-dev-jwt-secret');
+    if (!BASE_SECRET) { throw new Error('[MCP Tokens] Missing JWT_SECRET or SESSION_SECRET in production.'); }
+    const INTERNAL_SECRET = BASE_SECRET;
+  `;
+  const jwtSource = `
+    const isProduction = process.env.NODE_ENV === 'production';
+    const jwtSecretFromEnv = (process.env.JWT_SECRET || '').trim();
+    const sessionSecretFromEnv = (process.env.SESSION_SECRET || '').trim();
+    const JWT_SECRET = jwtSecretFromEnv || sessionSecretFromEnv || (isProduction ? '' : 'local-dev-jwt-secret');
+    if (!JWT_SECRET) { throw new Error('[JWT] Missing JWT_SECRET or SESSION_SECRET in production.'); }
+    export function verifyToken(token) { return jwt.verify(token, JWT_SECRET); }
+  `;
+  const options = {
+    verifyTokenAstSha256: activeFunctionDigest(jwtSource, 'verifyToken', 'JWT fixture'),
+  };
+  assert.doesNotThrow(() => assertInternalSecretCompatibility(
+    mcpSource,
+    jwtSource,
+    'MCP token fixture',
+    'JWT fixture',
+    options,
+  ));
+  assert.throws(
+    () => assertInternalSecretCompatibility(
+      mcpSource.replace('const INTERNAL_SECRET = BASE_SECRET;', "const INTERNAL_SECRET = BASE_SECRET + '-internal';"),
+      jwtSource,
+      'drifted MCP token fixture',
+      'JWT fixture',
+      options,
+    ),
+    /INTERNAL_SECRET.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertInternalSecretCompatibility(
+      mcpSource,
+      jwtSource.replace('jwtSecretFromEnv || sessionSecretFromEnv', 'sessionSecretFromEnv || jwtSecretFromEnv'),
+      'MCP token fixture',
+      'drifted JWT fixture',
+      options,
+    ),
+    /JWT_SECRET.*locked executable definition/,
+  );
+  assert.throws(
+    () => assertInternalSecretCompatibility(
+      mcpSource,
+      jwtSource.replace('jwt.verify(token, JWT_SECRET)', 'jwt.verify(token, REFRESH_SECRET)'),
+      'MCP token fixture',
+      'drifted JWT verification fixture',
+      options,
+    ),
+    /verifyToken.*locked active semantic AST/,
+  );
 });
 
 test('named Apply contract aliases resolve to executed schema definitions', () => {
