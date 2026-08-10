@@ -357,7 +357,7 @@ test('hosted plugin route rejects earlier Express handlers covering its canonica
         '/api/plugin/trackly/mcp',
         'shadowed plugin route fixture',
       ),
-      /must not have an earlier Express route or path-scoped middleware covering \/api\/plugin\/trackly\/mcp/,
+      /must not have an earlier Express route or path-scoped middleware covering \/api\/plugin\/trackly\/mcp|must preserve straight-line setup/,
     );
   }
 });
@@ -586,11 +586,27 @@ test('manual-submission route semantic lock rejects auth and transaction drift',
 });
 
 test('review-ready persistence lock rejects route and atomic transaction drift', () => {
+  const routeImport = "import { certifyPluginReviewReady } from '../services/application-profile/service';";
   const routeStatement = `router.post('/review', requireAuth, requireApplyFeature, requireAccessibleExecutionFeature, async (req, res) => {
     const result = await certifyPluginReviewReady(userId(req), req.body, caller(req));
     res.json({ success: true, ...result });
   });`;
-  const serviceSource = `export async function certifyPluginReviewReady(userId, input, authContext) {
+  const routeSource = `${routeImport}\n${routeStatement}`;
+  const serviceSource = `export async function withAuthorizedApplyMutation(userId, authContext, operation) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await operation(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  export async function certifyPluginReviewReady(userId, input, authContext) {
     return withAuthorizedApplyMutation(userId, authContext, async (client) => {
       await recordApplyBatchCheckpoints(client, input);
       await certifyApplyBatchTruth(client, input);
@@ -603,9 +619,10 @@ test('review-ready persistence lock rejects route and atomic transaction drift',
       'certifyPluginReviewReady',
       'review-ready service fixture',
     ),
+    serviceSourceSha256: sha256ExactBytes(serviceSource),
   };
   assert.doesNotThrow(() => assertPluginReviewReadyPersistenceSemantics(
-    routeStatement,
+    routeSource,
     serviceSource,
     'review-ready route fixture',
     'review-ready service fixture',
@@ -614,7 +631,7 @@ test('review-ready persistence lock rejects route and atomic transaction drift',
   ));
   assert.throws(
     () => assertPluginReviewReadyPersistenceSemantics(
-      routeStatement.replace(', requireAccessibleExecutionFeature', ''),
+      routeSource.replace(', requireAccessibleExecutionFeature', ''),
       serviceSource,
       'drifted review-ready route fixture',
       'review-ready service fixture',
@@ -625,7 +642,7 @@ test('review-ready persistence lock rejects route and atomic transaction drift',
   );
   assert.throws(
     () => assertPluginReviewReadyPersistenceSemantics(
-      routeStatement,
+      routeSource,
       serviceSource.replace('await certifyApplyBatchTruth(client, input);', ''),
       'review-ready route fixture',
       'drifted review-ready service fixture',
@@ -633,6 +650,31 @@ test('review-ready persistence lock rejects route and atomic transaction drift',
       options,
     ),
     /certifyPluginReviewReady.*locked active semantic AST/,
+  );
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeSource.replace(
+        "from '../services/application-profile/service'",
+        "from '../services/application-profile/decoy-service'",
+      ),
+      serviceSource,
+      'redirected review-ready import fixture',
+      'review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /must import certifyPluginReviewReady.*application-profile\/service/,
+  );
+  assert.throws(
+    () => assertPluginReviewReadyPersistenceSemantics(
+      routeSource,
+      serviceSource.replace("await client.query('BEGIN');", "await client.query('SELECT 1');"),
+      'review-ready route fixture',
+      'non-atomic review-ready service fixture',
+      routeStatement,
+      options,
+    ),
+    /must preserve its exact reviewed source bytes/,
   );
 });
 

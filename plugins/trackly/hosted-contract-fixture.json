@@ -93,6 +93,7 @@
     "maintenanceMode": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
     "databaseBinding": "c7d5fd8ea89d51557d919a6d331777542c99f75ea77f0021146ff765ec614566",
     "reviewIdentity": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
-    "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820"
+    "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
+    "applicationProfileService": "86f85809cdb6867f3e67310b6204c37e120942760565e033e07d409bcd2d0875"
   }
 }

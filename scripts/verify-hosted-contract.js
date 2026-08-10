@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '45d49334717eaa02edcabff2c7ce47b52a96e9e39d0b42f05730c6835979f122';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '89724491b9cf98e65b7c842ba3262538000c20d42e91714fd617cbee62eeb410';
 
 const parsedSourceCache = new Map();
 
@@ -428,6 +428,7 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     maintenanceMode: 'src/middleware/maintenance-mode.ts',
     databaseBinding: 'src/config/database.ts',
     reviewIdentity: 'src/services/review-identity.ts',
+    applicationProfileService: 'src/services/application-profile/service.ts',
   };
   for (const [lockName, relativePath] of Object.entries(lockedSources)) {
     const committedBytes = gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null);
@@ -1604,6 +1605,13 @@ function assertPluginRoutePrecedence(
   assert.equal(factory.body?.type, 'BlockStatement', `createApp in ${sourcePath} must use a block body`);
   const canonicalMount = canonicalPluginMount(factory, routerBinding, mountPath, sourcePath);
   const canonicalCall = canonicalMount.expression;
+  const canonicalMountIndex = factory.body.body.indexOf(canonicalMount);
+  assert.ok(
+    factory.body.body.slice(0, canonicalMountIndex).every((statement) => (
+      statement.type === 'VariableDeclaration' || statement.type === 'ExpressionStatement'
+    )),
+    `createApp in ${sourcePath} must preserve straight-line setup and must not place an unconditional return or throw before the canonical plugin mount`,
+  );
   const directCreateAppCalls = new Set(factory.body.body.flatMap((statement) => (
     statement.type === 'ExpressionStatement' && statement.expression?.type === 'CallExpression'
       ? [statement.expression]
@@ -1790,6 +1798,14 @@ function assertLivePluginRouterMount(
   options = {},
 ) {
   assertImportBinding(source, 'default', routerBinding, routerModule, sourcePath);
+  assertRateLimitBindingSemantics(source, sourcePath);
+  assertImportedFunctionCallInventory(
+    source,
+    'azureRehearsalRateLimitOptions',
+    './utils/azure-rehearsal-ip',
+    ['generalLimiter', 'authLimiter'],
+    sourcePath,
+  );
   const ast = parseFullSource(source, sourcePath);
   const exportedFactories = ast.program.body.filter((statement) => (
     statement.type === 'ExportNamedDeclaration'
@@ -1988,6 +2004,86 @@ function assertLivePluginRouterMount(
     }`,
     sourcePath,
   );
+}
+
+function assertRateLimitBindingSemantics(source, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const factory = activeNamedDefinitionAst(source, 'createApp', sourcePath);
+  const rateLimitImport = assertImportBinding(source, 'default', 'rateLimit', 'express-rate-limit', sourcePath);
+  const rateLimitCalls = [];
+  function visitRateLimitCalls(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitRateLimitCalls(child);
+      return;
+    }
+    if (node.type === 'CallExpression') {
+      const callee = unwrapTransparentExpression(node.callee);
+      if (callee?.type === 'Identifier' && callee.name === 'rateLimit') rateLimitCalls.push(callee);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitRateLimitCalls(child);
+    }
+  }
+  visitRateLimitCalls(ast);
+  assert.deepEqual(
+    collectBindingReferences(ast, 'rateLimit', () => false),
+    [rateLimitImport.local, ...rateLimitCalls],
+    `rateLimit in ${sourcePath} must come only from express-rate-limit and remain confined to its reviewed limiter initializers`,
+  );
+  for (const [name, expectedMountPaths] of [
+    ['generalLimiter', ['/api/']],
+    ['authLimiter', ['/auth/', '/api/admin/login']],
+  ]) {
+    const definitions = [];
+    function visitDefinitions(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) visitDefinitions(child);
+        return;
+      }
+      if (node.type === 'VariableDeclaration') {
+        for (const declarator of node.declarations) {
+          if (declarator.id?.type === 'Identifier' && declarator.id.name === name) {
+            definitions.push({ declarator, declaration: node });
+          }
+        }
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (key === 'loc' || key === 'extra') continue;
+        visitDefinitions(child);
+      }
+    }
+    visitDefinitions(ast);
+    assert.equal(definitions.length, 1, `${name} in ${sourcePath} must have exactly one active declaration`);
+    const { declarator, declaration } = definitions[0];
+    assert.equal(declaration.kind, 'const', `${name} in ${sourcePath} must remain immutable`);
+    const appUseMounts = factory.body.body.flatMap((statement) => {
+      const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+      if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== 'app.use') return [];
+      return call.arguments.flatMap((argument, index) => (
+        argument?.type === 'Identifier' && argument.name === name
+          ? [{
+            path: index === 1 && call.arguments[0]?.type === 'StringLiteral'
+              ? call.arguments[0].value
+              : null,
+            reference: argument,
+          }]
+          : []
+      ));
+    });
+    assert.deepEqual(
+      appUseMounts.map((mount) => mount.path),
+      expectedMountPaths,
+      `${name} in ${sourcePath} must protect the exact reviewed app.use mount paths`,
+    );
+    assert.deepEqual(
+      collectBindingReferences(ast, name, () => false),
+      [declarator.id, ...appUseMounts.map((mount) => mount.reference)],
+      `${name} in ${sourcePath} must not be reassigned, mutated, aliased, escaped, or referenced outside its reviewed app.use mounts`,
+    );
+  }
 }
 
 function assertMcpScopeHelperSemantics(source, sourcePath) {
@@ -2537,8 +2633,16 @@ function assertPluginReviewReadyPersistenceSemantics(
   {
     routeAstSha256 = 'a4b0a5ba28a0c80c2ddbc438b3cde25f61a7bb092ead4efe1813384f9e7d46ec',
     certifyAstSha256 = '6c0c19a3c05794b0fa8e1ed7917fa9de4322e32ecef1006869e026394cb90ffd',
+    serviceSourceSha256 = null,
   } = {},
 ) {
+  assertImportedFunctionCallInventory(
+    routeSource,
+    'certifyPluginReviewReady',
+    '../services/application-profile/service',
+    1,
+    routeSourcePath,
+  );
   if (expectedRouteStatement !== undefined) {
     assertActiveTopLevelStatementAst(routeSource, expectedRouteStatement, routeSourcePath);
   } else {
@@ -2566,6 +2670,9 @@ function assertPluginReviewReadyPersistenceSemantics(
     certifyAstSha256,
     serviceSourcePath,
   );
+  if (serviceSourceSha256 !== null) {
+    assertExactHostedSourceSha256(serviceSource, serviceSourceSha256, serviceSourcePath);
+  }
 }
 
 function assertInternalSecretCompatibility(
@@ -2783,6 +2890,69 @@ function assertImportBinding(source, importedName, localName, moduleName, source
     `${sourcePath} must import ${importedName} as ${localName} exactly once from ${moduleName}`,
   );
   return matches[0];
+}
+
+function assertImportedFunctionCallInventory(source, name, moduleName, expectedCallSites, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const importedBinding = assertImportBinding(source, name, name, moduleName, sourcePath);
+  const calledBindings = [];
+  const callSites = [];
+  function visit(node, ancestors = []) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, ancestors);
+      return;
+    }
+    if (node.type === 'CallExpression') {
+      const callee = unwrapTransparentExpression(node.callee);
+      if (callee?.type === 'Identifier' && callee.name === name) {
+        calledBindings.push(callee);
+        if (Array.isArray(expectedCallSites)) {
+          const [spread, optionsObject, rateLimitCall, declaration] = ancestors.slice(-4).reverse();
+          const binding = spread?.type === 'SpreadElement'
+            && spread.argument === node
+            && optionsObject?.type === 'ObjectExpression'
+            && rateLimitCall?.type === 'CallExpression'
+            && rateLimitCall.arguments.includes(optionsObject)
+            && babelCalleeName(rateLimitCall.callee) === 'rateLimit'
+            && declaration?.type === 'VariableDeclarator'
+            && declaration.init === rateLimitCall
+            && declaration.id?.type === 'Identifier'
+            ? declaration.id.name
+            : null;
+          callSites.push(binding);
+        }
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visit(child, [...ancestors, node]);
+    }
+  }
+  visit(ast);
+  if (Array.isArray(expectedCallSites)) {
+    assert.deepEqual(
+      callSites,
+      expectedCallSites,
+      `${sourcePath} must spread imported ${name} into the exact reviewed rate-limit initializers`,
+    );
+  } else {
+    assert.equal(
+      calledBindings.length,
+      expectedCallSites,
+      `${sourcePath} must call imported ${name} exactly ${expectedCallSites} times`,
+    );
+  }
+  const references = collectBindingReferences(
+    ast,
+    name,
+    (_node, parent, parentKey) => parent?.type === 'ImportSpecifier' && parentKey === 'imported',
+  );
+  assert.deepEqual(
+    references,
+    [importedBinding.local, ...calledBindings],
+    `${name} in ${sourcePath} must not be shadowed, reassigned, aliased, escaped, or referenced outside its locked calls`,
+  );
 }
 
 function assertDescriptorUsesTopLevelBinding(
@@ -3978,6 +4148,7 @@ function verifyCheckedInHostedContractFixture(
     databaseBinding: lock.publicExecutableContract.databaseBindingSha256,
     reviewIdentity: lock.publicExecutableContract.reviewIdentitySha256,
     azureRateLimitOptions: lock.publicExecutableContract.azureRateLimitOptionsSha256,
+    applicationProfileService: lock.publicExecutableContract.applicationProfileServiceSha256,
   }, `${fixturePath} hosted source snapshot drifted from the packaged executable lock`);
   for (const digest of [
     lock.publicExecutableContract.pluginServerSha256,
@@ -3988,6 +4159,7 @@ function verifyCheckedInHostedContractFixture(
     lock.publicExecutableContract.databaseBindingSha256,
     lock.publicExecutableContract.reviewIdentitySha256,
     lock.publicExecutableContract.azureRateLimitOptionsSha256,
+    lock.publicExecutableContract.applicationProfileServiceSha256,
     ...Object.values(lock.publicExecutableContract.descriptorSha256),
     ...Object.values(lock.publicExecutableContract.handlerSha256),
   ]) assert.match(digest, /^[a-f0-9]{64}$/);
@@ -6568,6 +6740,8 @@ assertPluginReviewReadyPersistenceSemantics(
   hostedApplicationProfileServiceSource,
   hostedTracklyApplyPath,
   hostedApplicationProfileServicePath,
+  undefined,
+  { serviceSourceSha256: pluginLock.publicExecutableContract.applicationProfileServiceSha256 },
 );
 
 const reconcileRegistration = pluginToolRegistration('trackly_reconcile_manual_submission');

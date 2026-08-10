@@ -58,7 +58,9 @@ const {
   wrappedHandlerReturnedObjectProperties,
 } = require('../scripts/verify-hosted-contract.js');
 
-const FIXTURE_ROUTE_OPTIONS = Object.freeze({ reviewedGlobalMiddlewareCallDigests: Object.freeze([]) });
+const FIXTURE_ROUTE_OPTIONS = Object.freeze({
+  reviewedGlobalMiddlewareCallDigests: Object.freeze([]),
+});
 function assertLivePluginRouterMount(
   source,
   routerBinding,
@@ -73,7 +75,7 @@ function assertLivePluginRouterMount(
     routerModule,
     mountPath,
     sourcePath,
-    options,
+    { ...FIXTURE_ROUTE_OPTIONS, ...options },
   );
 }
 
@@ -539,11 +541,18 @@ test('scope-free plugin methods are immutable and used only by the locked member
 test('the exported plugin router must be mounted on the exact production application path', () => {
   const source = `
     import express from 'express';
+    import rateLimit from 'express-rate-limit';
     import tracklyPluginMcpRoutes from './mcp/plugin-router';
+    import { azureRehearsalRateLimitOptions } from './utils/azure-rehearsal-ip';
     const PORT = 3000;
     export function createApp() {
       const app = express();
+      const generalLimiter = rateLimit({ ...azureRehearsalRateLimitOptions() });
+      const authLimiter = rateLimit({ ...azureRehearsalRateLimitOptions() });
       app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);
+      app.use('/api/', generalLimiter);
+      app.use('/auth/', authLimiter);
+      app.use('/api/admin/login', authLimiter);
       return app;
     }
     function startServer() {
@@ -562,6 +571,88 @@ test('the exported plugin router must be mounted on the exact production applica
     '/api/plugin/trackly/mcp',
     'application mount fixture',
   ));
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace("from 'express-rate-limit'", "from './utils/decoy-rate-limit'"),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'redirected rate-limit import fixture',
+    ),
+    /must import default as rateLimit exactly once from express-rate-limit/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        'const generalLimiter = rateLimit({ ...azureRehearsalRateLimitOptions() });',
+        'let generalLimiter = rateLimit({ ...azureRehearsalRateLimitOptions() });',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'mutable general limiter fixture',
+    ),
+    /generalLimiter.*must remain immutable/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        "app.use('/api/', generalLimiter);",
+        "if (false) { app.use('/api/', generalLimiter); }",
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'unreachable general limiter mount fixture',
+    ),
+    /generalLimiter.*must protect the exact reviewed app.use mount paths/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace("app.use('/api/', generalLimiter);", "app.use('/unrelated', generalLimiter);"),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'misdirected general limiter fixture',
+    ),
+    /generalLimiter.*must protect the exact reviewed app.use mount paths/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        "app.use('/api/', generalLimiter);",
+        "generalLimiter = (_req, _res, next) => next();\n      app.use('/api/', generalLimiter);",
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'reassigned general limiter fixture',
+    ),
+    /generalLimiter.*must not be reassigned/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace("from './utils/azure-rehearsal-ip'", "from './utils/decoy-azure-ip'"),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'redirected Azure limiter import fixture',
+    ),
+    /must import azureRehearsalRateLimitOptions.*\.\/utils\/azure-rehearsal-ip/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace(
+        'const generalLimiter = rateLimit({ ...azureRehearsalRateLimitOptions() });',
+        'const generalLimiter = rateLimit({}); function decoy() { azureRehearsalRateLimitOptions(); }',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'detached Azure limiter call fixture',
+    ),
+    /must spread imported azureRehearsalRateLimitOptions into the exact reviewed rate-limit initializers/,
+  );
   assert.throws(
     () => assertLivePluginRouterMount(
       source.replace('const app = express();', 'const app = express();\n      const openApp = app;'),
@@ -618,7 +709,35 @@ test('the exported plugin router must be mounted on the exact production applica
       'unreachable reviewed middleware fixture',
       { reviewedGlobalMiddlewareCallDigests: [reviewedMiddlewareDigest] },
     ),
-    /must preserve the complete ordered reviewed global middleware inventory/,
+    /must preserve straight-line setup/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      reviewedMiddlewareSource.replace(
+        'app.use(reviewedMiddleware);',
+        'throw new Error("stop");\n      app.use(reviewedMiddleware);',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'unreachable direct reviewed middleware fixture',
+      { reviewedGlobalMiddlewareCallDigests: [reviewedMiddlewareDigest] },
+    ),
+    /must not place an unconditional return or throw before the canonical plugin mount/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      reviewedMiddlewareSource.replace(
+        'app.use(reviewedMiddleware);',
+        'if (true) { throw new Error("stop"); }\n      app.use(reviewedMiddleware);',
+      ),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'nested unreachable reviewed middleware fixture',
+      { reviewedGlobalMiddlewareCallDigests: [reviewedMiddlewareDigest] },
+    ),
+    /must preserve straight-line setup/,
   );
   assert.throws(
     () => assertLivePluginRouterMount(
