@@ -305,13 +305,29 @@ test('hosted plugin route rejects earlier Express handlers covering its canonica
     ),
     /LEGAL_REDIRECT_PATHS in covering legal redirect fixture must remain disjoint/,
   );
+  assert.throws(
+    () => assertPluginRoutePrecedence(
+      legalRedirectSource.replace(
+        "const LEGAL_REDIRECT_PATHS = ['/privacy', '/terms'];",
+        "const LEGAL_REDIRECT_PATHS = ['/privacy', '/terms']; LEGAL_REDIRECT_PATHS.push('/safe');",
+      ),
+      'tracklyPluginMcpRoutes',
+      '/api/plugin/trackly/mcp',
+      'mutated legal redirect fixture',
+    ),
+    /LEGAL_REDIRECT_PATHS in mutated legal redirect fixture must not be aliased, escaped, mutated, or used outside its locked route/,
+  );
   for (const earlierHandler of [
     "app.use('/api', earlierRoutes);",
     "app.use('/API', earlierRoutes);",
     "app.use('/api/plugin', earlierRoutes);",
+    "app.use('/api/{*splat}', earlierRoutes);",
     "app.all('/api/plugin/trackly/mcp', earlierHandler);",
+    "app['use']('/api', earlierRoutes);",
+    "app.route('/api/plugin/trackly/mcp').post(earlierHandler);",
     "app.use(/\\/api\\/.*/, earlierRoutes);",
     'app.use(dynamicPath, earlierRoutes);',
+    'app.use(getPath(), earlierRoutes);',
     "if (enabled) { app.use('/api', earlierRoutes); }",
   ]) {
     assert.throws(
@@ -354,6 +370,19 @@ test('hosted listener locks active PORT binding and exact listen callback semant
     ),
     /app\.listen in drifted listener fixture must preserve its locked active semantic AST/,
   );
+  for (const extraListener of [
+    "if (enabled) app.listen(PORT, fallback);",
+    "app['listen'](PORT, fallback);",
+  ]) {
+    assert.throws(
+      () => assertServerListenSemantics(
+        source.replace('const app = createApp();', `const app = createApp(); ${extraListener}`),
+        'extra listener fixture',
+        options,
+      ),
+      /must have exactly one reachable app\.listen call and no nested or computed alternatives/,
+    );
+  }
 });
 
 test('hosted Git provenance reads outputs larger than the synchronous default buffer', () => {

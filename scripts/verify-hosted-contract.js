@@ -1454,18 +1454,20 @@ function staticExpressPathCovers(candidatePath, mountPath, method) {
   const normalizedMount = mountPath.length > 1
     ? mountPath.replace(/\/+$/, '').toLowerCase()
     : mountPath.toLowerCase();
+  const wildcardIndex = normalizedCandidate.search(/[*:({]/);
+  if (wildcardIndex !== -1) {
+    const staticPrefix = normalizedCandidate.slice(0, wildcardIndex).replace(/\/+$/, '');
+    return staticPrefix === ''
+      || normalizedMount === staticPrefix
+      || normalizedMount.startsWith(`${staticPrefix}/`);
+  }
   if (method === 'use') {
     return normalizedCandidate === '/'
       || normalizedMount === normalizedCandidate
       || normalizedMount.startsWith(`${normalizedCandidate}/`);
   }
   if (normalizedCandidate === normalizedMount || normalizedCandidate === '*') return true;
-  const wildcardIndex = normalizedCandidate.search(/[*:(]/);
-  if (wildcardIndex === -1) return false;
-  const staticPrefix = normalizedCandidate.slice(0, wildcardIndex).replace(/\/+$/, '');
-  return staticPrefix === ''
-    || normalizedMount === staticPrefix
-    || normalizedMount.startsWith(`${staticPrefix}/`);
+  return false;
 }
 
 function canonicalPluginMount(factory, routerBinding, mountPath, sourcePath) {
@@ -1494,58 +1496,95 @@ function assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePat
   const canonicalCall = canonicalMount.expression;
   const routeMethods = new Set(['use', 'all', 'get', 'post', 'put', 'patch', 'delete', 'options', 'head']);
   const earlierCoveringHandlers = [];
+  function staticMemberName(member) {
+    if (member?.type !== 'MemberExpression') return null;
+    if (!member.computed && member.property?.type === 'Identifier') return member.property.name;
+    if (member.computed && member.property?.type === 'StringLiteral') return member.property.value;
+    return null;
+  }
+  function chainedRoutePath(receiver) {
+    const candidate = unwrapTransparentExpression(receiver);
+    if (candidate?.type !== 'CallExpression') return null;
+    const callee = unwrapTransparentExpression(candidate.callee);
+    if (callee?.type !== 'MemberExpression') return null;
+    const method = staticMemberName(callee);
+    const object = unwrapTransparentExpression(callee.object);
+    if (object?.type === 'Identifier' && object.name === 'app' && method === 'route') {
+      return candidate.arguments.length === 1 ? candidate.arguments[0] : null;
+    }
+    return chainedRoutePath(object);
+  }
+  let legalRedirectPathsVerified = false;
+  function verifyLegalRedirectPaths(pathArgument, method) {
+    if (legalRedirectPathsVerified) return;
+    const declarations = factory.body.body.filter((statement) => (
+      statement.type === 'VariableDeclaration'
+      && statement.declarations.length === 1
+      && statement.declarations[0].id?.type === 'Identifier'
+      && statement.declarations[0].id.name === 'LEGAL_REDIRECT_PATHS'
+    ));
+    assert.equal(
+      declarations.length,
+      1,
+      `createApp in ${sourcePath} must declare LEGAL_REDIRECT_PATHS exactly once`,
+    );
+    assert.equal(declarations[0].kind, 'const', `LEGAL_REDIRECT_PATHS in ${sourcePath} must be immutable`);
+    const declaration = declarations[0].declarations[0];
+    const initializer = declaration.init;
+    assert.equal(initializer?.type, 'ArrayExpression', `LEGAL_REDIRECT_PATHS in ${sourcePath} must be a static array`);
+    assert.ok(initializer.elements.length > 0, `LEGAL_REDIRECT_PATHS in ${sourcePath} must not be empty`);
+    for (const element of initializer.elements) {
+      assert.equal(element?.type, 'StringLiteral', `LEGAL_REDIRECT_PATHS in ${sourcePath} must contain only static paths`);
+      assert.equal(
+        staticExpressPathCovers(element.value, mountPath, method),
+        false,
+        `LEGAL_REDIRECT_PATHS in ${sourcePath} must remain disjoint from ${mountPath}`,
+      );
+    }
+    const references = collectBindingReferences(factory, 'LEGAL_REDIRECT_PATHS', () => false);
+    assert.deepEqual(
+      references,
+      [declaration.id, pathArgument],
+      `LEGAL_REDIRECT_PATHS in ${sourcePath} must not be aliased, escaped, mutated, or used outside its locked route`,
+    );
+    legalRedirectPathsVerified = true;
+  }
   function visitEarlierRoutes(node) {
     if (node === null || typeof node !== 'object') return;
     if (Array.isArray(node)) {
       for (const child of node) visitEarlierRoutes(child);
       return;
     }
-    if (node.type === 'CallExpression'
-      && node.start < canonicalCall.start
-      && node.callee?.type === 'MemberExpression'
-      && !node.callee.computed
-      && node.callee.object?.type === 'Identifier'
-      && node.callee.object.name === 'app'
-      && node.callee.property?.type === 'Identifier'
-      && routeMethods.has(node.callee.property.name)) {
-      const method = node.callee.property.name;
-      const pathArgument = node.arguments[0];
-      const knownDisjointLegalRedirectPaths = pathArgument?.type === 'Identifier'
-        && pathArgument.name === 'LEGAL_REDIRECT_PATHS';
-      if (knownDisjointLegalRedirectPaths) {
-        const declarations = factory.body.body.filter((statement) => (
-          statement.type === 'VariableDeclaration'
-          && statement.declarations.length === 1
-          && statement.declarations[0].id?.type === 'Identifier'
-          && statement.declarations[0].id.name === 'LEGAL_REDIRECT_PATHS'
-        ));
-        assert.equal(
-          declarations.length,
-          1,
-          `createApp in ${sourcePath} must declare LEGAL_REDIRECT_PATHS exactly once`,
-        );
-        assert.equal(declarations[0].kind, 'const', `LEGAL_REDIRECT_PATHS in ${sourcePath} must be immutable`);
-        const initializer = declarations[0].declarations[0].init;
-        assert.equal(initializer?.type, 'ArrayExpression', `LEGAL_REDIRECT_PATHS in ${sourcePath} must be a static array`);
-        assert.ok(initializer.elements.length > 0, `LEGAL_REDIRECT_PATHS in ${sourcePath} must not be empty`);
-        for (const element of initializer.elements) {
-          assert.equal(element?.type, 'StringLiteral', `LEGAL_REDIRECT_PATHS in ${sourcePath} must contain only static paths`);
-          assert.equal(
-            staticExpressPathCovers(element.value, mountPath, method),
-            false,
-            `LEGAL_REDIRECT_PATHS in ${sourcePath} must remain disjoint from ${mountPath}`,
-          );
+    if (node.type === 'CallExpression' && node.start < canonicalCall.start) {
+      const callee = unwrapTransparentExpression(node.callee);
+      const receiver = callee?.type === 'MemberExpression'
+        ? unwrapTransparentExpression(callee.object)
+        : null;
+      const directAppCall = receiver?.type === 'Identifier' && receiver.name === 'app';
+      const routePath = directAppCall ? null : chainedRoutePath(receiver);
+      const staticMethod = staticMemberName(callee);
+      const possibleRouteCall = callee?.type === 'MemberExpression'
+        && (directAppCall || routePath !== null)
+        && (staticMethod === null || routeMethods.has(staticMethod));
+      if (possibleRouteCall) {
+        const method = staticMethod && routeMethods.has(staticMethod) ? staticMethod : 'use';
+        const pathArgument = routePath || node.arguments[0];
+        const knownDisjointLegalRedirectPaths = pathArgument?.type === 'Identifier'
+          && pathArgument.name === 'LEGAL_REDIRECT_PATHS';
+        if (knownDisjointLegalRedirectPaths) {
+          verifyLegalRedirectPaths(pathArgument, method);
         }
+        const pathlessUse = method === 'use'
+          && node.arguments.length === 1
+          && (pathArgument?.type === 'CallExpression'
+            || pathArgument?.type === 'FunctionExpression'
+            || pathArgument?.type === 'ArrowFunctionExpression'
+            || pathArgument?.type === 'Identifier');
+        const covers = pathArgument?.type === 'StringLiteral'
+          ? staticExpressPathCovers(pathArgument.value, mountPath, method)
+          : !pathlessUse && !knownDisjointLegalRedirectPaths;
+        if (covers) earlierCoveringHandlers.push(node);
       }
-      const pathlessUse = method === 'use'
-        && (node.arguments.length === 1
-          || pathArgument?.type === 'CallExpression'
-          || pathArgument?.type === 'FunctionExpression'
-          || pathArgument?.type === 'ArrowFunctionExpression');
-      const covers = pathArgument?.type === 'StringLiteral'
-        ? staticExpressPathCovers(pathArgument.value, mountPath, method)
-        : !pathlessUse && !knownDisjointLegalRedirectPaths;
-      if (covers) earlierCoveringHandlers.push(node);
     }
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'extra') continue;
@@ -1568,13 +1607,42 @@ function assertServerListenSemantics(
 ) {
   assertActiveVariableInitializerAst(source, 'PORT', 'process.env.PORT || 3000', sourcePath);
   const startServer = activeNamedDefinitionAst(source, 'startServer', sourcePath);
-  const liveListens = startServer.body.body.filter((statement) => (
+  const directListens = startServer.body.body.filter((statement) => (
     statement.type === 'ExpressionStatement'
     && statement.expression?.type === 'CallExpression'
     && babelCalleeName(statement.expression.callee) === 'app.listen'
   ));
-  assert.equal(liveListens.length, 1, `startServer in ${sourcePath} must have exactly one app.listen statement`);
-  const listenCall = liveListens[0].expression;
+  assert.equal(directListens.length, 1, `startServer in ${sourcePath} must have exactly one direct app.listen statement`);
+  const allListens = [];
+  function visitListens(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitListens(child);
+      return;
+    }
+    if (node.type === 'CallExpression' && node.callee?.type === 'MemberExpression') {
+      const receiver = unwrapTransparentExpression(node.callee.object);
+      const method = !node.callee.computed && node.callee.property?.type === 'Identifier'
+        ? node.callee.property.name
+        : node.callee.computed && node.callee.property?.type === 'StringLiteral'
+          ? node.callee.property.value
+          : null;
+      if (receiver?.type === 'Identifier' && receiver.name === 'app' && method === 'listen') {
+        allListens.push(node);
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitListens(child);
+    }
+  }
+  visitListens(startServer.body);
+  const listenCall = directListens[0].expression;
+  assert.deepEqual(
+    allListens,
+    [listenCall],
+    `startServer in ${sourcePath} must have exactly one reachable app.listen call and no nested or computed alternatives`,
+  );
   assert.equal(listenCall.arguments.length, 2, `app.listen in ${sourcePath} must receive exactly PORT and its callback`);
   assert.equal(
     listenCall.arguments[0]?.type === 'Identifier' ? listenCall.arguments[0].name : null,
@@ -1589,11 +1657,11 @@ function assertServerListenSemantics(
   assert.equal(listenCall.arguments[1].params.length, 0, `app.listen callback in ${sourcePath} must not accept parameters`);
   assert.equal(listenCall.arguments[1].body?.type, 'BlockStatement', `app.listen callback in ${sourcePath} must use a block body`);
   assert.equal(
-    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(liveListens[0]))),
+    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(directListens[0]))),
     listenAstSha256,
     `app.listen in ${sourcePath} must preserve its locked active semantic AST`,
   );
-  return liveListens[0];
+  return directListens[0];
 }
 
 function assertLivePluginRouterMount(
