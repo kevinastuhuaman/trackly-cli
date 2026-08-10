@@ -3261,6 +3261,7 @@ function validateBrandAsset(manifest, provenance, packagedBytes) {
     approvedPackagedSha256: '1bd52951de41a49bb87813207884797619390a82c0992ad5a1ea2d447daee21c',
     scope: 'OpenAI listing logo only; does not authorize OpenAI Submit or Publish',
   });
+  assert.equal(provenance.visualApproval.approvedPackagedSha256, provenance.packagedSha256);
   const svg = packagedBytes.toString('utf8');
   assert.match(svg, /<rect[^>]+fill="#000"/);
   assert.match(svg, /<path[^>]+fill="#fff"/);
