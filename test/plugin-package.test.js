@@ -24,7 +24,7 @@ const {
   assertExportedFactoryUsedByPluginRouter,
   assertImmutablePluginScopeFreeMethods,
   assertImmutablePluginToolScopesSemantics,
-  assertLivePluginRouterMount,
+  assertLivePluginRouterMount: assertLivePluginRouterMountProduction,
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
   assertHostedCommitTimestamps,
@@ -57,6 +57,25 @@ const {
   wrappedHandlerReturnProperties,
   wrappedHandlerReturnedObjectProperties,
 } = require('../scripts/verify-hosted-contract.js');
+
+const FIXTURE_ROUTE_OPTIONS = Object.freeze({ reviewedGlobalMiddlewareCallDigests: Object.freeze([]) });
+function assertLivePluginRouterMount(
+  source,
+  routerBinding,
+  routerModule,
+  mountPath,
+  sourcePath,
+  options = FIXTURE_ROUTE_OPTIONS,
+) {
+  return assertLivePluginRouterMountProduction(
+    source,
+    routerBinding,
+    routerModule,
+    mountPath,
+    sourcePath,
+    options,
+  );
+}
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
@@ -543,6 +562,27 @@ test('the exported plugin router must be mounted on the exact production applica
     '/api/plugin/trackly/mcp',
     'application mount fixture',
   ));
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace('const app = express();', 'const app = express();\n      const openApp = app;'),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'aliased application fixture',
+    ),
+    /must not alias, escape, or otherwise reference the canonical Express application outside direct calls and its final return/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source,
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'missing reviewed middleware inventory fixture',
+      { reviewedGlobalMiddlewareCallDigests: ['0'.repeat(64)] },
+    ),
+    /must preserve the complete ordered reviewed global middleware inventory/,
+  );
   assert.throws(
     () => assertLivePluginRouterMount(
       source.replace(
@@ -1394,7 +1434,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
   `;
   const routerSource = routerFixture(`
     const server = createTracklyPluginMcpServer(authToken);
-    const transport = new StreamableHTTPServerTransport({});
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -1450,6 +1490,17 @@ test('plugin registration proof binds the exported factory to the live POST rout
     ),
     /must import StreamableHTTPServerTransport as StreamableHTTPServerTransport exactly once from @modelcontextprotocol\/sdk\/server\/streamableHttp\.js/,
   );
+  assert.throws(
+    () => assertExportedFactoryUsedByPluginRouter(
+      routerSource.replace(
+        'new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })',
+        "new StreamableHTTPServerTransport({ sessionIdGenerator: () => 'shared' })",
+      ),
+      'createTracklyPluginMcpServer',
+      'stateful transport fixture',
+    ),
+    /must preserve the canonical stateless StreamableHTTPServerTransport construction/,
+  );
   for (const competingRoute of [
     "router.all('/', (_req, res) => res.end());",
     "router.use('/', (_req, res) => res.end());",
@@ -1492,7 +1543,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
     () => assertExportedFactoryUsedByPluginRouter(
       routerFixture(`
         const server = createTracklyPluginMcpServer(authToken);
-        const transport = new StreamableHTTPServerTransport({});
+        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
         try {
           await server.connect(transport);
           await transport.handleRequest(req, res, req.body);
@@ -1516,7 +1567,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
       const server = createTracklyPluginMcpServer(authToken);
-      const transport = new StreamableHTTPServerTransport({});
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       try {
         await decoyServer.connect(transport);
       } finally {
@@ -1528,7 +1579,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
       const server = createTracklyPluginMcpServer(authToken);
-      const transport = new StreamableHTTPServerTransport({});
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       try {
         await server.connect(transport);
         await decoyTransport.handleRequest(req, res, req.body);
@@ -1562,7 +1613,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
       const server = createTracklyPluginMcpServer(authToken);
-      const transport = new StreamableHTTPServerTransport({});
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     `, '(req as Request & { auth: HostedOAuthAuthInfo }).auth', 'req.body.authToken'),
     'createTracklyPluginMcpServer', 'shadow token fixture'),
     /must mint authToken only from authenticated authInfo/,
@@ -1570,7 +1621,7 @@ test('plugin registration proof binds the exported factory to the live POST rout
   assert.throws(
     () => assertExportedFactoryUsedByPluginRouter(routerFixture(`
       const server = createTracklyPluginMcpServer(authToken);
-      const transport = new StreamableHTTPServerTransport({});
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     `, 'req.body.auth'), 'createTracklyPluginMcpServer', 'raw auth context fixture'),
     /must derive authInfo from the authenticated request context/,
   );
@@ -1593,6 +1644,20 @@ test('plugin registration proof binds the exported factory to the live POST rout
     ),
     /validateOrigin.*must preserve its locked executable branch semantics/,
   );
+  for (const [label, mutation] of [
+    ['mutated', "allowedOrigins.add('https://attacker.example');"],
+    ['aliased', 'const escapedOrigins = allowedOrigins;'],
+    ['reassigned', 'allowedOrigins = new Set();'],
+  ]) {
+    assert.throws(
+      () => assertExportedFactoryUsedByPluginRouter(
+        routerSource.replace('function validateOrigin', `${mutation}\n    function validateOrigin`),
+        'createTracklyPluginMcpServer',
+        `${label} allowedOrigins fixture`,
+      ),
+      /allowedOrigins.*must (?:not be reassigned, mutated, aliased, escaped, or referenced outside its locked origin check|never be assigned or updated)/,
+    );
+  }
 });
 
 test('descriptor extraction binds active annotation and input-schema expressions instead of comments', () => {
@@ -3176,6 +3241,7 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.match(lock.publicExecutableContract.backendUiRedirectSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.maintenanceModeSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.databaseBindingSha256, /^[a-f0-9]{64}$/);
+  assert.match(lock.publicExecutableContract.reviewIdentitySha256, /^[a-f0-9]{64}$/);
   assert.ok(Object.values(lock.publicExecutableContract.schemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.transitiveSchemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.namedApplySchemaSha256).flatMap(Object.values).every((digest) => /^[a-f0-9]{64}$/.test(digest)));

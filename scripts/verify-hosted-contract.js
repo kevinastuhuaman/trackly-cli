@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'e51f47b791ae111291c44182c89b8d22768aa61ed4f445044a2945ba17feaac9';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '62a0725e8212fb12bf973e8fa8d3801ea8bc4f88f6c8d7bfca47b37e75c8ac9b';
 
 const parsedSourceCache = new Map();
 
@@ -340,6 +340,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/middleware/channel-attribution.ts',
   'src/middleware/maintenance-mode.ts',
   'src/services/job-brief.ts',
+  'src/services/review-identity.ts',
   'src/services/trackly-access.ts',
   'src/services/application-profile/apply-execution-contract.ts',
   'src/services/application-profile/catalog.ts',
@@ -424,6 +425,7 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     backendUiRedirect: 'src/utils/trackly-web-origin.ts',
     maintenanceMode: 'src/middleware/maintenance-mode.ts',
     databaseBinding: 'src/config/database.ts',
+    reviewIdentity: 'src/services/review-identity.ts',
   };
   for (const [lockName, relativePath] of Object.entries(lockedSources)) {
     const committedBytes = gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null);
@@ -1212,6 +1214,27 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     }`,
     sourcePath,
   );
+  const allowedOriginsDeclaration = activeVariableDeclarator(
+    source,
+    'allowedOrigins',
+    sourcePath,
+  ).declarator;
+  const validateOriginDefinition = activeNamedDefinitionAst(source, 'validateOrigin', sourcePath);
+  const lockedAllowedOriginReferences = collectBindingReferences(
+    validateOriginDefinition,
+    'allowedOrigins',
+    () => false,
+  );
+  assert.equal(
+    lockedAllowedOriginReferences.length,
+    1,
+    `validateOrigin in ${sourcePath} must perform exactly one locked allowedOrigins membership check`,
+  );
+  assert.deepEqual(
+    collectBindingReferences(ast, 'allowedOrigins', () => false),
+    [allowedOriginsDeclaration.id, ...lockedAllowedOriginReferences],
+    `allowedOrigins in ${sourcePath} must not be reassigned, mutated, aliased, escaped, or referenced outside its locked origin check`,
+  );
   assert.deepEqual(
     canonicalSchemaAst(activeVariableDeclarator(source, 'bearerAuth', sourcePath).declarator.init),
     canonicalSchemaAst(babelParser.parseExpression(
@@ -1348,6 +1371,13 @@ function assertExportedFactoryUsedByPluginRouter(source, expectedFactory, source
     transportDeclarations.length,
     1,
     `POST / handler in ${sourcePath} must directly create exactly one StreamableHTTPServerTransport`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(transportDeclarations[0].init),
+    canonicalSchemaAst(babelParser.parseExpression(
+      'new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })',
+    )),
+    `POST / handler in ${sourcePath} must preserve the canonical stateless StreamableHTTPServerTransport construction`,
   );
   const tryStatements = handler.body.body.filter((statement) => statement.type === 'TryStatement');
   assert.equal(tryStatements.length, 1, `POST / handler in ${sourcePath} must execute exactly one live transport try block`);
@@ -1508,37 +1538,50 @@ function canonicalPluginMount(factory, routerBinding, mountPath, sourcePath) {
   return mounts[0];
 }
 
-function assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePath, resolvedFactory = null) {
+const REVIEWED_GLOBAL_MIDDLEWARE_CALL_DIGESTS = Object.freeze([
+  'c9c8443c9a480263e54218e603a7ed927d1e4e411c7a4542e80206cb5b3ddecd',
+  '81d41aba94334a95d3a6002fd6ced8069b9739cd52c6679c6293e01c3f547f75',
+  '0c55d2f0a6f768bafaa9a8e8a8d5d52280734c68e9902a93e63d57441599b967',
+  '12def47c0dc1628a891b9045ed9c275af25dd73660929d528943f95a98c34855',
+  'bc0d7d12f97ab6e9e79b00fa3701899806387b16353d9575628545a06644b2e9',
+  'd63cf7bbc1fae45f475807325f4178283bfea854bf4aeecaf7754f66e509e0a5',
+  'd79c16521f24347d7114358baafc46d77bbe47fe2034506bf941521e9e66737f',
+  '971bb5b2a58a45df2caf26342572fcc3221e86544e0335be81a86cb22a30e284',
+]);
+const EXPRESS_ROUTE_CALL_METHODS = new Set([
+  'use', 'all',
+  'acl', 'bind', 'checkout', 'connect', 'copy', 'delete', 'get', 'head', 'link', 'lock',
+  'm-search', 'merge', 'mkactivity', 'mkcalendar', 'mkcol', 'move', 'notify', 'options',
+  'patch', 'post', 'propfind', 'proppatch', 'purge', 'put', 'query', 'rebind', 'report',
+  'search', 'source', 'subscribe', 'trace', 'unbind', 'unlink', 'unlock', 'unsubscribe',
+]);
+const EXPRESS_APPLICATION_CALL_METHODS = new Set([...EXPRESS_ROUTE_CALL_METHODS, 'set']);
+
+function staticMemberName(member) {
+  if (member?.type !== 'MemberExpression') return null;
+  if (!member.computed && member.property?.type === 'Identifier') return member.property.name;
+  if (member.computed && member.property?.type === 'StringLiteral') return member.property.value;
+  return null;
+}
+
+function assertPluginRoutePrecedence(
+  source,
+  routerBinding,
+  mountPath,
+  sourcePath,
+  {
+    resolvedFactory = null,
+    reviewedGlobalMiddlewareCallDigests = REVIEWED_GLOBAL_MIDDLEWARE_CALL_DIGESTS,
+  } = {},
+) {
   const factory = resolvedFactory || activeNamedDefinitionAst(source, 'createApp', sourcePath);
   assert.equal(factory.body?.type, 'BlockStatement', `createApp in ${sourcePath} must use a block body`);
   const canonicalMount = canonicalPluginMount(factory, routerBinding, mountPath, sourcePath);
   const canonicalCall = canonicalMount.expression;
-  const routeMethods = new Set([
-    'use', 'all',
-    'acl', 'bind', 'checkout', 'connect', 'copy', 'delete', 'get', 'head', 'link', 'lock',
-    'm-search', 'merge', 'mkactivity', 'mkcalendar', 'mkcol', 'move', 'notify', 'options',
-    'patch', 'post', 'propfind', 'proppatch', 'purge', 'put', 'query', 'rebind', 'report',
-    'search', 'source', 'subscribe', 'trace', 'unbind', 'unlink', 'unlock', 'unsubscribe',
-  ]);
-  const reviewedGlobalMiddlewareCallDigests = [
-    'c9c8443c9a480263e54218e603a7ed927d1e4e411c7a4542e80206cb5b3ddecd',
-    '81d41aba94334a95d3a6002fd6ced8069b9739cd52c6679c6293e01c3f547f75',
-    '0c55d2f0a6f768bafaa9a8e8a8d5d52280734c68e9902a93e63d57441599b967',
-    '12def47c0dc1628a891b9045ed9c275af25dd73660929d528943f95a98c34855',
-    'bc0d7d12f97ab6e9e79b00fa3701899806387b16353d9575628545a06644b2e9',
-    'd63cf7bbc1fae45f475807325f4178283bfea854bf4aeecaf7754f66e509e0a5',
-    'd79c16521f24347d7114358baafc46d77bbe47fe2034506bf941521e9e66737f',
-    '971bb5b2a58a45df2caf26342572fcc3221e86544e0335be81a86cb22a30e284',
-  ];
+  const routeMethods = EXPRESS_ROUTE_CALL_METHODS;
   const reviewedGlobalMiddlewareCallDigestSet = new Set(reviewedGlobalMiddlewareCallDigests);
   const encounteredReviewedGlobalMiddlewareDigests = [];
   const earlierCoveringHandlers = [];
-  function staticMemberName(member) {
-    if (member?.type !== 'MemberExpression') return null;
-    if (!member.computed && member.property?.type === 'Identifier') return member.property.name;
-    if (member.computed && member.property?.type === 'StringLiteral') return member.property.value;
-    return null;
-  }
   function chainedRoutePath(receiver) {
     const candidate = unwrapTransparentExpression(receiver);
     if (candidate?.type !== 'CallExpression') return null;
@@ -1629,13 +1672,11 @@ function assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePat
     }
   }
   visitEarlierRoutes(factory.body);
-  if (encounteredReviewedGlobalMiddlewareDigests.length > 0) {
-    assert.deepEqual(
-      encounteredReviewedGlobalMiddlewareDigests,
-      reviewedGlobalMiddlewareCallDigests,
-      `createApp in ${sourcePath} must preserve the complete ordered reviewed global middleware inventory before ${mountPath}`,
-    );
-  }
+  assert.deepEqual(
+    encounteredReviewedGlobalMiddlewareDigests,
+    reviewedGlobalMiddlewareCallDigests,
+    `createApp in ${sourcePath} must preserve the complete ordered reviewed global middleware inventory before ${mountPath}`,
+  );
   assert.equal(
     earlierCoveringHandlers.length,
     0,
@@ -1714,6 +1755,7 @@ function assertLivePluginRouterMount(
   routerModule,
   mountPath,
   sourcePath,
+  options = {},
 ) {
   assertImportBinding(source, 'default', routerBinding, routerModule, sourcePath);
   const ast = parseFullSource(source, sourcePath);
@@ -1795,7 +1837,10 @@ function assertLivePluginRouterMount(
   }
   visitRouterReferences(ast);
   const mounts = [canonicalPluginMount(factory, routerBinding, mountPath, sourcePath)];
-  assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePath, factory);
+  assertPluginRoutePrecedence(source, routerBinding, mountPath, sourcePath, {
+    ...options,
+    resolvedFactory: factory,
+  });
   assert.deepEqual(
     routerReferences,
     [routerImport[0].local, mounts[0].expression.arguments[1]],
@@ -1812,6 +1857,45 @@ function assertLivePluginRouterMount(
     directReturns[0].argument?.type === 'Identifier' ? directReturns[0].argument.name : null,
     'app',
     `createApp in ${sourcePath} must return the exact application receiving ${mountPath}`,
+  );
+  const permittedAppReferences = new Set([appDeclarations[0].id, directReturns[0].argument]);
+  const unverifiedAppReferences = [];
+  function visitAppReferences(node, parent = null, parentKey = null, grandparent = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visitAppReferences(child, parent, parentKey, grandparent);
+      return;
+    }
+    if (node.type === 'Identifier' && node.name === 'app') {
+      const isStaticMemberName = parent?.type === 'MemberExpression'
+        && parentKey === 'property'
+        && !parent.computed;
+      const isStaticObjectKey = parent?.type === 'ObjectProperty'
+        && parentKey === 'key'
+        && !parent.computed
+        && !parent.shorthand;
+      const isReviewedDirectCall = parent?.type === 'MemberExpression'
+        && parentKey === 'object'
+        && grandparent?.type === 'CallExpression'
+        && grandparent.callee === parent
+        && EXPRESS_APPLICATION_CALL_METHODS.has(staticMemberName(parent));
+      if (!isStaticMemberName
+        && !isStaticObjectKey
+        && !isReviewedDirectCall
+        && !permittedAppReferences.has(node)) {
+        unverifiedAppReferences.push(node);
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      visitAppReferences(child, node, key, parent);
+    }
+  }
+  visitAppReferences(factory);
+  assert.deepEqual(
+    unverifiedAppReferences,
+    [],
+    `createApp in ${sourcePath} must not alias, escape, or otherwise reference the canonical Express application outside direct calls and its final return`,
   );
   assert.ok(
     factory.body.body.indexOf(mounts[0]) < factory.body.body.indexOf(directReturns[0]),
@@ -3812,6 +3896,7 @@ function verifyCheckedInHostedContractFixture(
     backendUiRedirect: lock.publicExecutableContract.backendUiRedirectSha256,
     maintenanceMode: lock.publicExecutableContract.maintenanceModeSha256,
     databaseBinding: lock.publicExecutableContract.databaseBindingSha256,
+    reviewIdentity: lock.publicExecutableContract.reviewIdentitySha256,
   }, `${fixturePath} hosted source snapshot drifted from the packaged executable lock`);
   for (const digest of [
     lock.publicExecutableContract.pluginServerSha256,
@@ -3820,6 +3905,7 @@ function verifyCheckedInHostedContractFixture(
     lock.publicExecutableContract.backendUiRedirectSha256,
     lock.publicExecutableContract.maintenanceModeSha256,
     lock.publicExecutableContract.databaseBindingSha256,
+    lock.publicExecutableContract.reviewIdentitySha256,
     ...Object.values(lock.publicExecutableContract.descriptorSha256),
     ...Object.values(lock.publicExecutableContract.handlerSha256),
   ]) assert.match(digest, /^[a-f0-9]{64}$/);
@@ -3869,6 +3955,7 @@ const hostedPluginUiPath = path.join(backendRoot, 'src', 'mcp', 'plugin-ui.ts');
 const hostedAuthEpochPath = path.join(backendRoot, 'src', 'utils', 'auth-epoch.ts');
 const hostedJwtPath = path.join(backendRoot, 'src', 'utils', 'jwt.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
+const hostedReviewIdentityPath = path.join(backendRoot, 'src', 'services', 'review-identity.ts');
 const hostedTracklyAccessPath = path.join(backendRoot, 'src', 'services', 'trackly-access.ts');
 const hostedApplyExecutionContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-execution-contract.ts');
 const hostedApplicationProfileCatalogPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'catalog.ts');
@@ -3916,6 +4003,7 @@ const hostedPluginUiSource = fs.readFileSync(hostedPluginUiPath, 'utf8');
 const hostedAuthEpochSource = fs.readFileSync(hostedAuthEpochPath, 'utf8');
 const hostedJwtSource = fs.readFileSync(hostedJwtPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
+const hostedReviewIdentitySource = fs.readFileSync(hostedReviewIdentityPath, 'utf8');
 const hostedTracklyAccessSource = fs.readFileSync(hostedTracklyAccessPath, 'utf8');
 const hostedApplyExecutionContractSource = fs.readFileSync(hostedApplyExecutionContractPath, 'utf8');
 const hostedApplicationProfileCatalogSource = fs.readFileSync(hostedApplicationProfileCatalogPath, 'utf8');
@@ -4427,6 +4515,15 @@ assertActiveFunctionDefinitionAst(
     }
   }`,
   hostedMcpTokensPath,
+);
+assertActiveFunctionDefinitionAst(
+  hostedReviewIdentitySource,
+  'isConfiguredReviewUserId',
+  `function isConfiguredReviewUserId(value: unknown): boolean {
+    if (!Number.isSafeInteger(value) || Number(value) <= 0) return false;
+    return [1, 2, 3].some((slot) => configuredReviewUserId(slot) === Number(value));
+  }`,
+  hostedReviewIdentityPath,
 );
 for (const [importedName, localName, moduleName] of [
   ['verifyMcpAccessToken', 'verifyMcpAccessToken', './mcp-tokens.js'],
@@ -5166,6 +5263,11 @@ assert.equal(
   sha256ExactBytes(fs.readFileSync(path.join(backendRoot, 'src', 'config', 'database.ts'))),
   pluginLock.publicExecutableContract.databaseBindingSha256,
   'Hosted production database binding drifted from the packaged whole-source digest lock',
+);
+assert.equal(
+  sha256ExactBytes(hostedReviewIdentitySource),
+  pluginLock.publicExecutableContract.reviewIdentitySha256,
+  'Hosted configured review-identity predicate drifted from the packaged whole-source digest lock',
 );
 
 const executableSchemaDigests = Object.fromEntries(

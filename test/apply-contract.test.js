@@ -16,7 +16,7 @@ const {
   assertApplicationFieldByKeyReferenceSemantics,
   assertInternalSecretCompatibility,
   assertInstallProcessGuardsSemantics,
-  assertPluginRoutePrecedence,
+  assertPluginRoutePrecedence: assertPluginRoutePrecedenceProduction,
   assertServerListenSemantics,
   assertPluginManualSubmissionRouteSemantics,
   assertPluginUiContractSemantics,
@@ -28,6 +28,11 @@ const {
   sha256ExactBytes,
   verifyHostedContract,
 } = require('../scripts/verify-hosted-contract.js');
+
+const assertPluginRoutePrecedence = (...args) => assertPluginRoutePrecedenceProduction(
+  ...args,
+  { reviewedGlobalMiddlewareCallDigests: [] },
+);
 
 function activeFunctionDigest(sourceText, name, sourcePath) {
   return sha256ExactBytes(JSON.stringify(
@@ -197,6 +202,7 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
     'package-lock.json',
     'src/index.ts',
     'src/config/database.ts',
+    'src/services/review-identity.ts',
     'src/__tests__/cors-origins.integration.test.ts',
     'src/mcp/plugin-router.ts',
     'src/mcp/__tests__/plugin-server.test.ts',
