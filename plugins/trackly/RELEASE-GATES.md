@@ -2,14 +2,14 @@
 
 The package may be tested locally before these gates are complete. It must not be submitted to OpenAI or published publicly until every gate is satisfied.
 
-## Registered MCP binding
+## OpenAI Platform draft
 
-- Register `https://mcp.usetrackly.app/api/plugin/trackly/mcp` in ChatGPT developer mode.
-- Copy the real technical ID returned by ChatGPT. Do not invent or pre-allocate an ID.
-- Add `.app.json` with the supported `{"apps":{"trackly":{"id":"…"}}}` shape.
-- Add `"apps": "./.app.json"` to `.codex-plugin/plugin.json`.
-- Keep `.mcp.json` as the Codex remote MCP connection; `.app.json` binds the separately registered ChatGPT app identity, so neither replaces the other.
-- Re-run plugin validation and the repository test suite.
+- Verify the submitting OpenAI Platform organization as an individual or business and confirm the submitting account has Apps Management Write access.
+- Create a new **With MCP** draft at `https://platform.openai.com/plugins`. Submit the production MCP from scratch through the portal even if it was previously connected in ChatGPT or Codex.
+- Configure the Universal MCP URL as `https://mcp.usetrackly.app/api/plugin/trackly/mcp` and complete any portal-issued domain verification challenge at the exact required `/.well-known/openai-apps-challenge` path.
+- Do not invent, pre-allocate, or package a ChatGPT developer-mode app ID. `.app.json` and an `apps` manifest binding remain absent; `.mcp.json` remains the Codex remote MCP connection.
+- Complete the portal listing, authentication and reviewer-access details, skill bundle, starter prompts, regional availability, release notes, policy attestations, and scanned tool metadata without selecting **Submit for Review**.
+- Re-run plugin validation and the repository test suite after any portal-driven package or MCP change.
 
 ## Product verification
 
@@ -28,6 +28,6 @@ The package may be tested locally before these gates are complete. It must not b
 
 ## Submission control
 
-- Kevin must approve the exact listing, packaged logo asset, privacy and terms URLs, test cases, scanned tool metadata, and production MCP URL before submission.
-- OpenAI submission is a separate action from publication.
-- After OpenAI approval, ask Kevin again before selecting Publish.
+- Kevin must approve the exact listing, packaged logo asset, privacy and terms URLs, test cases, scanned tool metadata, production MCP URL, regional availability, release notes, and policy attestations immediately before selecting **Submit for Review**.
+- **Submit for Review** is a separate action from publication. Draft creation, domain verification, tool scanning, and draft validation do not authorize submission.
+- After OpenAI approval, ask Kevin again immediately before selecting **Publish**.
