@@ -17,6 +17,7 @@ const {
   assertCommonJsDestructuredRequire,
   assertActiveFunctionDirectStatementAst,
   assertActiveFunctionDefinitionAst,
+  assertActiveFunctionAstSha256,
   assertActiveTopLevelStatementAst,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
@@ -1919,6 +1920,139 @@ test('live work endpoint validation binds the consumed request result', () => {
       'snapshot decoy fixture',
     ),
     /must execute its locked direct statement exactly once/,
+  );
+});
+
+test('Apply work projection AST locks reject raw payloads and permissive decision dependencies', () => {
+  const source = `
+    function readinessCount(value) {
+      return Number.isSafeInteger(value) && value >= 0 ? Number(value) : null;
+    }
+    function projectApplyWorkResponse(value, kind) {
+      return {
+        kind,
+        lineageMismatch: value?.lineageMismatch === true,
+        execution: kind === 'progress' ? { id: readinessCount(value?.execution?.id) } : undefined,
+      };
+    }
+  `;
+  const digest = (text, name) => sha256ExactBytes(JSON.stringify(
+    canonicalSchemaAst(activeNamedDefinitionAst(text, name, 'Apply work projection fixture')),
+  ));
+  const responseDigest = digest(source, 'projectApplyWorkResponse');
+  const countDigest = digest(source, 'readinessCount');
+  assert.doesNotThrow(() => assertActiveFunctionAstSha256(
+    source,
+    'projectApplyWorkResponse',
+    responseDigest,
+    'Apply work projection fixture',
+  ));
+  assert.throws(
+    () => assertActiveFunctionAstSha256(
+      source.replace(
+        "return {\n        kind,\n        lineageMismatch: value?.lineageMismatch === true,\n        execution: kind === 'progress' ? { id: readinessCount(value?.execution?.id) } : undefined,\n      };",
+        'return value;',
+      ),
+      'projectApplyWorkResponse',
+      responseDigest,
+      'raw Apply work projection fixture',
+    ),
+    /must preserve its locked active semantic AST/,
+  );
+  assert.throws(
+    () => assertActiveFunctionAstSha256(
+      source.replace(
+        'Number.isSafeInteger(value) && value >= 0 ? Number(value) : null',
+        'Number(value)',
+      ),
+      'readinessCount',
+      countDigest,
+      'permissive Apply work dependency fixture',
+    ),
+    /must preserve its locked active semantic AST/,
+  );
+});
+
+test('remote lint handler stays on its in-memory value-free endpoint without logging, storage, or echo', () => {
+  const lintSource = `
+    function lintApplicationText(items) {
+      const results = items.map((item) => ({
+        key: item.key,
+        valid: item.text.trim().length > 0,
+        characterCount: item.text.length,
+      }));
+      return {
+        valid: results.every((item) => item.valid),
+        items: results,
+        privacy: 'Text was linted in memory and is not echoed or stored by this tool.',
+      };
+    }
+    registerPluginTool('trackly_lint_application_text', { inputSchema }, wrapTool(
+      ({ items }) => Promise.resolve(lintApplicationText(items)),
+      'Failed to lint application text',
+    ));
+  `;
+  const lintDigest = sha256ExactBytes(JSON.stringify(canonicalSchemaAst(
+    activeNamedDefinitionAst(lintSource, 'lintApplicationText', 'lint privacy fixture'),
+  )));
+  const [registration] = activeToolRegistrations(
+    lintSource,
+    'registerPluginTool',
+    'lint privacy fixture',
+  );
+  assert.doesNotThrow(() => assertWrappedHandlerAst(
+    registration,
+    '({ items }) => Promise.resolve(lintApplicationText(items))',
+    'lint privacy fixture',
+  ));
+  assert.doesNotThrow(() => assertActiveFunctionAstSha256(
+    lintSource,
+    'lintApplicationText',
+    lintDigest,
+    'lint privacy fixture',
+  ));
+  const echoed = lintSource.replace(
+    'characterCount: item.text.length,',
+    'characterCount: item.text.length, text: item.text,',
+  );
+  assert.throws(
+    () => assertActiveFunctionAstSha256(
+      echoed,
+      'lintApplicationText',
+      lintDigest,
+      'echoing lint fixture',
+    ),
+    /must preserve its locked active semantic AST/,
+  );
+  const logged = lintSource.replace(
+    'const results = items.map',
+    'console.log(items); const results = items.map',
+  );
+  assert.throws(
+    () => assertActiveFunctionAstSha256(
+      logged,
+      'lintApplicationText',
+      lintDigest,
+      'logging lint fixture',
+    ),
+    /must preserve its locked active semantic AST/,
+  );
+  const alternateEndpoint = lintSource.replace(
+    'Promise.resolve(lintApplicationText(items))',
+    'persistAndLintApplicationText(items)',
+  );
+  const [alternateRegistration] = activeToolRegistrations(
+    alternateEndpoint,
+    'registerPluginTool',
+    'persisting lint endpoint fixture',
+  );
+  assert.throws(
+    () => assertWrappedHandlerAst(
+      alternateRegistration,
+      '({ items }) => Promise.resolve(lintApplicationText(items))',
+      'persisting lint endpoint fixture',
+    ),
+    /must preserve its complete locked executable semantics/,
   );
 });
 

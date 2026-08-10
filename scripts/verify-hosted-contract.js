@@ -1726,6 +1726,17 @@ function assertActiveFunctionDefinitionAst(source, name, expectedSource, sourceP
   );
 }
 
+function assertActiveFunctionAstSha256(source, name, expectedSha256, sourcePath) {
+  const digest = sha256ExactBytes(JSON.stringify(
+    canonicalSchemaAst(activeNamedDefinitionAst(source, name, sourcePath)),
+  ));
+  assert.equal(
+    digest,
+    expectedSha256,
+    `${name} in ${sourcePath} must preserve its locked active semantic AST`,
+  );
+}
+
 function assertActiveClassMethodDefinitionAst(
   source,
   className,
@@ -4879,6 +4890,67 @@ assertWrappedHandlerStatementSequenceAst(
 );
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
+for (const [name, digest] of Object.entries({
+  projectApplyWorkSnapshot: '1f1f0f80381c14e44157b4d491f100cf9f4ad182abbf87cab89032dcf327eca1',
+  projectApplyWorkResponse: '9c0b03f3eeec7d5d7aef2d3fde45fe452471ae299806b338cad9a9592a9f5308',
+  projectApplyWorkExecution: 'b4bf7d4fe1720870cb579a4c3dc7fbc88df0b1e0b2abcaece9a3b4ef86cb77ea',
+  projectApplyWorkProgress: '5ec96731c10aa70a10ebde09d1ba118c55e32e366a30b394cce1b9e0a57bd568',
+  readinessCount: '3d130acc0da6a240ee0a07b4da2cec356ee7113e44cd5ffbed42a5c31f50f299',
+  safeExecutionStatus: 'b4bacbbea669cd7f3409d0995b7eb8dbaf52aff18d4c97282fc14d78800c2d8b',
+})) {
+  assertActiveFunctionAstSha256(hostedPluginSource, name, digest, hostedPluginSourcePath);
+}
+assertActiveVariableInitializerAst(hostedPluginSource, 'SHA256', '/^[a-f0-9]{64}$/', hostedPluginSourcePath);
+assertActiveVariableInitializerAst(
+  hostedPluginSource,
+  'APPLY_EXECUTION_STATUS_VALUES',
+  `[
+    'running', 'target_reached', 'exhausted_partial', 'stopped', 'closed', 'expired',
+  ] as const`,
+  hostedPluginSourcePath,
+);
+assertActiveVariableInitializerAst(
+  hostedPluginSource,
+  'READINESS_PROGRESS_COUNTS',
+  `[
+    'target', 'durablyReviewReady', 'submitted', 'reservedReviewSlots', 'currentlyFilling',
+    'awaitingAnswer', 'authParked', 'excluded', 'conflicted', 'attempted',
+    'remainingCandidates',
+  ] as const`,
+  hostedPluginSourcePath,
+);
+
+const lintRegistration = pluginToolRegistration('trackly_lint_application_text');
+const lintDescriptorProperties = staticBabelObjectProperties(
+  lintRegistration.call.arguments[1],
+  'trackly_lint_application_text descriptor',
+);
+assertBabelPropertyExpression(
+  lintDescriptorProperties,
+  'inputSchema',
+  `z.object({
+    items: z.array(z.object({
+      key: z.string().min(1).max(200),
+      text: z.string().max(20_000),
+      required: z.boolean().optional(),
+      minLength: z.number().int().min(0).max(20_000).optional(),
+      maxLength: z.number().int().min(1).max(20_000).optional(),
+    }).strict()).min(1).max(20),
+  }).strict()`,
+  'trackly_lint_application_text descriptor',
+);
+assertWrappedHandlerAst(
+  lintRegistration,
+  `({ items }) => Promise.resolve(lintApplicationText(items))`,
+  hostedPluginSourcePath,
+);
+assertActiveFunctionAstSha256(
+  hostedPluginSource,
+  'lintApplicationText',
+  'c0720fa2255558660ff43405b7b0ba1ebed8e708bc0d444a7f29aa53f11db3ea',
+  hostedPluginSourcePath,
+);
+
 const getWorkRegistration = pluginToolRegistration('trackly_get_apply_work');
 const getWorkDescriptorProperties = staticBabelObjectProperties(
   getWorkRegistration.call.arguments[1],
@@ -5344,6 +5416,7 @@ module.exports = {
   assertActiveFunctionDirectStatementAst,
   assertActiveTopLevelStatementAst,
   assertActiveFunctionDefinitionAst,
+  assertActiveFunctionAstSha256,
   assertLivePluginRouterMount,
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
