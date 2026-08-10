@@ -3255,6 +3255,12 @@ function validateBrandAsset(manifest, provenance, packagedBytes) {
   assert.equal(provenance.visualApprovalRequired, true);
   assert.match(provenance.treatment, /vector approximation/);
   assert.match(provenance.approvalRequirement, /Kevin must compare/);
+  assert.deepEqual(provenance.visualApproval, {
+    approvedBy: 'Kevin Astuhuaman',
+    approvedDatePacific: '2026-08-10',
+    approvedPackagedSha256: provenance.packagedSha256,
+    scope: 'OpenAI listing logo only; does not authorize OpenAI Submit or Publish',
+  });
   const svg = packagedBytes.toString('utf8');
   assert.match(svg, /<rect[^>]+fill="#000"/);
   assert.match(svg, /<path[^>]+fill="#fff"/);
