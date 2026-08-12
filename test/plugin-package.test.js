@@ -3537,6 +3537,17 @@ test('submission fixtures cover six internal cases and the exact five-case porta
   assert.equal(new Set([...fixtures.positive, ...fixtures.negative].map((item) => item.id)).size, 9);
   assert.equal(fixtures.reviewEnvironment.portalPositiveCaseIds.length, 5);
   assert.equal(new Set(fixtures.reviewEnvironment.portalPositiveCaseIds).size, 5);
+  assert.deepEqual(
+    fixtures.reviewEnvironment.portalPositiveCaseIds,
+    [
+      'search-recent-product',
+      'search-monitored-remote',
+      'job-brief',
+      'apply-to-review',
+      'reconcile-manual-submission',
+    ],
+    'portal submission must preserve the exact reviewed five-case sequence',
+  );
   assert.ok(
     fixtures.reviewEnvironment.portalPositiveCaseIds.every((id) =>
       fixtures.positive.some((item) => item.id === id)),
