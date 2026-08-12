@@ -4323,6 +4323,25 @@ function verifyCoordinatedBackendCore({
     parseSchemaExpression(localApplySource, 'startApplyRunInputSchema', localApplyPath),
     parseSchemaExpression(hostedApplySource, 'startApplyRunSchema', hostedApplyPath),
   );
+  const localTruthWrapper = parseSchemaExpression(
+    localApplySource,
+    'truthCertificationInputSchema',
+    localApplyPath,
+  );
+  const hostedTruthWrapper = parseSchemaExpression(
+    hostedApplySource,
+    'truthCertificationInputSchema',
+    hostedApplyPath,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(hostedTruthWrapper),
+    canonicalSchemaAst(localTruthWrapper),
+    'truthCertificationInputSchema published AST drifted between local and hosted MCP',
+  );
+  assertTruthWrapperCompatibility(
+    hostedTruthWrapper,
+    parseSchemaExpression(hostedApplySource, 'truthCertificationSchema', hostedApplyPath),
+  );
 }
 
 function verifyCheckedInHostedContractFixture(

@@ -1185,10 +1185,38 @@ test('coordinated hosted verifier executes disposition, wrapper, and lifecycle w
   const dispositionTool = 'z.object({ dispositions: z.array(applyExecutionDispositionSchema) }).strict()';
   const localApplySource = `
     const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
+    const truthCertificationCommon = z.object({ runId: z.number().int() }).strict();
+    const truthCertificationInputSchema = z.object({
+      ...truthCertificationCommon.shape,
+      resumeDependency: z.enum(['approved', 'not_applicable']),
+      resumeId: z.number().int().min(1).nullable().optional(),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
+    }).strict();
     const startApplyRunInputSchema = z.object({ runId: z.number().int() }).strict();
   `;
   const hostedApplySource = `
     const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
+    const truthCertificationCommon = z.object({ runId: z.number().int() }).strict();
+    const truthCertificationInputSchema = z.object({
+      ...truthCertificationCommon.shape,
+      resumeDependency: z.enum(['approved', 'not_applicable']),
+      resumeId: z.number().int().min(1).nullable().optional(),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
+    }).strict();
+    const truthCertificationSchema = z.discriminatedUnion('resumeDependency', [
+      z.object({
+        ...truthCertificationCommon.shape,
+        resumeDependency: z.literal('approved'),
+        resumeId: z.number().int().min(1),
+        resumeSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+      }).strict(),
+      z.object({
+        ...truthCertificationCommon.shape,
+        resumeDependency: z.literal('not_applicable'),
+        resumeId: z.null().optional(),
+        resumeSha256: z.null().optional(),
+      }).strict(),
+    ]);
     const startApplyRunSchema = z.object({ runId: z.number().int() }).strict()
       .superRefine(validateStartApplyRun);
   `;
@@ -1230,10 +1258,19 @@ test('coordinated hosted verifier executes disposition, wrapper, and lifecycle w
   assert.throws(verify(lifecycleDrift), /hosted plugin lifecycle drifted/);
   const publishedWrapperDrift = structuredClone(fixture);
   publishedWrapperDrift.localApplySource = publishedWrapperDrift.localApplySource.replace(
-    'runId: z.number().int()',
-    'runId: z.string()',
+    'const startApplyRunInputSchema = z.object({ runId: z.number().int() }).strict();',
+    'const startApplyRunInputSchema = z.object({ runId: z.string() }).strict();',
   );
   assert.throws(verify(publishedWrapperDrift), /startApplyRunInputSchema must equal the hosted published object/);
+  const publishedTruthDrift = structuredClone(fixture);
+  publishedTruthDrift.hostedApplySource = publishedTruthDrift.hostedApplySource.replace(
+    "resumeDependency: z.enum(['approved', 'not_applicable'])",
+    'resumeDependency: z.string()',
+  );
+  assert.throws(
+    verify(publishedTruthDrift),
+    /truthCertificationInputSchema published AST drifted between local and hosted MCP/,
+  );
 });
 
 test('standalone hosted verifier executes tool, schema, and handler snapshot wiring end to end', (t) => {
