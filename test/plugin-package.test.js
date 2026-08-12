@@ -3217,18 +3217,6 @@ test('every transitive Apply schema constant is audited, locked, and semanticall
   );
 });
 
-function validateAppBinding(manifest, appConfig) {
-  const hasManifestBinding = Object.hasOwn(manifest, 'apps');
-  assert.equal(hasManifestBinding, appConfig !== null, 'manifest and .app.json binding must appear together');
-  if (appConfig === null) return;
-  assert.equal(manifest.apps, './.app.json');
-  assert.deepEqual(Object.keys(appConfig), ['apps']);
-  assert.deepEqual(Object.keys(appConfig.apps), ['trackly']);
-  assert.deepEqual(Object.keys(appConfig.apps.trackly), ['id']);
-  assert.match(appConfig.apps.trackly.id, /^[A-Za-z0-9][A-Za-z0-9._:-]{2,199}$/);
-  assert.doesNotMatch(appConfig.apps.trackly.id, /\.\.\.|replace|placeholder|todo/i);
-}
-
 function validateBrandAsset(manifest, provenance, packagedBytes) {
   const manifestPath = `./${provenance.packagedAsset}`;
   assert.equal(manifest.interface.composerIcon, manifestPath);
@@ -3282,7 +3270,8 @@ test('plugin manifest is complete, lowercase, and uses the official trackly bran
   assert.equal(manifest.skills, './skills/');
   assert.equal(manifest.mcpServers, './.mcp.json');
   const appPath = path.join(PLUGIN, '.app.json');
-  validateAppBinding(manifest, fs.existsSync(appPath) ? JSON.parse(fs.readFileSync(appPath, 'utf8')) : null);
+  assert.equal(fs.existsSync(appPath), false, 'OpenAI portal submissions must not package a developer-mode app ID');
+  assert.equal(Object.hasOwn(manifest, 'apps'), false, 'OpenAI portal submissions must not bind a developer-mode app ID');
   assert.equal(manifest.interface.defaultPrompt.length, 3);
   assert.ok(manifest.interface.defaultPrompt.every((prompt) => prompt.length <= 128));
   for (const key of ['websiteURL', 'privacyPolicyURL', 'termsOfServiceURL']) {
@@ -3352,12 +3341,6 @@ test('brand validation accepts the exact approved PNG replacement state', () => 
     visualApprovalRequired: false,
     forbiddenReplacement: 'Purple Orb composer icon',
   }, png);
-});
-
-test('app binding validation accepts a real future registered state', () => {
-  validateAppBinding({ apps: './.app.json' }, {
-    apps: { trackly: { id: 'app_trackly_prod_7H3K9' } },
-  });
 });
 
 test('public skills reference only the locked 18-tool facade', () => {
@@ -3545,13 +3528,31 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(handoff, /Never tell the user to submit an already reconciled member/);
 });
 
-test('submission fixtures cover six positive and three negative cases', () => {
+test('submission fixtures cover six internal cases and the exact five-case portal subset', () => {
   const fixtures = json('plugins/trackly/listing/submission-tests.json');
   const lock = json('plugins/trackly/skill-lock.json');
   const allowedTools = new Set(lock.publicToolAllowlist);
   assert.equal(fixtures.positive.length, 6);
   assert.equal(fixtures.negative.length, 3);
   assert.equal(new Set([...fixtures.positive, ...fixtures.negative].map((item) => item.id)).size, 9);
+  assert.equal(fixtures.reviewEnvironment.portalPositiveCaseIds.length, 5);
+  assert.equal(new Set(fixtures.reviewEnvironment.portalPositiveCaseIds).size, 5);
+  assert.deepEqual(
+    fixtures.reviewEnvironment.portalPositiveCaseIds,
+    [
+      'search-recent-product',
+      'search-monitored-remote',
+      'job-brief',
+      'apply-to-review',
+      'reconcile-manual-submission',
+    ],
+    'portal submission must preserve the exact reviewed five-case sequence',
+  );
+  assert.ok(
+    fixtures.reviewEnvironment.portalPositiveCaseIds.every((id) =>
+      fixtures.positive.some((item) => item.id === id)),
+    'every portal positive case must resolve to a reviewed internal fixture',
+  );
   assert.match(fixtures.reviewEnvironment.account, /synthetic reviewer account/i);
   assert.match(fixtures.reviewEnvironment.submissionPolicy, /No fixture may submit/);
   assert.doesNotMatch(JSON.stringify(fixtures), /\b(?:Kevin|Astuhuaman)\b/i, 'submission fixtures must not leak a real reviewer identity');
@@ -3663,16 +3664,29 @@ test('submission fixtures cover six positive and three negative cases', () => {
   );
 });
 
-test('registered app binding and public submission remain explicit release gates', () => {
+test('OpenAI Platform draft and public submission remain explicit release gates', () => {
   const gates = read('plugins/trackly/RELEASE-GATES.md');
   const provenance = json('plugins/trackly/assets/brand-source.json');
-  assert.match(gates, /Do not invent or pre-allocate an ID/);
+  assert.match(gates, /Create a new \*\*With MCP\*\* draft at `https:\/\/platform\.openai\.com\/plugins`/);
+  assert.match(gates, /Submit the production MCP from scratch through the portal/);
+  assert.match(gates, /Do not invent, pre-allocate, or package a ChatGPT developer-mode app ID/);
+  assert.match(gates, /\.app\.json.*remain absent/);
   assert.match(gates, /HTTP 200 response from `https:\/\/usetrackly\.app\/plugins\/trackly`/);
   assert.match(gates, /approved PNG/);
   assert.ok(
     gates.includes(`SHA-256 \`${provenance.visualApproval.approvedPackagedSha256}\``),
     'release gates must cite the exact approved packaged logo digest from brand provenance',
   );
-  assert.match(gates, /Kevin must approve/);
-  assert.match(gates, /ask Kevin again before selecting Publish/);
+  assert.match(gates, /Kevin must approve.*immediately before selecting \*\*Submit for Review\*\*/);
+  assert.match(gates, /ask Kevin again immediately before selecting \*\*Publish\*\*/);
+  assert.match(gates, /portal accepts exactly five positive cases/);
+  assert.match(gates, /demo covering Trackly's main use cases on ChatGPT web, iOS, and Android/);
+});
+
+test('plugin README directs maintainers to the current portal without a developer-mode app binding', () => {
+  const readme = read('plugins/trackly/README.md');
+  assert.match(readme, /OpenAI Platform plugin portal/);
+  assert.match(readme, /https:\/\/platform\.openai\.com\/plugins/);
+  assert.match(readme, /\.app\.json` remains intentionally absent/);
+  assert.doesNotMatch(readme, /registers? the production MCP server in ChatGPT developer mode/i);
 });
