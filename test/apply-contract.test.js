@@ -151,7 +151,7 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.2');
+  assert.equal(contract.contractVersion, '3.6.3');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -159,17 +159,32 @@ test('local MCP Apply schemas match each complete versioned input schema', () =>
   }
 });
 
-function toolsDigest(tools) {
+function canonicalJsonValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalJsonValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, canonicalJsonValue(nestedValue)]),
+    );
+  }
+  return value;
+}
+
+function contractDigest(candidate) {
   const crypto = require('node:crypto');
-  const canonicalTools = Object.fromEntries(
-    Object.entries(tools).sort(([left], [right]) => left.localeCompare(right)),
-  );
-  return crypto.createHash('sha256').update(JSON.stringify(canonicalTools)).digest('hex');
+  const executableContract = canonicalJsonValue({
+    constants: candidate.constants,
+    tools: candidate.tools,
+  });
+  return crypto.createHash('sha256').update(JSON.stringify(executableContract)).digest('hex');
 }
 
 function assertNoHistoricalVersionReuse(candidate) {
   for (const [version, historical] of Object.entries(contractHistory)) {
-    if (toolsDigest(candidate.tools) !== historical.toolsSha256) {
+    if (contractDigest(candidate) !== historical.contractSha256) {
       assert.notEqual(candidate.contractVersion, version);
     }
   }
@@ -183,6 +198,16 @@ test('contract history covers changes to every tool, not only profile tools', ()
   const historicalContract = JSON.parse(JSON.stringify(contract));
   historicalContract.contractVersion = contract.contractVersion;
   historicalContract.tools.trackly_get_apply_queue += ',mutation:z.boolean().optional()';
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
+});
+
+test('contract history covers changes to constants as well as tools', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.constants.applyBatchConflictCodes.push('future_conflict');
   assert.throws(
     () => assertNoHistoricalVersionReuse(historicalContract),
     (error) => error?.code === 'ERR_ASSERTION',
@@ -1160,12 +1185,78 @@ test('coordinated hosted verifier executes disposition, wrapper, and lifecycle w
   const dispositionTool = 'z.object({ dispositions: z.array(applyExecutionDispositionSchema) }).strict()';
   const localApplySource = `
     const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
-    const startApplyRunInputSchema = z.object({ runId: z.number().int() }).strict();
+    const truthCertificationCommon = z.object({ runId: z.number().int() }).strict();
+    const truthCertificationInputSchema = z.object({
+      ...truthCertificationCommon.shape,
+      resumeDependency: z.enum(['approved', 'not_applicable']),
+      resumeId: z.number().int().min(1).nullable().optional(),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
+    }).strict();
+    const startApplyRunInputSchema = z.object({
+      runId: z.number().int(),
+      batchId: z.number().int().optional(),
+      memberId: z.number().int().optional(),
+      expectedMemberVersion: z.number().int().optional(),
+      expectedInspectionEpoch: z.number().int().optional(),
+      leaseToken: z.string().optional(),
+    });
+    const startApplyRunSchema = z.object({
+      runId: z.number().int(),
+      batchId: z.number().int().optional(),
+      memberId: z.number().int().optional(),
+      expectedMemberVersion: z.number().int().optional(),
+      expectedInspectionEpoch: z.number().int().optional(),
+      leaseToken: z.string().optional(),
+    }).superRefine((value, context) => {
+      const batchValues = [
+        value.batchId,
+        value.memberId,
+        value.expectedMemberVersion,
+        value.expectedInspectionEpoch,
+        value.leaseToken,
+      ];
+      if (
+        batchValues.some((item) => item !== undefined)
+        && batchValues.some((item) => item === undefined)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Batch binding fields must be supplied together',
+        });
+      }
+    });
   `;
   const hostedApplySource = `
     const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
-    const startApplyRunSchema = z.object({ runId: z.number().int() }).strict()
-      .superRefine(validateStartApplyRun);
+    const truthCertificationCommon = z.object({ runId: z.number().int() }).strict();
+    const truthCertificationInputSchema = z.object({
+      ...truthCertificationCommon.shape,
+      resumeDependency: z.enum(['approved', 'not_applicable']),
+      resumeId: z.number().int().min(1).nullable().optional(),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
+    }).strict();
+    const truthCertificationSchema = z.discriminatedUnion('resumeDependency', [
+      z.object({
+        ...truthCertificationCommon.shape,
+        resumeDependency: z.literal('approved'),
+        resumeId: z.number().int().min(1),
+        resumeSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+      }).strict(),
+      z.object({
+        ...truthCertificationCommon.shape,
+        resumeDependency: z.literal('not_applicable'),
+        resumeId: z.null().optional(),
+        resumeSha256: z.null().optional(),
+      }).strict(),
+    ]);
+    const startApplyRunSchema = z.object({
+      runId: z.number().int(),
+      batchId: z.number().int().optional(),
+      memberId: z.number().int().optional(),
+      expectedMemberVersion: z.number().int().optional(),
+      expectedInspectionEpoch: z.number().int().optional(),
+      leaseToken: z.string().optional(),
+    });
   `;
   const hostedPluginSource = `
     function wrapTool(
@@ -1205,10 +1296,22 @@ test('coordinated hosted verifier executes disposition, wrapper, and lifecycle w
   assert.throws(verify(lifecycleDrift), /hosted plugin lifecycle drifted/);
   const publishedWrapperDrift = structuredClone(fixture);
   publishedWrapperDrift.localApplySource = publishedWrapperDrift.localApplySource.replace(
-    'runId: z.number().int()',
-    'runId: z.string()',
+    'runId: z.number().int(),',
+    'runId: z.string(),',
   );
-  assert.throws(verify(publishedWrapperDrift), /startApplyRunInputSchema must equal the hosted published object/);
+  assert.throws(
+    verify(publishedWrapperDrift),
+    /local startApplyRunSchema must refine the exact published startApplyRunInputSchema|startApplyRunInputSchema must equal the hosted published object/,
+  );
+  const publishedTruthDrift = structuredClone(fixture);
+  publishedTruthDrift.hostedApplySource = publishedTruthDrift.hostedApplySource.replace(
+    "resumeDependency: z.enum(['approved', 'not_applicable'])",
+    'resumeDependency: z.string()',
+  );
+  assert.throws(
+    verify(publishedTruthDrift),
+    /truthCertificationInputSchema published AST drifted between local and hosted MCP/,
+  );
 });
 
 test('standalone hosted verifier executes tool, schema, and handler snapshot wiring end to end', (t) => {
@@ -1251,7 +1354,7 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   ancestryDrift.mergedRuntime.parents[1] = 'a'.repeat(40);
   assert.throws(verifyFixture(ancestryDrift), /must prove the reviewed runtime commit is a direct parent/);
   const staleCapture = structuredClone(originalFixture);
-  staleCapture.capturedAt = '2026-08-11T04:45:00-07:00';
+  staleCapture.capturedAt = '2026-08-12T12:56:02-07:00';
   assert.throws(verifyFixture(staleCapture), /must be captured within 24 hours of its recorded runtime merge/);
 });
 

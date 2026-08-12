@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-08-11
+
+### Fixed
+
+- Align the packaged Apply contract with hosted contract 3.6.3, including the
+  dedicated recovery outcome used after authorization replacement.
+- Accept the exact MCP `server/discover` compatibility probe without widening
+  OAuth access, so OpenAI can fall back to the supported legacy protocol and
+  complete its required tool scan.
+- Lock hosted/local schemas, intentional hosted-only tools, and source/merge
+  provenance through the coordinated contract verifier.
+
 ## [0.13.3] - 2026-08-03
 
 ### Added

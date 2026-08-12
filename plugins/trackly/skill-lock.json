@@ -113,15 +113,15 @@
       "trackly_reconcile_manual_submission": "32be19dadef3c8e3a1d9f320d3c1a9a0cde3845f930dac85641409f25a722b0a",
       "trackly_stop_apply": "8363bfe5eb7fb8ed4093b1f01bdaa9ebcb599ac35004fd13bab0ae6a2ab4f1ce"
     },
-    "pluginServerSha256": "c28ca52e53cc4d56e0c5bebb942b4774c2fc7f46ef64d862b0dc22703436b07c",
-    "pluginScopesSha256": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
+    "pluginServerSha256": "6818d64566c5223417e46176056087ab6722d52fb70d9e01e5bf8f3580e98dc6",
+    "pluginScopesSha256": "5868a90cc1c1a2eb28541a3ac96c26d9f834cab861f5c9c243d2e02213291140",
     "jobBriefServiceSha256": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
     "backendUiRedirectSha256": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceModeSha256": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBindingSha256": "c7d5fd8ea89d51557d919a6d331777542c99f75ea77f0021146ff765ec614566",
+    "databaseBindingSha256": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
     "reviewIdentitySha256": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptionsSha256": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
-    "applicationProfileServiceSha256": "86f85809cdb6867f3e67310b6204c37e120942760565e033e07d409bcd2d0875",
+    "applicationProfileServiceSha256": "f32f4f26550988eef3751613c22dc6a4be9b6b1273e535a042f8859ea94f63b8",
     "schemaSha256": {
       "SAFE_IDEMPOTENCY_KEY": "046859665306e5aeaf57032c76268934e1b98c95d4c17a88434062c9b6a4547a",
       "SAFE_CODE": "a35176c6c3f6ee563d4b6f6f68e4c546d8b03b03915d37bf55dd5a7011927574",
@@ -157,7 +157,7 @@
       },
       "hostedMcpServer": {
         "applyExecutionDispositionSchema": "0de532896889a97c80333adc99f6c00ecae2e3b70a498499959c925d74647fbd",
-        "startApplyRunSchema": "0a2901e07b1ec44359ad64a5c8441fe5e21b6b17f9d111a45413acdac82bf554",
+        "startApplyRunSchema": "9348b661c38273226ebb589e809c880f44cb10be1afa82430c8282eaed0d07fc",
         "truthCertificationCommon": "c6ba15aea01acfd64aa50bdde1e5763a0ee80ac93d1fb9ab384f0489dc8413d3",
         "truthCertificationSchema": "cdb3b224c87812346734f786ec8363efe59c0a1058a8b0c7c4db982913ffc729"
       }
@@ -226,7 +226,8 @@
     "trackly_record_application_outcomes",
     "trackly_prepare_resume",
     "trackly_verify_prepared_resume",
-    "trackly_chat"
+    "trackly_chat",
+    "get_more_tools"
   ],
   "publicToolAllowlist": [
     "trackly_search_jobs",

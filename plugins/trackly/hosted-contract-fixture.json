@@ -1,20 +1,20 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-08-10T01:08:57-07:00",
+  "capturedAt": "2026-08-11T19:35:02-07:00",
   "sourceRuntime": {
-    "commit": "c60599bfdd8c245b42e0dab57aabf6a1e36e9119",
-    "parent": "8fa1f1d86fc83b11631808278b5d65cf6cd311dc",
-    "committedAt": "2026-08-10T00:57:50-07:00"
+    "commit": "cfdeb514e3a9879e43bb41a7ca112f0809e6e358",
+    "parent": "03e1588d9ea7f9de2cfb9593d092cd903a6cf2b8",
+    "committedAt": "2026-08-11T11:38:21-07:00"
   },
   "mergedRuntime": {
-    "commit": "57d4590f9edf628732b4b07a3fde60d2427aa3c6",
+    "commit": "d0b67d30e1674a5213044c252e55aea369e01d6e",
     "parents": [
-      "c0b14f64a1fe290d6d293de148577d6b6fc7cd24",
-      "c60599bfdd8c245b42e0dab57aabf6a1e36e9119"
+      "db95e44584d3531d232573cdccbbf03664e2c41f",
+      "cfdeb514e3a9879e43bb41a7ca112f0809e6e358"
     ],
-    "committedAt": "2026-08-10T01:07:41-07:00"
+    "committedAt": "2026-08-11T11:56:01-07:00"
   },
-  "applyContractVersion": "3.6.2",
+  "applyContractVersion": "3.6.3",
   "pluginContractVersion": "1.0.0",
   "publicTools": [
     ["trackly_search_jobs", "6e72672960c93c127fcd38588fcd2444ba59dea169c0d46d300c70201b6aca1a", "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481"],
@@ -83,17 +83,18 @@
     "trackly_record_application_outcomes",
     "trackly_prepare_resume",
     "trackly_verify_prepared_resume",
-    "trackly_chat"
+    "trackly_chat",
+    "get_more_tools"
   ],
   "sourceSha256": {
-    "pluginServer": "c28ca52e53cc4d56e0c5bebb942b4774c2fc7f46ef64d862b0dc22703436b07c",
-    "pluginScopes": "ea0a7c5c7d4ca4e1f15648e76be7dd7b98c74319254474f6e7af9af0c86b92c2",
+    "pluginServer": "6818d64566c5223417e46176056087ab6722d52fb70d9e01e5bf8f3580e98dc6",
+    "pluginScopes": "5868a90cc1c1a2eb28541a3ac96c26d9f834cab861f5c9c243d2e02213291140",
     "jobBriefService": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
     "backendUiRedirect": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceMode": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBinding": "c7d5fd8ea89d51557d919a6d331777542c99f75ea77f0021146ff765ec614566",
+    "databaseBinding": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
     "reviewIdentity": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
-    "applicationProfileService": "86f85809cdb6867f3e67310b6204c37e120942760565e033e07d409bcd2d0875"
+    "applicationProfileService": "f32f4f26550988eef3751613c22dc6a4be9b6b1273e535a042f8859ea94f63b8"
   }
 }

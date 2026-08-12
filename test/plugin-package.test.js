@@ -28,7 +28,11 @@ const {
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
   assertHostedCommitTimestamps,
+  assertHostedStartApplyRunBatchBindingGuard,
+  assertJsonRpcResponseClassifierSemantics,
+  assertStartRunWrapperCompatibility,
   assertWrappedHandlerParsesWithSchema,
+  assertWrappedHandlerSafeParsesTruthCertification,
   assertWrappedHandlerAssignedRequestEndpoint,
   assertWrappedHandlerGuardedBlockAst,
   assertWrappedHandlerAst,
@@ -39,6 +43,7 @@ const {
   canonicalSchemaAst,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
+  directHostedToolRegistrationsInNamedFactory,
   directToolRegistrationsInNamedFactory,
   directToolRegistrationsInNamedParameterFunction,
   exactSchemaDefinition,
@@ -403,6 +408,11 @@ test('plugin tool scope map rejects mutation, reassignment, aliasing, and escape
     const TRACKLY_PLUGIN_TOOL_NAMES = Object.freeze(
       Object.keys(TRACKLY_PLUGIN_TOOL_SCOPES),
     );
+    function diagnosticToolName(value: unknown): string {
+      return typeof value === 'string' && Object.hasOwn(TRACKLY_PLUGIN_TOOL_SCOPES, value)
+        ? value
+        : '[redacted]';
+    }
     function requiredScopesForPluginTool(toolName: string): string[] | null {
       if (!Object.hasOwn(TRACKLY_PLUGIN_TOOL_SCOPES, toolName)) return null;
       return [
@@ -422,9 +432,16 @@ test('plugin tool scope map rejects mutation, reassignment, aliasing, and escape
   ]) {
     assert.throws(
       () => assertImmutablePluginToolScopesSemantics(`${source}\n${mutation}`, 'mutated scope-map fixture'),
-      /must (?:not be reassigned, mutated, aliased, escaped, or referenced outside its locked names catalog and requiredScopesForPluginTool|never be assigned or updated after declaration)/,
+      /must (?:not be reassigned, mutated, aliased, escaped, or referenced outside its locked names catalog, diagnostic redaction, and requiredScopesForPluginTool|never be assigned or updated after declaration)/,
     );
   }
+  assert.throws(
+    () => assertImmutablePluginToolScopesSemantics(
+      source.replace("Object.hasOwn(TRACKLY_PLUGIN_TOOL_SCOPES, value)", "typeof value === 'string'"),
+      'widened diagnostic fixture',
+    ),
+    /diagnosticToolName.*locked executable branch semantics/,
+  );
 });
 
 test('OAuth scope normalization and subset checks stay fail-closed against the canonical scope catalog', () => {
@@ -501,14 +518,18 @@ test('OAuth scope normalization and subset checks stay fail-closed against the c
 test('scope-free plugin methods are immutable and used only by the locked membership decision', () => {
   const source = `
     const TRACKLY_PLUGIN_SCOPE_FREE_METHODS = new Set([
+      'server/discover',
       'initialize',
       'ping',
       'notifications/initialized',
       'notifications/cancelled',
+      'notifications/roots/list_changed',
+      'notifications/progress',
       'tools/list',
       'resources/list',
       'resources/templates/list',
       'resources/read',
+      'prompts/list',
     ]);
     function enforce(message) {
       if (TRACKLY_PLUGIN_SCOPE_FREE_METHODS.has(message.method)) return;
@@ -535,6 +556,70 @@ test('scope-free plugin methods are immutable and used only by the locked member
       'widened scope-free fixture',
     ),
     /must preserve its locked executable definition/,
+  );
+});
+
+test('JSON-RPC response bypass is bound to the canonical SDK response schema', () => {
+  const source = `
+    import { JSONRPCResponseSchema } from '@modelcontextprotocol/sdk/types.js';
+    function isJsonRpcResponse(message: Record<string, unknown>): boolean {
+      return JSONRPCResponseSchema.safeParse(message).success;
+    }
+    function enforce(candidate) {
+      if (isJsonRpcResponse(candidate)) return;
+      deny();
+    }
+  `;
+  assert.doesNotThrow(() => assertJsonRpcResponseClassifierSemantics(source, 'response classifier fixture'));
+  for (const [label, drifted] of [
+    ['widened', source.replace('JSONRPCResponseSchema.safeParse(message).success', 'true')],
+    ['redirected', source.replace("'@modelcontextprotocol/sdk/types.js'", "'./decoy.js'")],
+    ['aliased', `${source}\nconst classify = isJsonRpcResponse;`],
+    ['schema escaped', `${source}\nconsume(JSONRPCResponseSchema);`],
+  ]) {
+    assert.throws(
+      () => assertJsonRpcResponseClassifierSemantics(drifted, `${label} response classifier fixture`),
+      /must (?:preserve its locked executable branch semantics|import JSONRPCResponseSchema|be used only|be called exactly once)/,
+    );
+  }
+});
+
+test('start-run schema compatibility locks the local refinement and hosted direct object', () => {
+  const base = `z.object({
+    jobId: z.number().int().min(1),
+    batchId: z.number().int().min(1).optional(),
+    memberId: z.number().int().min(1).optional(),
+    expectedMemberVersion: z.number().int().min(1).optional(),
+    expectedInspectionEpoch: z.number().int().min(0).optional(),
+    leaseToken: z.string().min(1).max(1024).optional(),
+  })`;
+  const refinement = `.superRefine((value, context) => {
+    const batchValues = [
+      value.batchId,
+      value.memberId,
+      value.expectedMemberVersion,
+      value.expectedInspectionEpoch,
+      value.leaseToken,
+    ];
+    if (
+      batchValues.some((item) => item !== undefined)
+      && batchValues.some((item) => item === undefined)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch binding fields must be supplied together',
+      });
+    }
+  })`;
+  const parse = (source) => parseSchemaExpression(`const schema = ${source};`, 'schema', 'start schema fixture');
+  assert.doesNotThrow(() => assertStartRunWrapperCompatibility(parse(base), parse(`${base}${refinement}`), parse(base)));
+  assert.throws(
+    () => assertStartRunWrapperCompatibility(parse(base), parse(`${base}${refinement.replace('item === undefined', 'false')}`), parse(base)),
+    /must preserve the exact all-or-none batch-binding refinement/,
+  );
+  assert.throws(
+    () => assertStartRunWrapperCompatibility(parse(base), parse(`${base}${refinement}`), parse(`${base}.superRefine(() => {})`)),
+    /must be a direct z.object/,
   );
 });
 
@@ -1093,6 +1178,8 @@ test('plugin registration proof accepts only unconditional calls in the exported
       requestApi: PluginApiRequest = apiRequest,
     ) {
       const server = new McpServer({ name: 'trackly', version: PLUGIN_VERSION });
+      server.server.registerCapabilities({ prompts: {} });
+      server.server.setRequestHandler(ListPromptsRequestSchema, () => ({ prompts: [] }));
       const registerPluginTool = (name, config, handler) => {
         const securitySchemes = [{
           type: 'oauth2',
@@ -1171,7 +1258,7 @@ test('plugin registration proof accepts only unconditional calls in the exported
       'const server = new McpServer',
       'const abort = abortStartup();\n      const server = new McpServer',
     ), 'createTracklyPluginMcpServer', 'registerPluginTool', 'executable initializer fixture'),
-    /only the verified server and registration-helper declarations/,
+    /only the verified server, prompt capability, empty prompt handler, and registration-helper declarations/,
   );
   assert.throws(
     () => directToolRegistrationsInExportedFunction(factoryFixture(`
@@ -1185,7 +1272,7 @@ test('plugin registration proof accepts only unconditional calls in the exported
         if (disabled) return server;
         registerPluginTool('trackly_unreachable', { inputSchema: z.object({}) }, handler);
     `), 'createTracklyPluginMcpServer', 'registerPluginTool', 'early return fixture'),
-    /must contain only the verified server and registration-helper declarations before registering tools/,
+    /must contain only the verified server, prompt capability, empty prompt handler, and registration-helper declarations before registering tools/,
   );
   assert.throws(
     () => directToolRegistrationsInExportedFunction(factoryFixture(`
@@ -1260,7 +1347,7 @@ test('plugin registration proof accepts only unconditional calls in the exported
       'const registerPluginTool =',
       'const escapedServer = server;\n      const registerPluginTool =',
     ), 'createTracklyPluginMcpServer', 'registerPluginTool', 'aliased facade server fixture'),
-    /must contain only the verified server and registration-helper declarations before registering tools|must not alias, escape, or use its public facade server/,
+    /must contain only the verified server, prompt capability, empty prompt handler, and registration-helper declarations before registering tools|must not alias, escape, or use its public facade server/,
   );
 });
 
@@ -1452,6 +1539,111 @@ test('hosted schema registration proof uses only direct reachable factory initia
       'shadowed constructor fixture',
     ),
     /must not shadow the canonical imported McpServer binding/,
+  );
+});
+
+test('hosted helper registration proof rejects hidden tools, alternate servers, and weakened batch binding', () => {
+  const fixture = (handler = `async (value) => {
+    const batchValues = [
+      value.batchId,
+      value.memberId,
+      value.expectedMemberVersion,
+      value.expectedInspectionEpoch,
+      value.leaseToken,
+    ];
+    if (
+      batchValues.some((item) => item !== undefined)
+      && batchValues.some((item) => item === undefined)
+    ) {
+      throw Object.assign(new Error('Batch binding fields must be supplied together'), {
+        status: 400,
+        code: 'incomplete_apply_batch_binding',
+      });
+    }
+    return requestApi('POST', '/api/jobscout/apply/runs', authToken, value);
+  }`) => `
+    import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+    function registerHostedMcpTool(server, toolName, description, shape, handler) {
+      return server.registerTool(toolName, { description, inputSchema: shape }, handler);
+    }
+    export function createTracklyMcpServer(authToken: string, requestApi: McpApiRequest = apiRequest) {
+      const server = new McpServer({ name: 'trackly', version: MCP_VERSION });
+      registerHostedMcpTool(
+        server,
+        'trackly_start_apply_run',
+        'Start Apply run',
+        startApplyRunSchema.shape,
+        wrapTool(authToken, ${handler}, 'Failed to start apply run'),
+      );
+      server.registerPrompt('trackly-apply', promptDescriptor, promptHandler);
+      server.registerResource('trackly-apply-protocol', 'trackly://apply/protocol', resourceDescriptor, resourceHandler);
+      return server;
+    }
+  `;
+  const helperDigest = (source) => sha256ExactBytes(JSON.stringify(
+    canonicalSchemaAst(activeNamedDefinitionAst(
+      source,
+      'registerHostedMcpTool',
+      'hosted helper fixture',
+    )),
+  ));
+  const registrations = (source) => directHostedToolRegistrationsInNamedFactory(
+    source,
+    'createTracklyMcpServer',
+    'registerHostedMcpTool',
+    'hosted helper fixture',
+    ['trackly_start_apply_run'],
+    { helperAstSha256: helperDigest(fixture()) },
+  );
+  const source = fixture();
+  const active = registrations(source);
+  assert.equal(active.length, 1);
+  assertHostedStartApplyRunBatchBindingGuard(active[0], 'hosted helper fixture');
+
+  assert.throws(
+    () => registrations(source.replace(
+      "server.registerPrompt('trackly-apply', promptDescriptor, promptHandler);",
+      "if (enabled) registerHostedMcpTool(server, 'trackly_hidden', 'Hidden', hiddenSchema, hiddenHandler);\n      server.registerPrompt('trackly-apply', promptDescriptor, promptHandler);",
+    )),
+    /must not hide additional registerHostedMcpTool calls|may contain only/,
+  );
+  assert.throws(
+    () => registrations(source.replace(
+      "server.registerPrompt('trackly-apply', promptDescriptor, promptHandler);",
+      "server.registerTool('trackly_hidden', hiddenDescriptor, hiddenHandler);\n      server.registerPrompt('trackly-apply', promptDescriptor, promptHandler);",
+    )),
+    /may contain only|must not alias, escape, reassign, or use server through an alternate registrar/,
+  );
+  assert.throws(
+    () => registrations(source.replace('return server;', 'return decoyServer;')),
+    /must return the registered server/,
+  );
+  assert.throws(
+    () => registrations(source.replace(
+      'createTracklyMcpServer(authToken: string, requestApi: McpApiRequest = apiRequest)',
+      'createTracklyMcpServer(authToken: string, requestApi: McpApiRequest = apiRequest, McpServer = DecoyServer)',
+    )),
+    /must preserve the exact authToken and canonical apiRequest-backed requestApi parameters/,
+  );
+  assert.throws(
+    () => registrations(source.replace(
+      'function registerHostedMcpTool(server, toolName, description, shape, handler) {',
+      'function registerHostedMcpTool(server, toolName, description, shape, handler) {\n      audit(server);',
+    )),
+    /must preserve its locked active semantic AST/,
+  );
+
+  const partialBindingHandler = `async (value) => {
+    const batchValues = [value.batchId, value.memberId];
+    if (batchValues.some((item) => item !== undefined)) {
+      throw new Error('Incomplete');
+    }
+    return requestApi('POST', '/api/jobscout/apply/runs', authToken, value);
+  }`;
+  const weakened = registrations(fixture(partialBindingHandler));
+  assert.throws(
+    () => assertHostedStartApplyRunBatchBindingGuard(weakened[0], 'weakened batch binding fixture'),
+    /must reject every partial batch binding before dispatching/,
   );
 });
 
@@ -2057,6 +2249,49 @@ test('local wrapper handlers must actively parse params with their strict schema
     () => assertWrappedHandlerParsesWithSchema(dead, 'strictSchema', 'dead parse fixture'),
     /must parse params in its first unconditional statement/,
   );
+});
+
+test('hosted truth certification must safe-parse and forward only strict certification data', () => {
+  const handler = `async (params) => {
+    const certification = truthCertificationSchema.safeParse(params);
+    if (!certification.success) {
+      throw Object.assign(new Error('Truth certification resume dependency is invalid'), {
+        status: 400,
+        code: 'invalid_truth_certification_resume_dependency',
+      });
+    }
+    const { batchId, idempotencyKey, ...body } = certification.data;
+    return requestApi(
+      'POST',
+      \`/api/jobscout/apply/batches/\${batchId}/truth-certification\`,
+      authToken,
+      body,
+      { 'Idempotency-Key': idempotencyKey },
+    );
+  }`;
+  const registrationFrom = (handlerSource, sourcePath) => activeToolRegistrations(
+    `registerHostedMcpTool(server, 'trackly_certify_apply_batch_truth', 'description', schema, wrapTool(authToken, ${handlerSource}, 'failure'));`,
+    'registerHostedMcpTool',
+    sourcePath,
+    1,
+  )[0];
+  assert.doesNotThrow(() => assertWrappedHandlerSafeParsesTruthCertification(
+    registrationFrom(handler, 'truth safe-parse fixture'),
+    'truth safe-parse fixture',
+  ));
+  for (const [label, drifted] of [
+    ['bypass', handler.replace('truthCertificationSchema.safeParse(params)', '{ success: true, data: params }')],
+    ['guard', handler.replace('if (!certification.success)', 'if (false)')],
+    ['raw params', handler.replace('certification.data', 'params')],
+  ]) {
+    assert.throws(
+      () => assertWrappedHandlerSafeParsesTruthCertification(
+        registrationFrom(drifted, `${label} truth drift fixture`),
+        `${label} truth drift fixture`,
+      ),
+      /must strictly parse, reject invalid combinations, and forward only certification.data/,
+    );
+  }
 });
 
 test('truth-certification handler locks auth, body, idempotency, and bounded projection', () => {
@@ -3347,8 +3582,8 @@ test('public skills reference only the locked 18-tool facade', () => {
   const lock = json('plugins/trackly/skill-lock.json');
   const actual = referencedTools(path.join(PLUGIN, 'skills'));
   assert.equal(lock.publicToolAllowlist.length, 18);
-  assert.equal(lock.hostedMcpToolAllowlist.length, 47);
-  assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 47);
+  assert.equal(lock.hostedMcpToolAllowlist.length, 48);
+  assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 48);
   assert.deepEqual(actual, [...lock.publicToolAllowlist].sort());
   assert.ok(!actual.some((name) => name.includes('referral')));
   assert.deepEqual(lock.publicLifecycleContract, {
