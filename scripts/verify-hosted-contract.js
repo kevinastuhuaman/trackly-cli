@@ -75,7 +75,7 @@ function rootRouteChain(call) {
   return null;
 }
 
-function activeToolRegistrations(source, expectedCallee, sourcePath) {
+function activeToolRegistrations(source, expectedCallee, sourcePath, nameArgumentIndex = 0) {
   const registrations = [];
   function visit(node) {
     if (node === null || typeof node !== 'object') return;
@@ -85,11 +85,11 @@ function activeToolRegistrations(source, expectedCallee, sourcePath) {
     }
     if (node.type === 'CallExpression' && babelCalleeName(node.callee) === expectedCallee) {
       assert.equal(
-        node.arguments[0]?.type,
+        node.arguments[nameArgumentIndex]?.type,
         'StringLiteral',
         `${expectedCallee} in ${sourcePath} must register a static string-literal tool name`,
       );
-      registrations.push({ name: node.arguments[0].value, call: node });
+      registrations.push({ name: node.arguments[nameArgumentIndex].value, call: node });
     }
     for (const [key, child] of Object.entries(node)) {
       if (key === 'loc' || key === 'extra') continue;
@@ -3578,6 +3578,49 @@ function assertWrappedHandlerParsesWithSchema(registration, schemaName, sourcePa
   );
 }
 
+function assertWrappedHandlerSafeParsesTruthCertification(registration, sourcePath) {
+  assert.equal(
+    registration.call.arguments.length,
+    5,
+    `${registration.name} hosted registration in ${sourcePath} must provide server, name, description, schema, and handler arguments`,
+  );
+  const wrapper = registration.call.arguments[4];
+  assert.equal(wrapper?.type, 'CallExpression', `${registration.name} handler in ${sourcePath} must use a wrapper call`);
+  assert.equal(babelCalleeName(wrapper.callee), 'wrapTool', `${registration.name} handler in ${sourcePath} must use wrapTool`);
+  assert.equal(wrapper.arguments.length, 3, `${registration.name} wrapTool call in ${sourcePath} must provide authToken, handler, and fallback`);
+  assert.equal(wrapper.arguments[0]?.type, 'Identifier');
+  assert.equal(wrapper.arguments[0].name, 'authToken');
+  assert.equal(wrapper.arguments[2]?.type, 'StringLiteral');
+  const handler = wrapper.arguments[1];
+  assert.equal(handler?.type, 'ArrowFunctionExpression', `${registration.name} wrapper in ${sourcePath} must receive an arrow handler`);
+  assert.equal(handler.async, true, `${registration.name} handler in ${sourcePath} must be async`);
+  assert.equal(handler.params.length, 1);
+  assert.equal(handler.params[0]?.type, 'Identifier');
+  const parameterName = handler.params[0].name;
+  const expectedBody = babelParser.parse(`async (${parameterName}) => {
+    const certification = truthCertificationSchema.safeParse(${parameterName});
+    if (!certification.success) {
+      throw Object.assign(new Error('Truth certification resume dependency is invalid'), {
+        status: 400,
+        code: 'invalid_truth_certification_resume_dependency',
+      });
+    }
+    const { batchId, idempotencyKey, ...body } = certification.data;
+    return requestApi(
+      'POST',
+      \`/api/jobscout/apply/batches/\${batchId}/truth-certification\`,
+      authToken,
+      body,
+      { 'Idempotency-Key': idempotencyKey },
+    );
+  }`).program.body[0].expression.body;
+  assert.deepEqual(
+    canonicalSchemaAst(handler.body),
+    canonicalSchemaAst(expectedBody),
+    `${registration.name} handler in ${sourcePath} must strictly parse, reject invalid combinations, and forward only certification.data`,
+  );
+}
+
 function assertWrappedHandlerRequestEndpoint(registration, method, pathExpression, sourcePath) {
   const handler = wrappedHandlerFunction(registration, sourcePath);
   const returnedExpression = handler.body?.type === 'BlockStatement'
@@ -6089,7 +6132,8 @@ const publishedSchemaCompatibility = {
   trackly_certify_apply_batch_truth: {
     localPublished: 'truthCertificationInputSchema',
     localParse: 'truthCertificationSchema',
-    hostedPublishedAndParse: 'truthCertificationInputSchema',
+    hostedPublished: 'truthCertificationInputSchema',
+    hostedParse: 'truthCertificationSchema',
   },
   trackly_start_apply_run: {
     localPublished: 'startApplyRunInputSchema',
@@ -6170,7 +6214,12 @@ for (const toolName of sharedApplyToolNames) {
   if (mapping) {
     for (const [side, registrations, sourcePath, schemaName] of [
       ['local', localRegistrations, localApplySourcePath, mapping.localPublished],
-      ['hosted', hostedRegistrations, hostedApplySourcePath, mapping.hostedPublishedAndParse],
+      [
+        'hosted',
+        hostedRegistrations,
+        hostedApplySourcePath,
+        mapping.hostedPublished ?? mapping.hostedPublishedAndParse,
+      ],
     ]) {
       assert.equal(
         registrations.length,
@@ -6184,6 +6233,8 @@ for (const toolName of sharedApplyToolNames) {
       );
       if (side === 'local') {
         assertWrappedHandlerParsesWithSchema(registrations[0], mapping.localParse, sourcePath);
+      } else if (mapping.hostedParse) {
+        assertWrappedHandlerSafeParsesTruthCertification(registrations[0], sourcePath);
       }
     }
     continue;
@@ -7285,6 +7336,7 @@ module.exports = {
   assertMergeCommitPreservesPaths,
   assertHostedCommitTimestamps,
   assertHostedStartApplyRunBatchBindingGuard,
+  assertWrappedHandlerSafeParsesTruthCertification,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,

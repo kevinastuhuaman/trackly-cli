@@ -30,6 +30,7 @@ const {
   assertHostedCommitTimestamps,
   assertHostedStartApplyRunBatchBindingGuard,
   assertWrappedHandlerParsesWithSchema,
+  assertWrappedHandlerSafeParsesTruthCertification,
   assertWrappedHandlerAssignedRequestEndpoint,
   assertWrappedHandlerGuardedBlockAst,
   assertWrappedHandlerAst,
@@ -2182,6 +2183,49 @@ test('local wrapper handlers must actively parse params with their strict schema
     () => assertWrappedHandlerParsesWithSchema(dead, 'strictSchema', 'dead parse fixture'),
     /must parse params in its first unconditional statement/,
   );
+});
+
+test('hosted truth certification must safe-parse and forward only strict certification data', () => {
+  const handler = `async (params) => {
+    const certification = truthCertificationSchema.safeParse(params);
+    if (!certification.success) {
+      throw Object.assign(new Error('Truth certification resume dependency is invalid'), {
+        status: 400,
+        code: 'invalid_truth_certification_resume_dependency',
+      });
+    }
+    const { batchId, idempotencyKey, ...body } = certification.data;
+    return requestApi(
+      'POST',
+      \`/api/jobscout/apply/batches/\${batchId}/truth-certification\`,
+      authToken,
+      body,
+      { 'Idempotency-Key': idempotencyKey },
+    );
+  }`;
+  const registrationFrom = (handlerSource, sourcePath) => activeToolRegistrations(
+    `registerHostedMcpTool(server, 'trackly_certify_apply_batch_truth', 'description', schema, wrapTool(authToken, ${handlerSource}, 'failure'));`,
+    'registerHostedMcpTool',
+    sourcePath,
+    1,
+  )[0];
+  assert.doesNotThrow(() => assertWrappedHandlerSafeParsesTruthCertification(
+    registrationFrom(handler, 'truth safe-parse fixture'),
+    'truth safe-parse fixture',
+  ));
+  for (const [label, drifted] of [
+    ['bypass', handler.replace('truthCertificationSchema.safeParse(params)', '{ success: true, data: params }')],
+    ['guard', handler.replace('if (!certification.success)', 'if (false)')],
+    ['raw params', handler.replace('certification.data', 'params')],
+  ]) {
+    assert.throws(
+      () => assertWrappedHandlerSafeParsesTruthCertification(
+        registrationFrom(drifted, `${label} truth drift fixture`),
+        `${label} truth drift fixture`,
+      ),
+      /must strictly parse, reject invalid combinations, and forward only certification.data/,
+    );
+  }
 });
 
 test('truth-certification handler locks auth, body, idempotency, and bounded projection', () => {
