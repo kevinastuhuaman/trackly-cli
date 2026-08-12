@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '89724491b9cf98e65b7c842ba3262538000c20d42e91714fd617cbee62eeb410';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'b7acd0248e78f4117dd1ee2bd67531198e98e40eab42879759f93eba1168eefb';
 
 const parsedSourceCache = new Map();
 
@@ -273,6 +273,225 @@ function directToolRegistrationsInNamedParameterFunction(
     `${expectedFunction} in ${sourcePath} must register every ${receiverParameter}.${method} tool directly on its reachable body`,
   );
   return direct;
+}
+
+function directHostedToolRegistrationsInNamedFactory(
+  source,
+  expectedFunction,
+  helperName,
+  sourcePath,
+  expectedToolCatalog,
+  {
+    helperAstSha256 = '62cb38dc14622e0f6e96bca650876a142cc8a2b38adfb8bf9e257a13abdbc11d',
+  } = {},
+) {
+  const ast = parseFullSource(source, sourcePath);
+  assertImportBinding(
+    source,
+    'McpServer',
+    'McpServer',
+    '@modelcontextprotocol/sdk/server/mcp.js',
+    sourcePath,
+  );
+  assertActiveFunctionAstSha256(source, helperName, helperAstSha256, sourcePath);
+  const factory = activeNamedDefinitionAst(source, expectedFunction, sourcePath);
+  assert.equal(factory.type, 'FunctionDeclaration');
+  assert.equal(factory.async, false, `${expectedFunction} in ${sourcePath} must not be async`);
+  assert.equal(factory.generator, false, `${expectedFunction} in ${sourcePath} must not be a generator`);
+  assert.deepEqual(
+    canonicalSchemaAst(factory.params),
+    canonicalSchemaAst(babelParser.parseExpression(
+      `(authToken: string, requestApi: McpApiRequest = apiRequest) => undefined`,
+      { plugins: ['typescript'] },
+    ).params),
+    `${expectedFunction} in ${sourcePath} must preserve the exact authToken and canonical apiRequest-backed requestApi parameters without shadowing runtime dependencies`,
+  );
+  const body = factory.body.body;
+  const serverDeclarations = body.flatMap((statement) => (
+    statement.type === 'VariableDeclaration'
+      ? statement.declarations.filter((declaration) => declaration.id?.type === 'Identifier' && declaration.id.name === 'server')
+        .map((declaration) => ({ statement, declaration }))
+      : []
+  ));
+  assert.equal(serverDeclarations.length, 1, `${expectedFunction} in ${sourcePath} must declare one exact server binding`);
+  const [{ statement: serverStatement, declaration: serverDeclaration }] = serverDeclarations;
+  assert.equal(serverStatement.kind, 'const', `${expectedFunction} in ${sourcePath} must declare server as immutable const`);
+  assert.deepEqual(
+    canonicalSchemaAst(serverDeclaration.init),
+    canonicalSchemaAst(babelParser.parseExpression(
+      `new McpServer({ name: 'trackly', version: MCP_VERSION })`,
+      { plugins: ['typescript'] },
+    )),
+    `${expectedFunction} in ${sourcePath} must construct the canonical Trackly McpServer exactly`,
+  );
+  const registrations = body.flatMap((statement, index) => {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== helperName) return [];
+    assert.equal(call.callee.type, 'Identifier', `${helperName} in ${sourcePath} must be called directly`);
+    assert.equal(call.arguments[0]?.type, 'Identifier');
+    assert.equal(call.arguments[0].name, 'server', `${helperName} in ${sourcePath} must receive the factory server`);
+    assert.equal(call.arguments[1]?.type, 'StringLiteral', `${helperName} in ${sourcePath} must receive a static tool name`);
+    return [{ name: call.arguments[1].value, call, index }];
+  });
+  assert.ok(registrations.length > 0, `${expectedFunction} in ${sourcePath} must register hosted tools through ${helperName}`);
+  assert.deepEqual(
+    registrations.map(({ name }) => name),
+    expectedToolCatalog,
+    `${expectedFunction} in ${sourcePath} hosted helper tool catalog drifted from the locked allowlist`,
+  );
+  const registrationIndexes = registrations.map(({ index }) => index);
+  assert.ok(
+    registrationIndexes.every((index, offset) => offset === 0 || index > registrationIndexes[offset - 1]),
+    `${expectedFunction} in ${sourcePath} must preserve the direct hosted helper registration order`,
+  );
+  const allowedSchemaDeclarations = new Set([
+    'truthCertificationCommon',
+    'truthCertificationInputSchema',
+    'truthCertificationSchema',
+    'startApplyRunSchema',
+  ]);
+  const registrationCalls = new Set(registrations.map(({ call }) => call));
+  const allowedServerMemberCalls = [];
+  for (const [index, statement] of body.entries()) {
+    if (statement === serverStatement) {
+      assert.equal(index, 0, `${expectedFunction} in ${sourcePath} must construct server before executable work`);
+      continue;
+    }
+    if (statement.type === 'VariableDeclaration') {
+      assert.equal(statement.kind, 'const', `${expectedFunction} in ${sourcePath} schema bindings must be immutable const`);
+      assert.ok(
+        statement.declarations.every((declaration) => (
+          declaration.id?.type === 'Identifier' && allowedSchemaDeclarations.has(declaration.id.name)
+        )),
+        `${expectedFunction} in ${sourcePath} may declare only the reviewed hosted schema bindings`,
+      );
+      continue;
+    }
+    if (statement.type === 'ExpressionStatement' && registrationCalls.has(statement.expression)) continue;
+    if (statement.type === 'ExpressionStatement' && statement.expression?.type === 'CallExpression') {
+      const callee = unwrapTransparentExpression(statement.expression.callee);
+      const receiver = unwrapTransparentExpression(callee?.object);
+      const method = callee?.type === 'MemberExpression'
+        ? (callee.computed
+          ? (callee.property?.type === 'StringLiteral' ? callee.property.value : null)
+          : (callee.property?.type === 'Identifier' ? callee.property.name : null))
+        : null;
+      if (receiver?.type === 'Identifier' && receiver.name === 'server'
+        && (method === 'registerPrompt' || method === 'registerResource')) {
+        allowedServerMemberCalls.push(statement.expression);
+        continue;
+      }
+    }
+    if (statement.type === 'ReturnStatement') {
+      assert.equal(index, body.length - 1, `${expectedFunction} in ${sourcePath} must return only after every registration`);
+      assert.equal(statement.argument?.type, 'Identifier');
+      assert.equal(statement.argument.name, 'server', `${expectedFunction} in ${sourcePath} must return the registered server`);
+      continue;
+    }
+    assert.fail(
+      `${expectedFunction} in ${sourcePath} may contain only its exact server construction, reviewed schemas, direct hosted registrations, prompt/resource registrations, and sole final return`,
+    );
+  }
+  assert.deepEqual(
+    allowedServerMemberCalls.map((call) => memberName(call.callee)),
+    ['registerPrompt', 'registerResource'],
+    `${expectedFunction} in ${sourcePath} must preserve one canonical prompt and one canonical resource registration`,
+  );
+
+  const nestedHelperCalls = [];
+  function collectCalls(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) collectCalls(child);
+      return;
+    }
+    if (node.type === 'CallExpression') {
+      const callee = unwrapTransparentExpression(node.callee);
+      if (callee?.type === 'Identifier' && callee.name === helperName) nestedHelperCalls.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      collectCalls(child);
+    }
+  }
+  collectCalls(factory.body);
+  assert.equal(
+    nestedHelperCalls.length,
+    registrations.length,
+    `${expectedFunction} in ${sourcePath} must not hide additional ${helperName} calls in nested or conditional code`,
+  );
+  assert.ok(
+    nestedHelperCalls.every((call) => registrationCalls.has(call)),
+    `${expectedFunction} in ${sourcePath} must register every hosted tool through a direct reachable ${helperName} call`,
+  );
+
+  const allowedServerReferences = new Set([
+    serverDeclaration.id,
+    ...registrations.map(({ call }) => call.arguments[0]),
+    ...allowedServerMemberCalls.map((call) => unwrapTransparentExpression(call.callee).object),
+    body.at(-1).argument,
+  ]);
+  const serverReferences = collectBindingReferences(factory, 'server', () => false);
+  assert.equal(
+    serverReferences.length,
+    allowedServerReferences.size,
+    `${expectedFunction} in ${sourcePath} must not alias, escape, reassign, or use server through an alternate registrar`,
+  );
+  assert.ok(
+    serverReferences.every((reference) => allowedServerReferences.has(reference)),
+    `${expectedFunction} in ${sourcePath} must use server only for reviewed registrations and its final return`,
+  );
+
+  const helperDefinition = activeNamedDefinitionAst(source, helperName, sourcePath);
+  const helperReferences = collectBindingReferences(ast, helperName, () => false);
+  const allowedHelperReferences = new Set([helperDefinition.id, ...registrations.map(({ call }) => call.callee)]);
+  assert.equal(
+    helperReferences.length,
+    allowedHelperReferences.size,
+    `${helperName} in ${sourcePath} must not be aliased, escaped, reassigned, or invoked outside the reviewed catalog`,
+  );
+  assert.ok(
+    helperReferences.every((reference) => allowedHelperReferences.has(reference)),
+    `${helperName} in ${sourcePath} must be referenced only by its definition and direct reviewed registrations`,
+  );
+  return registrations;
+}
+
+function assertHostedStartApplyRunBatchBindingGuard(registration, sourcePath) {
+  const wrapper = registration.call.arguments[4];
+  assert.equal(wrapper?.type, 'CallExpression', `trackly_start_apply_run handler in ${sourcePath} must call wrapTool`);
+  assert.equal(babelCalleeName(wrapper.callee), 'wrapTool', `trackly_start_apply_run handler in ${sourcePath} must use wrapTool`);
+  const handler = wrapper.arguments[1];
+  assert.equal(handler?.type, 'ArrowFunctionExpression', `trackly_start_apply_run in ${sourcePath} must use an arrow handler`);
+  assert.equal(handler.async, true, `trackly_start_apply_run in ${sourcePath} must await its request handler`);
+  assert.equal(handler.params.length, 1);
+  assert.equal(handler.params[0]?.type, 'Identifier');
+  assert.equal(handler.params[0].name, 'value');
+  assert.equal(handler.body?.type, 'BlockStatement');
+  const expectedHandler = babelParser.parseExpression(`async (value) => {
+    const batchValues = [
+      value.batchId,
+      value.memberId,
+      value.expectedMemberVersion,
+      value.expectedInspectionEpoch,
+      value.leaseToken,
+    ];
+    if (
+      batchValues.some((item) => item !== undefined)
+      && batchValues.some((item) => item === undefined)
+    ) {
+      throw Object.assign(new Error('Batch binding fields must be supplied together'), {
+        status: 400,
+        code: 'incomplete_apply_batch_binding',
+      });
+    }
+    return requestApi('POST', '/api/jobscout/apply/runs', authToken, value);
+  }`, { plugins: ['typescript'] });
+  assert.deepEqual(
+    canonicalSchemaAst(handler.body.body),
+    canonicalSchemaAst(expectedHandler.body.body),
+    `trackly_start_apply_run in ${sourcePath} must reject every partial batch binding before dispatching the exact start request`,
+  );
 }
 
 function assertCommonJsDestructuredRequire(source, importedName, moduleName, sourcePath) {
@@ -806,14 +1025,23 @@ function directToolRegistrationsInExportedFunction(
   const preRegistrationStatements = factory.body.body.slice(0, firstRegistrationIndex);
   assert.equal(
     preRegistrationStatements.length,
-    2,
-    `${expectedFunction} in ${sourcePath} must contain only the verified server and registration-helper declarations before registering tools`,
+    4,
+    `${expectedFunction} in ${sourcePath} must contain only the verified server, prompt capability, empty prompt handler, and registration-helper declarations before registering tools`,
   );
-  assert.ok(
-    preRegistrationStatements.every((statement) => (
-      statement.type === 'VariableDeclaration' && statement.declarations.length === 1
+  assert.deepEqual(
+    preRegistrationStatements.map((statement) => canonicalSchemaAst(statement)),
+    parseFullSource(`
+      const server = new McpServer({ name: 'trackly', version: PLUGIN_VERSION });
+      server.server.registerCapabilities({ prompts: {} });
+      server.server.setRequestHandler(ListPromptsRequestSchema, () => ({ prompts: [] }));
+      const registerPluginTool = (name, config, handler) => {};
+    `, `${expectedFunction} locked pre-registration prefix`).program.body.map((statement, index) => (
+      index === 3 ? canonicalSchemaAst({ ...statement, declarations: [{
+        ...statement.declarations[0],
+        init: preRegistrationStatements[3].declarations[0].init,
+      }] }) : canonicalSchemaAst(statement)
     )),
-    `${expectedFunction} in ${sourcePath} must contain only single-binding declarations before registering tools`,
+    `${expectedFunction} in ${sourcePath} must preserve the exact prompt capability and empty prompt handler before tool registration`,
   );
   const directDeclarators = preRegistrationStatements.flatMap((statement) => (
     statement.type === 'VariableDeclaration' ? statement.declarations : []
@@ -1042,6 +1270,8 @@ function directToolRegistrationsInExportedFunction(
   const uiResourceReceiver = uiResourceLoops[0]?.body?.body?.[1]?.expression?.callee?.object;
   const allowedServerReferences = [
     serverBindings[0].id,
+    preRegistrationStatements[1].expression.callee.object.object,
+    preRegistrationStatements[2].expression.callee.object.object,
     helperReturnStatements[0].argument.callee.object,
     ...(uiResourceReceiver ? [uiResourceReceiver] : []),
     factoryReturns[0].argument,
@@ -1568,7 +1798,8 @@ function canonicalPluginMount(factory, routerBinding, mountPath, sourcePath) {
 const REVIEWED_GLOBAL_MIDDLEWARE_CALL_DIGESTS = Object.freeze([
   'c9c8443c9a480263e54218e603a7ed927d1e4e411c7a4542e80206cb5b3ddecd',
   '81d41aba94334a95d3a6002fd6ced8069b9739cd52c6679c6293e01c3f547f75',
-  '0c55d2f0a6f768bafaa9a8e8a8d5d52280734c68e9902a93e63d57441599b967',
+  '1eac0496bd02d2dadc4227b753c0ca2d04169bf3c43bec0f5d1eaa0c4bd4bf96',
+  'f730c8df64484529aff713b1a49bdfcc570b99fb682f60d17a5fde0f9eed529a',
   '12def47c0dc1628a891b9045ed9c275af25dd73660929d528943f95a98c34855',
   'bc0d7d12f97ab6e9e79b00fa3701899806387b16353d9575628545a06644b2e9',
   'd63cf7bbc1fae45f475807325f4178283bfea854bf4aeecaf7754f66e509e0a5',
@@ -2173,14 +2404,18 @@ function assertImmutablePluginScopeFreeMethods(source, sourcePath) {
     source,
     name,
     `new Set([
+      'server/discover',
       'initialize',
       'ping',
       'notifications/initialized',
       'notifications/cancelled',
+      'notifications/roots/list_changed',
+      'notifications/progress',
       'tools/list',
       'resources/list',
       'resources/templates/list',
       'resources/read',
+      'prompts/list',
     ])`,
     sourcePath,
   );
@@ -2264,11 +2499,41 @@ function assertImmutablePluginToolScopesSemantics(source, sourcePath) {
     lockedFunctionReferences.length > 0,
     `requiredScopesForPluginTool in ${sourcePath} must read ${name}`,
   );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'diagnosticToolName',
+    `function diagnosticToolName(value: unknown): string {
+      return typeof value === 'string' && Object.hasOwn(TRACKLY_PLUGIN_TOOL_SCOPES, value)
+        ? value
+        : '[redacted]';
+    }`,
+    sourcePath,
+  );
+  const diagnosticFunction = activeNamedDefinitionAst(
+    source,
+    'diagnosticToolName',
+    sourcePath,
+  );
+  const diagnosticFunctionReferences = collectBindingReferences(
+    diagnosticFunction,
+    name,
+    () => false,
+  );
+  assert.equal(
+    diagnosticFunctionReferences.length,
+    1,
+    `diagnosticToolName in ${sourcePath} must validate names against ${name} exactly once`,
+  );
   const references = collectBindingReferences(ast, name, () => false);
   assert.deepEqual(
     references,
-    [declaration.id, ...namesReferences, ...lockedFunctionReferences],
-    `${name} in ${sourcePath} must not be reassigned, mutated, aliased, escaped, or referenced outside its locked names catalog and requiredScopesForPluginTool`,
+    [
+      declaration.id,
+      ...namesReferences,
+      ...diagnosticFunctionReferences,
+      ...lockedFunctionReferences,
+    ],
+    `${name} in ${sourcePath} must not be reassigned, mutated, aliased, escaped, or referenced outside its locked names catalog, diagnostic redaction, and requiredScopesForPluginTool`,
   );
 }
 
@@ -2415,6 +2680,17 @@ function registrationArgumentSources(source, registration, sourcePath) {
 }
 
 function registeredInputSchemaName(registration, sourcePath) {
+  if (registration.call.callee?.type === 'Identifier'
+    && registration.call.callee.name === 'registerHostedMcpTool') {
+    const schema = registration.call.arguments[3];
+    if (schema?.type === 'Identifier') return schema.name;
+    assert.equal(schema?.type, 'MemberExpression');
+    assert.equal(schema.computed, false);
+    assert.equal(schema.property?.type, 'Identifier');
+    assert.equal(schema.property.name, 'shape');
+    assert.equal(schema.object?.type, 'Identifier');
+    return schema.object.name;
+  }
   let descriptor = registration.call.arguments[1];
   while (descriptor?.type === 'TSSatisfiesExpression' || descriptor?.type === 'TSAsExpression') {
     descriptor = descriptor.expression;
@@ -2480,6 +2756,10 @@ function registrationDescriptorPropertyAst(source, registration, propertyName, s
 
 function registrationInputSchemaAst(source, registration, sourcePath) {
   const callee = registration.call.callee;
+  if (callee?.type === 'Identifier' && callee.name === 'registerHostedMcpTool') {
+    assert.ok(registration.call.arguments[3], `${registration.name} in ${sourcePath} must publish an input schema`);
+    return registration.call.arguments[3];
+  }
   const method = callee?.type === 'MemberExpression' && !callee.computed
     && callee.property?.type === 'Identifier'
     ? callee.property.name
@@ -3964,12 +4244,19 @@ function assertTruthWrapperCompatibility(localWrapper, hostedSchema) {
 
 function assertStartRunWrapperCompatibility(localWrapper, hostedSchema) {
   assert.equal(hostedSchema?.type, 'CallExpression');
-  assert.equal(memberName(hostedSchema.callee), 'superRefine');
-  assert.equal(hostedSchema.arguments.length, 1, 'hosted startApplyRunSchema must have one refinement callback');
+  const hostedMember = memberName(hostedSchema.callee);
+  const hostedPublishedObject = hostedMember === 'superRefine'
+    ? hostedSchema.callee.object
+    : hostedSchema;
+  if (hostedMember === 'superRefine') {
+    assert.equal(hostedSchema.arguments.length, 1, 'hosted startApplyRunSchema must have one refinement callback');
+  } else {
+    assert.equal(hostedMember, 'object', 'hosted startApplyRunSchema must be a z.object or a refined z.object');
+  }
   assert.deepEqual(
     canonicalSchemaAst(localWrapper),
-    canonicalSchemaAst(hostedSchema.callee.object),
-    'startApplyRunInputSchema must equal the hosted published object before parse-time superRefine',
+    canonicalSchemaAst(hostedPublishedObject),
+    'startApplyRunInputSchema must equal the hosted published object before any parse-time refinement',
   );
 }
 
@@ -4318,6 +4605,10 @@ verifyCoordinatedBackendCore({
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
   'trackly_diagnose_local_path',
+];
+const HOSTED_ONLY_TOOLS = [
+  'trackly_chat',
+  'get_more_tools',
 ];
 
 for (const constantName of [
@@ -4851,13 +5142,13 @@ assertActiveClassMethodDefinitionAst(
     let grant: McpGrantRow;
     try {
       const result = await pool.query<McpGrantRow>(
-        \`SELECT grant.grant_id, grant.user_id, grant.client_id,
-                grant.consented_scopes, grant.resource, users.auth_epoch
-         FROM mcp_oauth_grants AS grant
-         JOIN users ON users.id = grant.user_id
-         WHERE grant.grant_id = $1
-           AND grant.revoked_at IS NULL
-           AND grant.expires_at > NOW()\`,
+        \`SELECT oauth_grant.grant_id, oauth_grant.user_id, oauth_grant.client_id,
+                oauth_grant.consented_scopes, oauth_grant.resource, users.auth_epoch
+         FROM mcp_oauth_grants AS oauth_grant
+         JOIN users ON users.id = oauth_grant.user_id
+         WHERE oauth_grant.grant_id = $1
+           AND oauth_grant.revoked_at IS NULL
+           AND oauth_grant.expires_at > NOW()\`,
         [decoded.grant_id],
       );
       if (result.rows.length !== 1) {
@@ -5319,6 +5610,7 @@ assertActiveFunctionDefinitionAst(
     for (const candidate of messages) {
       if (candidate === null || typeof candidate !== 'object') continue;
       const message = candidate as JsonRpcMessage;
+      if (isJsonRpcResponse(candidate as Record<string, unknown>)) continue;
       if (typeof message.method === 'string'
         && TRACKLY_PLUGIN_SCOPE_FREE_METHODS.has(message.method)) continue;
       if (message.method !== 'tools/call') {
@@ -5341,6 +5633,48 @@ assertActiveFunctionDefinitionAst(
     }
 
     const required = denied.required || [];
+    const messageShape = typeof denied.message.method === 'string'
+      ? 'method-present'
+      : 'method-free';
+    const method = diagnosticMethod(denied.message.method);
+    const tool = method === 'tools/call'
+      ? diagnosticToolName(denied.message.params?.name)
+      : '[redacted]';
+    const missingSignature = required
+      .filter((scope) => !grantedSet.has(scope))
+      .sort()
+      .join(',') || '[none]';
+    const diagnosticKey = \`\${messageShape}:\${method}:\${tool}:\${missingSignature}\`;
+    const diagnostic = scopeDenialDiagnostics.get(diagnosticKey) || {
+      nextAt: 0,
+      suppressed: 0,
+    };
+    const now = Date.now();
+    if (now >= diagnostic.nextAt) {
+      scopeDenialDiagnostics.set(diagnosticKey, {
+        nextAt: now + SCOPE_DENIAL_DIAGNOSTIC_INTERVAL_MS,
+        suppressed: 0,
+      });
+      try {
+        logger.warn('trackly-plugin-mcp', 'OAuth scope enforcement denied request', {
+          messageShape,
+          method,
+          tool,
+          requiredScopes: required.slice(0, 16),
+          grantedScopes: granted
+            .filter((scope): scope is McpScope => (
+              typeof scope === 'string' && MCP_SUPPORTED_SCOPES.includes(scope as McpScope)
+            ))
+            .slice(0, 16),
+          suppressedSinceLast: diagnostic.suppressed,
+        });
+      } catch {
+        // Diagnostics must never change the authorization response.
+      }
+    } else {
+      diagnostic.suppressed += 1;
+      scopeDenialDiagnostics.set(diagnosticKey, diagnostic);
+    }
     res.setHeader(
       'WWW-Authenticate',
       \`Bearer error="insufficient_scope", scope="\${required.join(' ')}"\`,
@@ -5618,6 +5952,9 @@ const sharedParseSchemaNames = [
   'truthCertificationSchema',
   'startApplyRunSchema',
 ];
+const exactSharedParseSchemaNames = sharedParseSchemaNames.filter(
+  (schemaName) => schemaName !== 'startApplyRunSchema',
+);
 const localApplySchemaAsts = Object.fromEntries(
   [
     ...sharedParseSchemaNames,
@@ -5634,7 +5971,7 @@ const hostedApplySchemaAsts = Object.fromEntries(
     parseSchemaExpression(hostedApplySource, schemaName, hostedApplySourcePath),
   ]),
 );
-for (const schemaName of sharedParseSchemaNames) {
+for (const schemaName of exactSharedParseSchemaNames) {
   assert.deepEqual(
     canonicalSchemaAst(localApplySchemaAsts[schemaName]),
     canonicalSchemaAst(hostedApplySchemaAsts[schemaName]),
@@ -5654,14 +5991,14 @@ for (const [side, sourceText, sourcePath, schemaAsts] of [
   ['hosted', hostedApplySource, hostedApplySourcePath, hostedApplySchemaAsts],
 ]) {
   const dependencies = [...new Set(
-    sharedParseSchemaNames.flatMap((schemaName) => referencedFreeIdentifiers(schemaAsts[schemaName])),
+    exactSharedParseSchemaNames.flatMap((schemaName) => referencedFreeIdentifiers(schemaAsts[schemaName])),
   )].sort();
   classifiedSchemaDependencies[side] = {
     sourceText,
     sourcePath,
     dependencies: classifyFreeIdentifiers(dependencies, {
       runtimeGlobal: ['undefined', 'z'],
-      sharedDefinition: sharedParseSchemaNames,
+      sharedDefinition: exactSharedParseSchemaNames,
       contractConstant: expectedSchemaConstants,
     }, `${side} Apply schema`),
   };
@@ -5733,7 +6070,7 @@ const publishedSchemaCompatibility = {
   trackly_certify_apply_batch_truth: {
     localPublished: 'truthCertificationInputSchema',
     localParse: 'truthCertificationSchema',
-    hostedPublishedAndParse: 'truthCertificationSchema',
+    hostedPublishedAndParse: 'truthCertificationInputSchema',
   },
   trackly_start_apply_run: {
     localPublished: 'startApplyRunInputSchema',
@@ -5765,22 +6102,17 @@ const executableLocalBaseRegistrations = directToolRegistrationsInNamedParameter
   localServerSourcePath,
   'direct-construction',
 );
-const executableHostedRegistrations = [
-  ...directToolRegistrationsInNamedFactory(
-    hostedApplySource,
-    'createTracklyMcpServer',
-    'server.tool',
-    hostedApplySourcePath,
-    pluginLock.hostedMcpToolAllowlist,
-  ),
-  ...directToolRegistrationsInNamedFactory(
-    hostedApplySource,
-    'createTracklyMcpServer',
-    'server.registerTool',
-    hostedApplySourcePath,
-    pluginLock.hostedMcpToolAllowlist,
-  ),
-];
+const executableHostedRegistrations = directHostedToolRegistrationsInNamedFactory(
+  hostedApplySource,
+  'createTracklyMcpServer',
+  'registerHostedMcpTool',
+  hostedApplySourcePath,
+  pluginLock.hostedMcpToolAllowlist,
+);
+assertHostedStartApplyRunBatchBindingGuard(
+  executableHostedRegistrations.find(({ name }) => name === 'trackly_start_apply_run'),
+  hostedApplySourcePath,
+);
 const executableLocalApplyToolNames = executableLocalApplyRegistrations.map(({ name }) => name);
 const executableLocalToolNames = [
   ...executableLocalBaseRegistrations.map(({ name }) => name),
@@ -5794,7 +6126,7 @@ assert.equal(
 assert.deepEqual(
   [...executableLocalToolNames].sort(),
   [
-    ...pluginLock.hostedMcpToolAllowlist.filter((name) => name !== 'trackly_chat'),
+    ...pluginLock.hostedMcpToolAllowlist.filter((name) => !HOSTED_ONLY_TOOLS.includes(name)),
     ...LOCAL_ONLY_TOOLS,
   ].sort(),
   'Executable local MCP registrations must exactly match the locked hosted catalog minus hosted-only chat plus local-only tools',
@@ -6933,6 +7265,7 @@ module.exports = {
   assertMcpScopeHelperSemantics,
   assertMergeCommitPreservesPaths,
   assertHostedCommitTimestamps,
+  assertHostedStartApplyRunBatchBindingGuard,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
   assertExportedFactoryUsedByPluginRouter,
@@ -6948,6 +7281,7 @@ module.exports = {
   canonicalSchemaAst,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
+  directHostedToolRegistrationsInNamedFactory,
   directToolRegistrationsInNamedFactory,
   directToolRegistrationsInNamedParameterFunction,
   exactSchemaDefinition,

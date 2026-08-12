@@ -151,7 +151,7 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.2');
+  assert.equal(contract.contractVersion, '3.6.3');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -159,17 +159,32 @@ test('local MCP Apply schemas match each complete versioned input schema', () =>
   }
 });
 
-function toolsDigest(tools) {
+function canonicalJsonValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalJsonValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, canonicalJsonValue(nestedValue)]),
+    );
+  }
+  return value;
+}
+
+function contractDigest(candidate) {
   const crypto = require('node:crypto');
-  const canonicalTools = Object.fromEntries(
-    Object.entries(tools).sort(([left], [right]) => left.localeCompare(right)),
-  );
-  return crypto.createHash('sha256').update(JSON.stringify(canonicalTools)).digest('hex');
+  const executableContract = canonicalJsonValue({
+    constants: candidate.constants,
+    tools: candidate.tools,
+  });
+  return crypto.createHash('sha256').update(JSON.stringify(executableContract)).digest('hex');
 }
 
 function assertNoHistoricalVersionReuse(candidate) {
   for (const [version, historical] of Object.entries(contractHistory)) {
-    if (toolsDigest(candidate.tools) !== historical.toolsSha256) {
+    if (contractDigest(candidate) !== historical.contractSha256) {
       assert.notEqual(candidate.contractVersion, version);
     }
   }
@@ -183,6 +198,16 @@ test('contract history covers changes to every tool, not only profile tools', ()
   const historicalContract = JSON.parse(JSON.stringify(contract));
   historicalContract.contractVersion = contract.contractVersion;
   historicalContract.tools.trackly_get_apply_queue += ',mutation:z.boolean().optional()';
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
+});
+
+test('contract history covers changes to constants as well as tools', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.constants.applyBatchConflictCodes.push('future_conflict');
   assert.throws(
     () => assertNoHistoricalVersionReuse(historicalContract),
     (error) => error?.code === 'ERR_ASSERTION',
@@ -1251,7 +1276,7 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   ancestryDrift.mergedRuntime.parents[1] = 'a'.repeat(40);
   assert.throws(verifyFixture(ancestryDrift), /must prove the reviewed runtime commit is a direct parent/);
   const staleCapture = structuredClone(originalFixture);
-  staleCapture.capturedAt = '2026-08-11T04:45:00-07:00';
+  staleCapture.capturedAt = '2026-08-12T12:56:02-07:00';
   assert.throws(verifyFixture(staleCapture), /must be captured within 24 hours of its recorded runtime merge/);
 });
 
