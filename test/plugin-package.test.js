@@ -3528,13 +3528,20 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(handoff, /Never tell the user to submit an already reconciled member/);
 });
 
-test('submission fixtures cover six positive and three negative cases', () => {
+test('submission fixtures cover six internal cases and the exact five-case portal subset', () => {
   const fixtures = json('plugins/trackly/listing/submission-tests.json');
   const lock = json('plugins/trackly/skill-lock.json');
   const allowedTools = new Set(lock.publicToolAllowlist);
   assert.equal(fixtures.positive.length, 6);
   assert.equal(fixtures.negative.length, 3);
   assert.equal(new Set([...fixtures.positive, ...fixtures.negative].map((item) => item.id)).size, 9);
+  assert.equal(fixtures.reviewEnvironment.portalPositiveCaseIds.length, 5);
+  assert.equal(new Set(fixtures.reviewEnvironment.portalPositiveCaseIds).size, 5);
+  assert.ok(
+    fixtures.reviewEnvironment.portalPositiveCaseIds.every((id) =>
+      fixtures.positive.some((item) => item.id === id)),
+    'every portal positive case must resolve to a reviewed internal fixture',
+  );
   assert.match(fixtures.reviewEnvironment.account, /synthetic reviewer account/i);
   assert.match(fixtures.reviewEnvironment.submissionPolicy, /No fixture may submit/);
   assert.doesNotMatch(JSON.stringify(fixtures), /\b(?:Kevin|Astuhuaman)\b/i, 'submission fixtures must not leak a real reviewer identity');
@@ -3661,6 +3668,8 @@ test('OpenAI Platform draft and public submission remain explicit release gates'
   );
   assert.match(gates, /Kevin must approve.*immediately before selecting \*\*Submit for Review\*\*/);
   assert.match(gates, /ask Kevin again immediately before selecting \*\*Publish\*\*/);
+  assert.match(gates, /portal accepts exactly five positive cases/);
+  assert.match(gates, /demo covering Trackly's main use cases on ChatGPT web, iOS, and Android/);
 });
 
 test('plugin README directs maintainers to the current portal without a developer-mode app binding', () => {
