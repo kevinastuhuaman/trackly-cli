@@ -1192,7 +1192,39 @@ test('coordinated hosted verifier executes disposition, wrapper, and lifecycle w
       resumeId: z.number().int().min(1).nullable().optional(),
       resumeSha256: z.string().regex(/^[a-f0-9]{64}$/i).nullable().optional(),
     }).strict();
-    const startApplyRunInputSchema = z.object({ runId: z.number().int() }).strict();
+    const startApplyRunInputSchema = z.object({
+      runId: z.number().int(),
+      batchId: z.number().int().optional(),
+      memberId: z.number().int().optional(),
+      expectedMemberVersion: z.number().int().optional(),
+      expectedInspectionEpoch: z.number().int().optional(),
+      leaseToken: z.string().optional(),
+    });
+    const startApplyRunSchema = z.object({
+      runId: z.number().int(),
+      batchId: z.number().int().optional(),
+      memberId: z.number().int().optional(),
+      expectedMemberVersion: z.number().int().optional(),
+      expectedInspectionEpoch: z.number().int().optional(),
+      leaseToken: z.string().optional(),
+    }).superRefine((value, context) => {
+      const batchValues = [
+        value.batchId,
+        value.memberId,
+        value.expectedMemberVersion,
+        value.expectedInspectionEpoch,
+        value.leaseToken,
+      ];
+      if (
+        batchValues.some((item) => item !== undefined)
+        && batchValues.some((item) => item === undefined)
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Batch binding fields must be supplied together',
+        });
+      }
+    });
   `;
   const hostedApplySource = `
     const applyExecutionDispositionSchema = z.object({ source: z.literal('live') }).strict();
@@ -1217,8 +1249,14 @@ test('coordinated hosted verifier executes disposition, wrapper, and lifecycle w
         resumeSha256: z.null().optional(),
       }).strict(),
     ]);
-    const startApplyRunSchema = z.object({ runId: z.number().int() }).strict()
-      .superRefine(validateStartApplyRun);
+    const startApplyRunSchema = z.object({
+      runId: z.number().int(),
+      batchId: z.number().int().optional(),
+      memberId: z.number().int().optional(),
+      expectedMemberVersion: z.number().int().optional(),
+      expectedInspectionEpoch: z.number().int().optional(),
+      leaseToken: z.string().optional(),
+    });
   `;
   const hostedPluginSource = `
     function wrapTool(
@@ -1258,10 +1296,13 @@ test('coordinated hosted verifier executes disposition, wrapper, and lifecycle w
   assert.throws(verify(lifecycleDrift), /hosted plugin lifecycle drifted/);
   const publishedWrapperDrift = structuredClone(fixture);
   publishedWrapperDrift.localApplySource = publishedWrapperDrift.localApplySource.replace(
-    'const startApplyRunInputSchema = z.object({ runId: z.number().int() }).strict();',
-    'const startApplyRunInputSchema = z.object({ runId: z.string() }).strict();',
+    'runId: z.number().int(),',
+    'runId: z.string(),',
   );
-  assert.throws(verify(publishedWrapperDrift), /startApplyRunInputSchema must equal the hosted published object/);
+  assert.throws(
+    verify(publishedWrapperDrift),
+    /local startApplyRunSchema must refine the exact published startApplyRunInputSchema|startApplyRunInputSchema must equal the hosted published object/,
+  );
   const publishedTruthDrift = structuredClone(fixture);
   publishedTruthDrift.hostedApplySource = publishedTruthDrift.hostedApplySource.replace(
     "resumeDependency: z.enum(['approved', 'not_applicable'])",

@@ -29,6 +29,8 @@ const {
   assertMergeCommitPreservesPaths,
   assertHostedCommitTimestamps,
   assertHostedStartApplyRunBatchBindingGuard,
+  assertJsonRpcResponseClassifierSemantics,
+  assertStartRunWrapperCompatibility,
   assertWrappedHandlerParsesWithSchema,
   assertWrappedHandlerSafeParsesTruthCertification,
   assertWrappedHandlerAssignedRequestEndpoint,
@@ -554,6 +556,70 @@ test('scope-free plugin methods are immutable and used only by the locked member
       'widened scope-free fixture',
     ),
     /must preserve its locked executable definition/,
+  );
+});
+
+test('JSON-RPC response bypass is bound to the canonical SDK response schema', () => {
+  const source = `
+    import { JSONRPCResponseSchema } from '@modelcontextprotocol/sdk/types.js';
+    function isJsonRpcResponse(message: Record<string, unknown>): boolean {
+      return JSONRPCResponseSchema.safeParse(message).success;
+    }
+    function enforce(candidate) {
+      if (isJsonRpcResponse(candidate)) return;
+      deny();
+    }
+  `;
+  assert.doesNotThrow(() => assertJsonRpcResponseClassifierSemantics(source, 'response classifier fixture'));
+  for (const [label, drifted] of [
+    ['widened', source.replace('JSONRPCResponseSchema.safeParse(message).success', 'true')],
+    ['redirected', source.replace("'@modelcontextprotocol/sdk/types.js'", "'./decoy.js'")],
+    ['aliased', `${source}\nconst classify = isJsonRpcResponse;`],
+    ['schema escaped', `${source}\nconsume(JSONRPCResponseSchema);`],
+  ]) {
+    assert.throws(
+      () => assertJsonRpcResponseClassifierSemantics(drifted, `${label} response classifier fixture`),
+      /must (?:preserve its locked executable branch semantics|import JSONRPCResponseSchema|be used only|be called exactly once)/,
+    );
+  }
+});
+
+test('start-run schema compatibility locks the local refinement and hosted direct object', () => {
+  const base = `z.object({
+    jobId: z.number().int().min(1),
+    batchId: z.number().int().min(1).optional(),
+    memberId: z.number().int().min(1).optional(),
+    expectedMemberVersion: z.number().int().min(1).optional(),
+    expectedInspectionEpoch: z.number().int().min(0).optional(),
+    leaseToken: z.string().min(1).max(1024).optional(),
+  })`;
+  const refinement = `.superRefine((value, context) => {
+    const batchValues = [
+      value.batchId,
+      value.memberId,
+      value.expectedMemberVersion,
+      value.expectedInspectionEpoch,
+      value.leaseToken,
+    ];
+    if (
+      batchValues.some((item) => item !== undefined)
+      && batchValues.some((item) => item === undefined)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch binding fields must be supplied together',
+      });
+    }
+  })`;
+  const parse = (source) => parseSchemaExpression(`const schema = ${source};`, 'schema', 'start schema fixture');
+  assert.doesNotThrow(() => assertStartRunWrapperCompatibility(parse(base), parse(`${base}${refinement}`), parse(base)));
+  assert.throws(
+    () => assertStartRunWrapperCompatibility(parse(base), parse(`${base}${refinement.replace('item === undefined', 'false')}`), parse(base)),
+    /must preserve the exact all-or-none batch-binding refinement/,
+  );
+  assert.throws(
+    () => assertStartRunWrapperCompatibility(parse(base), parse(`${base}${refinement}`), parse(`${base}.superRefine(() => {})`)),
+    /must be a direct z.object/,
   );
 });
 

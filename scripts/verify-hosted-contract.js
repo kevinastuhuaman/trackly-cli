@@ -4285,22 +4285,74 @@ function assertTruthWrapperCompatibility(localWrapper, hostedSchema) {
   }
 }
 
-function assertStartRunWrapperCompatibility(localWrapper, hostedSchema) {
+function assertStartRunWrapperCompatibility(localWrapper, localParseSchema, hostedSchema) {
+  assert.equal(memberName(localParseSchema?.callee), 'superRefine');
+  assert.equal(localParseSchema.arguments.length, 1, 'local startApplyRunSchema must have one refinement callback');
+  assert.deepEqual(
+    canonicalSchemaAst(localParseSchema.callee.object),
+    canonicalSchemaAst(localWrapper),
+    'local startApplyRunSchema must refine the exact published startApplyRunInputSchema',
+  );
+  const expectedRefinement = parseSchemaExpression(`const refinement = (value, context) => {
+    const batchValues = [
+      value.batchId,
+      value.memberId,
+      value.expectedMemberVersion,
+      value.expectedInspectionEpoch,
+      value.leaseToken,
+    ];
+    if (
+      batchValues.some((item) => item !== undefined)
+      && batchValues.some((item) => item === undefined)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch binding fields must be supplied together',
+      });
+    }
+  };`, 'refinement', 'expected local startApplyRunSchema refinement');
+  assert.deepEqual(
+    canonicalSchemaAst(localParseSchema.arguments[0]),
+    canonicalSchemaAst(expectedRefinement),
+    'local startApplyRunSchema must preserve the exact all-or-none batch-binding refinement',
+  );
   assert.equal(hostedSchema?.type, 'CallExpression');
-  const hostedMember = memberName(hostedSchema.callee);
-  const hostedPublishedObject = hostedMember === 'superRefine'
-    ? hostedSchema.callee.object
-    : hostedSchema;
-  if (hostedMember === 'superRefine') {
-    assert.equal(hostedSchema.arguments.length, 1, 'hosted startApplyRunSchema must have one refinement callback');
-  } else {
-    assert.equal(hostedMember, 'object', 'hosted startApplyRunSchema must be a z.object or a refined z.object');
-  }
+  assert.equal(memberName(hostedSchema.callee), 'object', 'hosted startApplyRunSchema must be a direct z.object');
   assert.deepEqual(
     canonicalSchemaAst(localWrapper),
-    canonicalSchemaAst(hostedPublishedObject),
-    'startApplyRunInputSchema must equal the hosted published object before any parse-time refinement',
+    canonicalSchemaAst(hostedSchema),
+    'startApplyRunInputSchema must equal the hosted published object',
   );
+}
+
+function assertJsonRpcResponseClassifierSemantics(source, sourcePath) {
+  const schemaImport = assertImportBinding(
+    source,
+    'JSONRPCResponseSchema',
+    'JSONRPCResponseSchema',
+    '@modelcontextprotocol/sdk/types.js',
+    sourcePath,
+  );
+  assertActiveFunctionDefinitionAst(
+    source,
+    'isJsonRpcResponse',
+    `function isJsonRpcResponse(message: Record<string, unknown>): boolean {
+      return JSONRPCResponseSchema.safeParse(message).success;
+    }`,
+    sourcePath,
+  );
+  const ast = parseFullSource(source, sourcePath);
+  const definition = activeNamedDefinitionAst(source, 'isJsonRpcResponse', sourcePath);
+  const schemaReferences = collectBindingReferences(
+    ast,
+    'JSONRPCResponseSchema',
+    (_node, parent, parentKey) => parent?.type === 'ImportSpecifier' && parentKey === 'imported',
+  );
+  assert.equal(schemaReferences.length, 2, `JSONRPCResponseSchema in ${sourcePath} must be used only by isJsonRpcResponse`);
+  assert.equal(schemaReferences[0], schemaImport.local);
+  const classifierReferences = collectBindingReferences(ast, 'isJsonRpcResponse', () => false);
+  assert.equal(classifierReferences.length, 2, `isJsonRpcResponse in ${sourcePath} must be called exactly once by scope enforcement`);
+  assert.equal(classifierReferences[0], definition.id);
 }
 
 function verifyCoordinatedBackendCore({
@@ -4364,6 +4416,7 @@ function verifyCoordinatedBackendCore({
   );
   assertStartRunWrapperCompatibility(
     parseSchemaExpression(localApplySource, 'startApplyRunInputSchema', localApplyPath),
+    parseSchemaExpression(localApplySource, 'startApplyRunSchema', localApplyPath),
     parseSchemaExpression(hostedApplySource, 'startApplyRunSchema', hostedApplyPath),
   );
   const localTruthWrapper = parseSchemaExpression(
@@ -5554,6 +5607,7 @@ const executableScopeContract = staticStringArrayMap(
 assertMcpScopeHelperSemantics(hostedMcpScopesSource, hostedMcpScopesPath);
 assertImmutablePluginScopeFreeMethods(hostedPluginScopesSource, hostedPluginScopesPath);
 assertImmutablePluginToolScopesSemantics(hostedPluginScopesSource, hostedPluginScopesPath);
+assertJsonRpcResponseClassifierSemantics(hostedPluginScopesSource, hostedPluginScopesPath);
 assertActiveVariableInitializerAst(
   hostedApplicationProfileCatalogSource,
   'APPLICATION_PROFILE_FIELDS',
@@ -6014,9 +6068,7 @@ const sharedParseSchemaNames = [
   'truthCertificationSchema',
   'startApplyRunSchema',
 ];
-const exactSharedParseSchemaNames = sharedParseSchemaNames.filter(
-  (schemaName) => schemaName !== 'startApplyRunSchema',
-);
+const exactSharedParseSchemaNames = sharedParseSchemaNames.filter((schemaName) => schemaName !== 'startApplyRunSchema');
 const localApplySchemaAsts = Object.fromEntries(
   [
     ...sharedParseSchemaNames,
@@ -6308,6 +6360,7 @@ assertTruthWrapperCompatibility(
 );
 assertStartRunWrapperCompatibility(
   localApplySchemaAsts.startApplyRunInputSchema,
+  localApplySchemaAsts.startApplyRunSchema,
   hostedApplySchemaAsts.startApplyRunSchema,
 );
 
@@ -7336,6 +7389,8 @@ module.exports = {
   assertMergeCommitPreservesPaths,
   assertHostedCommitTimestamps,
   assertHostedStartApplyRunBatchBindingGuard,
+  assertJsonRpcResponseClassifierSemantics,
+  assertStartRunWrapperCompatibility,
   assertWrappedHandlerSafeParsesTruthCertification,
   assertBabelPropertyExpression,
   assertExactSchemaProperties,
