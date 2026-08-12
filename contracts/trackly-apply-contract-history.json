@@ -1,11 +1,14 @@
 {
   "3.6.0": {
-    "toolsSha256": "d3e856817b5b94b8e091bff2d57954e99a6abea82f41d029f2671dbbbccccd41"
+    "contractSha256": "ac94b02de5123ec743283cbbc76ca44cc678dbb633951679d457f8f8ab1f4bd1"
   },
   "3.6.1": {
-    "toolsSha256": "0d5dfa89c79ad2b75304a3288603825c287a118a9f3e0b2c0e5a2c4a80f8cca2"
+    "contractSha256": "8c52daa8b62095a6431d5b954505079c3f7c802e5c5ae39efa8ea7e988dfbc7a"
   },
   "3.6.2": {
-    "toolsSha256": "d9d24da4b79a4cc65aec589debd2b9072e41b309fd6bf6a65e95dd4b5bef3c08"
+    "contractSha256": "83e107ad7ae2abdc42cdacb9848d8e3bf345951ed7b8f42d5cd9b5e203528bf2"
+  },
+  "3.6.3": {
+    "contractSha256": "93a8e55196c14f04afb923711997eacdc26dbdeae50b253b906d547abd346e30"
   }
 }

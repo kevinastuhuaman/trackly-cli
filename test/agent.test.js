@@ -432,7 +432,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
   }];
   const current = agent.evaluateApplyCompatibility({
     version: '3.5.0',
-    mcpContractVersion: '3.6.2',
+    mcpContractVersion: '3.6.3',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.4.0',
@@ -445,7 +445,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
 
   const future = agent.evaluateApplyCompatibility({
     version: '3.5.0',
-    mcpContractVersion: '3.6.2',
+    mcpContractVersion: '3.6.3',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.5.0',
@@ -456,7 +456,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
 
   const missingMinimum = agent.evaluateApplyCompatibility({
     version: '3.4.1',
-    mcpContractVersion: '3.6.2',
+    mcpContractVersion: '3.6.3',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
   }, installed);
@@ -472,7 +472,7 @@ test('agent doctor compatibility rejects stale CLI and MCP contract versions', (
   }];
   const base = {
     version: '3.5.0',
-    mcpContractVersion: '3.6.2',
+    mcpContractVersion: '3.6.3',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.4.0',
@@ -514,8 +514,8 @@ test('agent doctor accepts the local MCP contract during an explicit overlap win
   const result = agent.evaluateApplyCompatibility({
     version: '3.5.1',
     mcpContractVersion: '3.6.0',
-    preferredMcpContractVersion: '3.6.2',
-    compatibleMcpContractVersions: ['3.6.0', '3.6.1', '3.6.2'],
+    preferredMcpContractVersion: '3.6.3',
+    compatibleMcpContractVersions: ['3.6.1', '3.6.2', '3.6.3'],
     compatibleCliMinimumVersion: '0.13.1',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.4.1',
@@ -523,16 +523,16 @@ test('agent doctor accepts the local MCP contract during an explicit overlap win
   }, clients);
 
   assert.equal(result.mcpContractCompatible, true);
-  assert.equal(result.preferredMcpContractVersion, '3.6.2');
-  assert.deepEqual(result.compatibleMcpContractVersions, ['3.6.0', '3.6.1', '3.6.2']);
+  assert.equal(result.preferredMcpContractVersion, '3.6.3');
+  assert.deepEqual(result.compatibleMcpContractVersions, ['3.6.1', '3.6.2', '3.6.3']);
 });
 
 test('agent doctor treats an explicit MCP compatibility window as authoritative', () => {
   const result = agent.evaluateApplyCompatibility({
     version: '3.5.1',
-    mcpContractVersion: '3.6.2',
-    preferredMcpContractVersion: '3.6.3',
-    compatibleMcpContractVersions: ['3.6.3'],
+    mcpContractVersion: '3.6.3',
+    preferredMcpContractVersion: '3.6.2',
+    compatibleMcpContractVersions: ['3.6.2'],
     compatibleCliMinimumVersion: '0.13.1',
     compatibleSkillMajor: 4,
     compatibleSkillMinimumVersion: '4.4.1',
@@ -592,7 +592,7 @@ test('agent doctor does not infer controller and user tab union inventory from p
   await withTempAgentHomeAsync(async () => {
     const report = await agent.doctorAgent();
     assert.equal(report.cliVersion, packageManifest.version);
-    assert.equal(report.mcpContractVersion, '3.6.2');
+    assert.equal(report.mcpContractVersion, '3.6.3');
     assert.match(report.skillPackIntegrity.expectedDigest, /^[a-f0-9]{64}$/);
     assert.deepEqual(report.browserControl.tabInventory, {
       controllerOwnedTabs: 'runtime_verification_required',

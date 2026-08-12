@@ -1,0 +1,14 @@
+{
+  "pluginName": "trackly",
+  "heroFeature": "trackly Apply",
+  "tagline": "trackly finds. You decide. trackly fills. You submit.",
+  "shortDescription": "Find openings as they appear and fill approved applications for your review.",
+  "audience": "US job seekers",
+  "accountRequired": true,
+  "pricingClaim": "Free and unlimited",
+  "submissionBoundary": "The user reviews and submits every application manually.",
+  "supportURL": "https://usetrackly.app/support",
+  "privacyPolicyURL": "https://usetrackly.app/privacy",
+  "termsOfServiceURL": "https://usetrackly.app/terms",
+  "productionMcpURL": "https://mcp.usetrackly.app/api/plugin/trackly/mcp"
+}

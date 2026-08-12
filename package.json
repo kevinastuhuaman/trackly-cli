@@ -77,5 +77,9 @@
     "@hono/node-server": "2.0.12",
     "fast-uri": "3.1.5",
     "ip-address": "10.4.0"
+  },
+  "devDependencies": {
+    "@babel/parser": "7.29.8",
+    "acorn": "8.18.0"
   }
 }

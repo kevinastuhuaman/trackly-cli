@@ -201,7 +201,7 @@ function projectPreferenceResponse(result, experienceFilterV2Available = null) {
   };
 }
 
-function createServer(options = {}) {
+function createServer() {
   const server = new McpServer({
     name: 'trackly',
     version: PACKAGE_VERSION,
@@ -487,23 +487,22 @@ function createServer(options = {}) {
     throwMcpResourceError,
   });
 
-  // Keep server construction deterministic for embedders and schema tests.
-  // The executable startup path enables production analytics after every tool
-  // is registered; callers may inject instrumentation here when they need to
-  // inspect that boundary directly.
-  if (typeof options.configureAnalytics === 'function') {
-    options.configureAnalytics(server, options.analytics);
-  } else if (options.analytics !== undefined) {
-    configureMcpAnalytics(server, options.analytics);
-  }
   return server;
 }
 
-async function startMcpServer(options = {}) {
-  const server = createServer(options);
-  if (typeof options.configureAnalytics !== 'function' && options.analytics === undefined) {
-    configureMcpAnalytics(server, options.analytics);
+// Keep `createServer` a deterministic catalog factory for embedders and
+// contract verification. Analytics belongs at the executable startup boundary,
+// after every source tool has been registered.
+function configureServerAnalytics(server, options = {}) {
+  if (typeof options.configureAnalytics === 'function') {
+    return options.configureAnalytics(server, options.analytics);
   }
+  return configureMcpAnalytics(server, options.analytics);
+}
+
+async function startMcpServer(options = {}) {
+  const server = createServer();
+  configureServerAnalytics(server, options);
   const transport = options.transport || new StdioServerTransport();
   const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
   const previousOnClose = server.server.onclose;
@@ -579,6 +578,7 @@ module.exports = {
   AUTH_HINT,
   createAuthErrorResult,
   createErrorResult,
+  configureServerAnalytics,
   createServer,
   installMcpSignalHandlers,
   startMcpServer,

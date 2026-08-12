@@ -495,6 +495,66 @@ test('config rejects --api-key together with --clear-api-key', async (t) => {
   assert.match(result.stderr, /Cannot use --api-key and --clear-api-key together/);
 });
 
+test('config --clear-api-key synchronizes opt-out before removing the final credential', async (t) => {
+  const dir = createTempConfigDir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(
+    path.join(dir, 'config.json'),
+    JSON.stringify({ apiKey: 'trk_last_credential' }),
+    { mode: 0o600 },
+  );
+
+  const requests = [];
+  const { server, port } = await startMockServer((req, res) => {
+    requests.push({ method: req.method, url: req.url, authorization: req.headers.authorization });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ shareUsageAnalytics: false }));
+  });
+  t.after(() => server.close());
+
+  const result = await runCli(['config', '--clear-api-key'], {
+    TRACKLY_CONFIG_DIR: dir,
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(requests, [{
+    method: 'GET',
+    url: '/api/jobscout/analytics-preference',
+    authorization: 'Bearer trk_last_credential',
+  }]);
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')),
+    { mcpAnalyticsOptOut: true },
+  );
+  assert.match(result.stdout, /Stored API key cleared/);
+});
+
+test('logout synchronizes the preference and clears credentials without leaving config', async (t) => {
+  const dir = createTempConfigDir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(
+    path.join(dir, 'config.json'),
+    JSON.stringify({ token: 'jwt_last', refreshToken: 'rt_last', baseUrl: 'https://custom.example' }),
+    { mode: 0o600 },
+  );
+
+  const { server, port } = await startMockServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ shareUsageAnalytics: true }));
+  });
+  t.after(() => server.close());
+
+  const result = await runCli(['logout'], {
+    TRACKLY_CONFIG_DIR: dir,
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Logged out\. Credentials cleared/);
+  assert.equal(fs.existsSync(path.join(dir, 'config.json')), false);
+});
+
 test('agent setup rejects --client without a value', async () => {
   const result = await runCli(['agent', 'setup', '--client']);
   assert.notEqual(result.code, 0);
@@ -590,7 +650,7 @@ test('agent doctor explains that exact resume validation is deferred to a real A
 
   assert.equal(result.stderr, '');
   assert.ok(result.stdout.includes(
-    `CLI: ${require('../package.json').version}; MCP contract: 3.6.2`,
+    `CLI: ${require('../package.json').version}; MCP contract: 3.6.3`,
   ));
   assert.match(result.stdout, /Skill: 4\.4\.2; digest: [a-f0-9]{64}/);
   assert.match(result.stdout, /Resume validation: available \(exact bytes are verified during an active Apply run\)/);

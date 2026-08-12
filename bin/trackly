@@ -4,7 +4,6 @@
 const {
   DEFAULT_BASE_URL,
   apiRequest,
-  clearConfig,
   createTracklyAccessError,
   getApiKey,
   getAuthMethod,
@@ -13,8 +12,8 @@ const {
   hasAuth,
   maintenanceOutput,
   loadConfig,
+  removeCredentials,
   saveConfig,
-  synchronizeAnalyticsPreferenceBeforeLogout,
 } = require('../lib/client');
 const { color, isJSON, outputJobs, outputCompanies, outputStats, outputContacts, outputReferralCampaign, outputNetworkBrief, outputCompanyBrief, outputCompanyWorkspace, outputError } = require('../lib/formatters');
 const http = require('http');
@@ -545,8 +544,7 @@ p{color:#a1a1aa;font-size:15px;line-height:1.5}
 }
 
 async function cmdLogout() {
-  await synchronizeAnalyticsPreferenceBeforeLogout();
-  clearConfig();
+  await removeCredentials({ scope: 'all' });
   console.log(color('green', 'Logged out. Credentials cleared.'));
 }
 
@@ -1057,11 +1055,12 @@ async function cmdConfig(args) {
     failNow('Cannot use --base-url and --clear-base-url together.');
   }
 
-  const config = loadConfig();
+  let config = loadConfig();
   let updated = false;
 
   if (args['clear-api-key']) {
-    delete config.apiKey;
+    await removeCredentials({ scope: 'apiKey' });
+    config = loadConfig();
     updated = true;
     console.log(color('green', 'Stored API key cleared.'));
   }

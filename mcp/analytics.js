@@ -14,6 +14,9 @@ const {
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const RELAY_TIMEOUT_MS = 2_000;
+const DEFAULT_MAX_PENDING_DELIVERIES = 32;
+const MAX_CAPTURED_ITEMS = 50;
+const MAX_CONTENT_LENGTH = 100_000;
 const AUTHENTICATED_RELAY_PATH = '/api/jobscout/mcp-analytics';
 const ANONYMOUS_RELAY_PATH = '/api/jobscout/mcp-analytics/anonymous';
 const ANALYTICS_PREFERENCE_PATH = '/api/jobscout/analytics-preference';
@@ -23,6 +26,7 @@ const REDACTED = '[redacted]';
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on', 'enabled']);
 const CONTEXT_DESCRIPTION =
   'Briefly explain why this tool helps the current job-search goal. Never include resume text, profile answers, demographic or work-authorization answers, application notes, credentials, or secrets.';
+const CONTEXT_INTENT_MARKER = 'trackly_context_parameter:';
 const ANONYMOUS_RELAY_EVENTS = new Set([
   '$exception',
   '$mcp_initialize',
@@ -41,6 +45,76 @@ const RICH_PAYLOAD_TOOLS = new Set([
   'trackly_ask',
   'get_more_tools',
 ]);
+
+const MISSING_CAPABILITY_VALUES = {
+  requestedCapability: [
+    'search', 'inspect', 'compare', 'rank', 'recommend', 'track', 'update', 'apply',
+    'submit', 'export', 'notify', 'schedule', 'integrate', 'authenticate', 'debug', 'other',
+  ],
+  requestedAction: [
+    'find', 'read', 'compare', 'rank', 'create', 'update', 'delete', 'submit',
+    'export', 'notify', 'schedule', 'connect', 'debug', 'other',
+  ],
+  requestedResource: [
+    'job', 'company', 'application', 'contact', 'profile', 'resume', 'preference',
+    'analytics', 'account', 'tool', 'other',
+  ],
+  requestedDestination: [
+    'trackly', 'external_site', 'file', 'email', 'calendar', 'crm', 'browser', 'other',
+  ],
+};
+
+const SAFE_RESPONSE_SHAPES = {
+  trackly_search_jobs: {
+    containers: ['jobs', 'data', 'results', 'pagination', 'meta'],
+    textLengths: ['title', 'company', 'companyName', 'location', 'description'],
+  },
+  trackly_get_job: {
+    containers: ['job', 'data', 'result', 'company'],
+    textLengths: ['title', 'company', 'companyName', 'location', 'description'],
+  },
+  trackly_search_companies: {
+    containers: ['companies', 'data', 'results', 'pagination', 'meta'],
+    textLengths: ['name', 'companyName', 'domain', 'description'],
+  },
+  trackly_list_companies: {
+    containers: ['companies', 'data', 'results', 'pagination', 'meta'],
+    textLengths: ['name', 'companyName', 'domain', 'description'],
+  },
+  trackly_ask: {
+    containers: ['jobs', 'data', 'results', 'filters', 'parsedFilters', 'pagination', 'meta'],
+    textLengths: ['title', 'company', 'companyName', 'location', 'description', 'query'],
+  },
+  get_more_tools: {
+    containers: [],
+    textLengths: [],
+  },
+};
+
+const SAFE_ID_KEYS = new Set([
+  'id', 'jobid', 'postingid', 'companyid', 'trackerid', 'requestid',
+]);
+const SAFE_COUNT_KEYS = new Set([
+  'total', 'count', 'limit', 'offset', 'page', 'pages', 'pagesize', 'remaining',
+  'activejobcount', 'jobcount', 'resultcount', 'returnedcount',
+]);
+const SAFE_BOOLEAN_KEYS = new Set([
+  'success', 'iserror', 'hasmore', 'remote', 'active', 'tracked', 'applied', 'saved',
+  'dismissed', 'jobsurlrefused', 'reported',
+]);
+const SAFE_ENUM_VALUES = new Set([
+  'new', 'applied', 'applied_confirmed', 'check_later', 'not_interested', 'all',
+  'backlog', 'discarded', 'full_time', 'internship', 'remote', 'hybrid', 'in_person',
+  'unspecified', 'us', 'non_us', 'europe', 'latam', 'middle_east', 'asia', 'africa',
+  'canada', 'oceania', 'unknown', 'product', 'engineering', 'design', 'data',
+  'marketing', 'sales', 'partnerships', 'finance', 'strategy', 'operations', 'people',
+  'legal', 'support', 'other', 'newest', 'match',
+]);
+const SAFE_ENUM_KEYS = new Set([
+  'status', 'stage', 'function', 'jobfunction', 'jobmodality', 'workarrangement',
+  'region', 'regiontag', 'locationfilter', 'sort',
+]);
+const SDK_FAILURE_WARNING = /Warning: (?:Failed to instrument server|Failed to setup tool call instrumentation|No PostHog client passed)/i;
 
 const FORBIDDEN_KEYS = new Set([
   // Credentials and authentication material.
@@ -137,7 +211,7 @@ function scrubString(value) {
 }
 
 function contentLength(value) {
-  return { length: Math.min(String(value).length, 100_000) };
+  return { length: Math.min(String(value).length, MAX_CONTENT_LENGTH) };
 }
 
 function classifyIntent(toolName, value) {
@@ -239,46 +313,153 @@ function redactValue(value) {
   return result;
 }
 
-function redactJsonText(value) {
-  if (typeof value !== 'string') return redactValue(value);
+function safeId(value) {
+  if (Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value)) return value;
+  return undefined;
+}
+
+function safeCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= MAX_CONTENT_LENGTH
+    ? value
+    : undefined;
+}
+
+function projectRichObject(toolName, value, depth = 0, budget = { remaining: 200 }) {
+  if (!value || typeof value !== 'object' || depth > 5 || budget.remaining <= 0) return {};
+  budget.remaining -= 1;
+  const shape = SAFE_RESPONSE_SHAPES[toolName];
+  if (!shape) return {};
+  const containers = new Set(shape.containers.map(normalizedKey));
+  const textLengths = new Set(shape.textLengths.map(normalizedKey));
+  const result = {};
+  for (const [key, nested] of Object.entries(value).slice(0, MAX_CAPTURED_ITEMS)) {
+    const normalized = normalizedKey(key);
+    if (SAFE_ID_KEYS.has(normalized)) {
+      const projected = safeId(nested);
+      if (projected !== undefined) result[key] = projected;
+      continue;
+    }
+    if (SAFE_COUNT_KEYS.has(normalized)) {
+      const projected = safeCount(nested);
+      if (projected !== undefined) result[key] = projected;
+      continue;
+    }
+    if (SAFE_BOOLEAN_KEYS.has(normalized) && typeof nested === 'boolean') {
+      result[key] = nested;
+      continue;
+    }
+    if (SAFE_ENUM_KEYS.has(normalized) && typeof nested === 'string'
+        && SAFE_ENUM_VALUES.has(nested)) {
+      result[key] = nested;
+      continue;
+    }
+    if (normalized === 'workarrangements' && Array.isArray(nested)) {
+      result[key] = nested.slice(0, 4).filter((candidate) => SAFE_ENUM_VALUES.has(candidate));
+      continue;
+    }
+    if (textLengths.has(normalized) && typeof nested === 'string') {
+      result[`${key}_length`] = contentLength(nested).length;
+      continue;
+    }
+    if (!containers.has(normalized)) continue;
+    if (Array.isArray(nested)) {
+      result[key] = nested.slice(0, MAX_CAPTURED_ITEMS)
+        .map((candidate) => projectRichObject(toolName, candidate, depth + 1, budget));
+    } else if (nested && typeof nested === 'object') {
+      result[key] = projectRichObject(toolName, nested, depth + 1, budget);
+    }
+  }
+  return result;
+}
+
+function projectRichJsonText(toolName, value) {
+  if (typeof value !== 'string') return projectRichObject(toolName, value);
   try {
-    return JSON.stringify(redactValue(JSON.parse(value)));
+    return JSON.stringify(projectRichObject(toolName, JSON.parse(value)));
   } catch {
-    return scrubString(value);
+    return JSON.stringify({
+      unparsed: true,
+      ...contentLength(value),
+      truncated: value.length > MAX_CONTENT_LENGTH,
+    });
   }
 }
 
-function redactMcpResponse(response) {
-  const redacted = redactValue(response);
-  if (!redacted || typeof redacted !== 'object' || !Array.isArray(redacted.content)) {
-    return redacted;
+function redactMcpResponse(toolName, response) {
+  if (!response || typeof response !== 'object') return {};
+  const projected = {};
+  if (typeof response.isError === 'boolean') projected.isError = response.isError;
+  if (!Array.isArray(response.content)) {
+    return { ...projected, ...projectRichObject(toolName, response) };
   }
 
   return {
-    ...redacted,
-    content: redacted.content.map((block) => {
-      if (!block || typeof block !== 'object' || block.type !== 'text') return block;
-      return { ...block, text: redactJsonText(block.text) };
+    ...projected,
+    content: response.content.slice(0, 10).map((block) => {
+      if (!block || typeof block !== 'object') return { type: 'unknown' };
+      if (block.type === 'text') {
+        return { type: 'text', text: projectRichJsonText(toolName, block.text) };
+      }
+      const type = ['image', 'audio', 'resource', 'resource_link'].includes(block.type)
+        ? block.type
+        : 'unknown';
+      const encoded = block.data ?? block.blob ?? block.resource?.blob;
+      return {
+        type,
+        ...(typeof encoded === 'string' ? { length: contentLength(encoded).length } : {}),
+      };
     }),
   };
 }
 
-function removeContextParameter(parameters) {
-  if (!parameters || typeof parameters !== 'object') return parameters;
-  const redacted = redactValue(parameters);
-  const candidates = [
-    redacted.request?.params?.arguments,
-    redacted.params?.arguments,
-    redacted.arguments,
-  ];
-  for (const args of candidates) {
-    if (!args || typeof args !== 'object') continue;
-    delete args.context;
-    for (const key of ['keywords', 'query']) {
-      if (typeof args[key] === 'string') args[key] = contentLength(args[key]);
+function findArguments(parameters) {
+  if (!parameters || typeof parameters !== 'object') return null;
+  return parameters.request?.params?.arguments
+    ?? parameters.params?.arguments
+    ?? parameters.arguments
+    ?? null;
+}
+
+function projectMcpParameters(toolName, parameters) {
+  const args = findArguments(parameters);
+  if (!args || typeof args !== 'object') return {};
+  const projected = {};
+  const allowed = {
+    trackly_search_jobs: new Set([
+      'function', 'companyId', 'locationFilter', 'jobModality', 'workArrangements',
+      'remote', 'status', 'sort', 'limit', 'offset', 'keywords',
+    ]),
+    trackly_get_job: new Set(['id']),
+    trackly_search_companies: new Set(['query', 'limit']),
+    trackly_list_companies: new Set(['limit', 'offset']),
+    trackly_ask: new Set(['query']),
+    get_more_tools: new Set(Object.keys(MISSING_CAPABILITY_VALUES)),
+  }[toolName] || new Set();
+
+  for (const [key, value] of Object.entries(args).slice(0, MAX_CAPTURED_ITEMS)) {
+    if (!allowed.has(key)) continue;
+    if ((key === 'keywords' || key === 'query') && typeof value === 'string') {
+      projected[key] = contentLength(value);
+    } else if (key === 'companyId' || key === 'id') {
+      const id = safeId(value);
+      if (id !== undefined) projected[key] = id;
+    } else if (key === 'limit' || key === 'offset') {
+      const count = safeCount(value);
+      if (count !== undefined) projected[key] = count;
+    } else if (key === 'remote' && typeof value === 'boolean') {
+      projected[key] = value;
+    } else if (key === 'workArrangements' && Array.isArray(value)) {
+      projected[key] = value.slice(0, 4).filter((candidate) => SAFE_ENUM_VALUES.has(candidate));
+    } else if (Object.hasOwn(MISSING_CAPABILITY_VALUES, key)) {
+      if (MISSING_CAPABILITY_VALUES[key].includes(value)) projected[key] = value;
+    } else if (typeof value === 'string' && SAFE_ENUM_VALUES.has(value)) {
+      projected[key] = value;
+    } else if (key === 'locationFilter' && Array.isArray(value)) {
+      projected[key] = value.slice(0, 10).filter((candidate) => SAFE_ENUM_VALUES.has(candidate));
     }
   }
-  return redacted;
+  return { request: { params: { arguments: projected } } };
 }
 
 function sanitizeMcpAnalyticsEvent(event) {
@@ -304,25 +485,35 @@ function sanitizeMcpAnalyticsEvent(event) {
   delete properties.$mcp_conversation_id;
 
   const toolName = properties.$mcp_tool_name ?? properties.$mcp_resource_name;
+  const sourceArguments = findArguments(properties.$mcp_parameters);
+  const sourceIntent = properties.$mcp_intent;
+  const markedContextIntent = typeof sourceIntent === 'string'
+    && sourceIntent.startsWith(CONTEXT_INTENT_MARKER);
+  const hasContext = markedContextIntent || (typeof sourceArguments?.context === 'string'
+    && sourceArguments.context.trim().length > 0);
+  if (markedContextIntent) {
+    properties.$mcp_intent = sourceIntent.slice(CONTEXT_INTENT_MARKER.length);
+  }
   if (typeof toolName !== 'string' || !RICH_PAYLOAD_TOOLS.has(toolName)) {
     delete properties.$mcp_parameters;
     delete properties.$mcp_response;
-    delete properties.$mcp_intent;
-    delete properties.$mcp_intent_source;
   } else {
     if (properties.$mcp_parameters !== undefined) {
-      properties.$mcp_parameters = removeContextParameter(properties.$mcp_parameters);
+      properties.$mcp_parameters = projectMcpParameters(toolName, properties.$mcp_parameters);
     }
     if (properties.$mcp_response !== undefined) {
-      properties.$mcp_response = redactMcpResponse(properties.$mcp_response);
+      properties.$mcp_response = redactMcpResponse(toolName, properties.$mcp_response);
     }
-    if (typeof properties.$mcp_intent === 'string') {
-      properties.$mcp_intent = classifyIntent(toolName, properties.$mcp_intent);
+  }
+  if (typeof toolName === 'string' && toolName.length > 0) {
+    properties.$mcp_intent = classifyIntent(toolName, properties.$mcp_intent);
+    properties.$mcp_intent_source = hasContext ? 'context_parameter' : 'inferred';
+    if (toolName === 'get_more_tools' && event.event === '$mcp_tool_call') {
+      sanitized.event = '$mcp_missing_capability';
     }
-    if (properties.$mcp_intent_source !== 'context_parameter'
-        && properties.$mcp_intent_source !== 'inferred') {
-      delete properties.$mcp_intent_source;
-    }
+  } else {
+    delete properties.$mcp_intent;
+    delete properties.$mcp_intent_source;
   }
 
   const sourceErrorMessage = properties.$mcp_error_message;
@@ -376,32 +567,22 @@ function addOptionalContextToTools(server) {
   }
 }
 
-function makeMissingCapabilityContextOptional(server) {
-  const handlers = server?.server?._requestHandlers;
-  const originalListTools = handlers?.get('tools/list');
-  if (!handlers || typeof originalListTools !== 'function') {
-    return;
-  }
-  handlers.set('tools/list', async (...args) => {
-    const response = await originalListTools(...args);
-    if (!Array.isArray(response?.tools)) return response;
-    return {
-      ...response,
-      tools: response.tools.map((tool) => {
-        if (tool?.name !== 'get_more_tools') return tool;
-        const required = Array.isArray(tool.inputSchema?.required)
-          ? tool.inputSchema.required.filter((key) => key !== 'context')
-          : undefined;
-        return {
-          ...tool,
-          inputSchema: {
-            ...tool.inputSchema,
-            ...(required?.length ? { required } : { required: undefined }),
-          },
-        };
-      }),
-    };
-  });
+function ensureMissingCapabilityTool(server) {
+  if (server?._registeredTools?.get_more_tools) return;
+  if (typeof server?.tool !== 'function') throw new Error('unsupported_mcp_sdk_tool_registration');
+  server.tool(
+    'get_more_tools',
+    'Report a capability Trackly does not currently provide. Use structured categories; context is optional and is classified but never stored as raw text.',
+    {
+      requestedCapability: z.enum(MISSING_CAPABILITY_VALUES.requestedCapability),
+      requestedAction: z.enum(MISSING_CAPABILITY_VALUES.requestedAction),
+      requestedResource: z.enum(MISSING_CAPABILITY_VALUES.requestedResource),
+      requestedDestination: z.enum(MISSING_CAPABILITY_VALUES.requestedDestination),
+    },
+    async () => ({
+      content: [{ type: 'text', text: JSON.stringify({ reported: true }) }],
+    }),
+  );
 }
 
 function runtimeEventProperties(env = process.env) {
@@ -424,6 +605,10 @@ function createBackendRelay(options = {}) {
   const loadConfigImpl = options.loadConfig || loadConfig;
   const saveConfigImpl = options.saveConfig || saveConfig;
   const pending = new Set();
+  const maxPendingDeliveries = Number.isSafeInteger(options.maxPendingDeliveries)
+    && options.maxPendingDeliveries > 0
+    ? options.maxPendingDeliveries
+    : DEFAULT_MAX_PENDING_DELIVERIES;
   let cachedOptOut = readCachedAnalyticsOptOut();
   let preferenceLookup = null;
 
@@ -514,6 +699,7 @@ function createBackendRelay(options = {}) {
       // unauthenticated delivery so stale in-memory consent never wins.
       if (!authenticated) cachedOptOut = readCachedAnalyticsOptOut();
       if (!authenticated && cachedOptOut) return;
+      if (pending.size >= maxPendingDeliveries) return;
 
       const endpoint = authenticated ? AUTHENTICATED_RELAY_PATH : ANONYMOUS_RELAY_PATH;
       const delivery = (async () => {
@@ -558,20 +744,25 @@ function configureMcpAnalytics(server, options = {}) {
   }
 
   let relay;
+  let diagnostic = 'instrumentation_exception';
   try {
     const sdk = (options.loadSdk || (() => require('@posthog/mcp')))();
     const anonymousDistinctId = `mcp-anon-${randomUUID()}`;
     relay = (options.createRelay || createBackendRelay)({ fetch: options.fetch });
     const eventProperties = runtimeEventProperties(env);
+    ensureMissingCapabilityTool(server);
     addOptionalContextToTools(server);
+    const sdkFailureWarnings = [];
     const analytics = sdk.instrument(server, relay, {
-      reportMissing: true,
+      reportMissing: false,
       enableConversationId: false,
       enableExceptionAutocapture: true,
       context: false,
       intentFallback: (request) => {
         const context = request?.params?.arguments?.context;
-        return typeof context === 'string' && context.trim() ? context : null;
+        return typeof context === 'string' && context.trim()
+          ? `${CONTEXT_INTENT_MARKER}${context}`
+          : null;
       },
       identify: { distinctId: anonymousDistinctId },
       beforeSend: (event) => safelySanitizeMcpAnalyticsEvent({
@@ -582,11 +773,20 @@ function configureMcpAnalytics(server, options = {}) {
         },
       }),
       eventProperties: () => eventProperties,
-      logger: () => {},
+      logger: (message) => {
+        if (SDK_FAILURE_WARNING.test(String(message))) {
+          sdkFailureWarnings.push('sdk_setup_warning');
+        }
+      },
     });
-    // The SDK advertises get_more_tools virtually from its tools/list handler.
-    // Normalize that descriptor without changing its missing-capability capture.
-    makeMissingCapabilityContextOptional(server);
+    if (sdkFailureWarnings.length > 0) {
+      diagnostic = sdkFailureWarnings[0];
+      throw new Error('posthog_mcp_instrumentation_warning');
+    }
+    if (!analytics || typeof analytics.capture !== 'function') {
+      diagnostic = 'sdk_noop_handle';
+      throw new Error('posthog_mcp_noop_handle');
+    }
 
     analyticsState.set(server, { analytics, relay });
     return { enabled: true, analytics };
@@ -601,11 +801,11 @@ function configureMcpAnalytics(server, options = {}) {
     try {
       const warn = options.onWarning
         || ((message) => process.stderr.write(`[trackly-mcp] ${message}\n`));
-      warn('Usage analytics are unavailable; MCP tools will continue without telemetry.');
+      warn(`Usage analytics are unavailable (${diagnostic}); MCP tools will continue without telemetry.`);
     } catch {
       // Warning delivery is analytics-only and must also fail open.
     }
-    return { enabled: false, reason: 'instrumentation_failed' };
+    return { enabled: false, reason: 'instrumentation_failed', diagnostic };
   }
 }
 

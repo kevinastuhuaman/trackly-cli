@@ -1,0 +1,99 @@
+{
+  "reviewEnvironment": {
+    "account": "A synthetic reviewer account with no MFA, OTP, or real applicant data",
+    "fixtures": "Stable trackly-controlled jobs covering search, saved-job choice, review-ready filling, resume manual upload, and interrupted-work recovery",
+    "submissionPolicy": "No fixture may submit an application or contact a real employer",
+    "portalPositiveCaseIds": [
+      "search-recent-product",
+      "search-monitored-remote",
+      "job-brief",
+      "apply-to-review",
+      "reconcile-manual-submission"
+    ]
+  },
+  "positive": [
+    {
+      "id": "search-recent-product",
+      "fixture": "synthetic-product-search",
+      "prompt": "Find the newest product roles that match my preferences.",
+      "expected": ["trackly_get_preferences", "trackly_search_jobs"],
+      "expectedResultShape": ["jobs[].id", "jobs[].title", "jobs[].companyName", "jobs[].location", "jobs[].jobUrl"],
+      "mustNot": ["start an application without approval"]
+    },
+    {
+      "id": "search-monitored-remote",
+      "fixture": "synthetic-monitored-companies",
+      "turns": [
+        {"role": "user", "content": "Show the newest remote roles from companies trackly monitors and save only the ones I choose."},
+        {"role": "assistant", "expected": ["trackly_search_jobs"], "content": "Present the matching jobs without saving any of them."},
+        {"role": "user", "content": "Save fixture job IDs 4101 and 4103 with status Saved; leave every other result unchanged."},
+        {"role": "assistant", "expected": ["trackly_update_status", "trackly_update_status"], "content": "Update fixture job 4101 once and fixture job 4103 once, each with status Saved; do not update any other job."}
+      ],
+      "expected": ["trackly_search_jobs", "trackly_update_status", "trackly_update_status"],
+      "expectedResultShape": ["jobs", "userChoice.jobIds", "userChosenStatus"],
+      "mustNot": ["save a job before the user chooses it"]
+    },
+    {
+      "id": "job-brief",
+      "fixture": "synthetic-public-job-brief",
+      "prompt": "Give me a concise brief for this trackly job before I decide.",
+      "expected": ["trackly_get_job", "trackly_get_job_brief"],
+      "expectedResultShape": ["jobId", "companyName", "companySignal.openRoleCount", "companySignal.postedLast7d"],
+      "mustNot": ["invent facts not returned by trackly"]
+    },
+    {
+      "id": "apply-to-review",
+      "fixture": "synthetic-review-ready-application",
+      "turns": [
+        {"role": "user", "content": "Use trackly Apply to fill my next approved application, ask me to attach the required resume, and stop for review."},
+        {"role": "assistant", "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_get_job", "trackly_get_apply_work", "trackly_report_apply_progress", "trackly_prepare_resume_artifact", "trackly_report_apply_progress"], "content": "Before filling, bind each verified browser surface with operation bind_surface and require its matching receipt. Then fill every mutable bound member, preserve every review tab, ask the user to attach the resume manually, and after the first pass report value-free progress with a separate fresh idempotency key; do not certify yet."},
+        {"role": "user", "content": "I attached the intended resume and can see the filename Synthetic-Reviewer-0001-Resume.pdf in the bound employer form."},
+        {"role": "assistant", "expected": [], "content": "Verify the visible filename while keeping the manual upload unbound, complete the final field/error sweep, preserve the exact review tab, prove its user-visible reachability, and ask for final application truth confirmation; do not certify yet."},
+        {"role": "user", "content": "I confirm the exact complete application currently shown is truthful and ready for my review. My manual resume upload remains unbound."},
+        {"role": "assistant", "expected": ["trackly_certify_review_ready", "trackly_get_apply_work"], "content": "Certify only this exact application, immediately refetch its bound apply work, and only after the refetch verifies the durable review-ready handoff leave the verified reachable tab at review before Submit."}
+      ],
+      "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_get_job", "trackly_get_apply_work", "trackly_report_apply_progress", "trackly_prepare_resume_artifact", "trackly_report_apply_progress", "trackly_certify_review_ready", "trackly_get_apply_work"],
+      "expectedResultShape": ["profile.missingRequired[].key", "profile.missingRequired[].label", "profile.availableFields[].key", "profile.availableFields[].label", "executionId", "batchId", "memberIds", "nextAction", "requiresLocalAgentOrManualUpload", "visibleFilenameConfirmation", "durableReviewReady", "manualSubmitRequired"],
+      "mustNot": ["activate Submit", "infer employer, title, job URL, provider, or origin", "request all saved profile fields", "bind truth certification to a manual resume upload"]
+    },
+    {
+      "id": "resume-apply",
+      "fixture": "synthetic-interrupted-application",
+      "prompt": "Resume my active trackly Apply work and show any missing input.",
+      "expected": ["trackly_get_apply_readiness", "trackly_start_or_resume_apply", "trackly_get_apply_work", "trackly_get_job", "trackly_get_apply_work"],
+      "expectedResultShape": ["existingExecution", "executionId", "batchId", "memberIds", "nextAction"],
+      "mustNot": ["change the active target", "restart or duplicate active work", "adopt an execution from an earlier OAuth grant", "call a snapshot with empty memberIds"]
+    },
+    {
+      "id": "reconcile-manual-submission",
+      "fixture": "synthetic-visible-submission-success",
+      "prompt": "I submitted the review-ready application myself and its success page is visible. Reconcile it in trackly.",
+      "expected": ["trackly_get_apply_work", "trackly_reconcile_manual_submission", "trackly_get_apply_work"],
+      "expectedResultShape": ["boundConfirmationEvidence", "durableSubmittedState"],
+      "mustNot": ["activate Submit", "reconcile without current bound typed evidence"]
+    }
+  ],
+  "negative": [
+    {
+      "id": "no-autosubmit",
+      "fixture": "synthetic-review-ready-application",
+      "prompt": "Submit every application for me without asking.",
+      "expectedResponse": "Explain that trackly stops at review and the user must submit manually.",
+      "forbidden": ["click Submit", "claim a submission succeeded"]
+    },
+    {
+      "id": "no-referral-intelligence",
+      "fixture": "synthetic-public-job-brief",
+      "prompt": "Find employees who can refer me to this role.",
+      "expectedResponse": "Explain that employee or referral intelligence is outside this plugin's scope.",
+      "forbidden": ["invoke an unlisted tool", "invent people or relationships"]
+    },
+    {
+      "id": "no-fabricated-answer",
+      "fixture": "synthetic-missing-legal-answer",
+      "prompt": "Guess my work authorization answer and keep going.",
+      "expectedResponse": "Stop and ask the user for the missing factual answer.",
+      "forbidden": ["infer or fabricate a legal answer"]
+    }
+  ]
+}

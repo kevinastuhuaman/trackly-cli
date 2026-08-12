@@ -322,6 +322,11 @@ test('refreshAccessToken clears tokens on 401 even when body has status:string (
     assert.equal(out, null);
     assert.equal(client.getRefreshToken(), null, 'tokens must clear even when body.status overrides');
     assert.equal(client.loadConfig().baseUrl, 'https://k.com');
+    assert.equal(
+      client.loadConfig().mcpAnalyticsOptOut,
+      true,
+      'an invalid final OAuth session must fail closed for anonymous analytics',
+    );
   });
 });
 
@@ -358,6 +363,42 @@ test('refreshAccessToken clears tokens on 401 but preserves baseUrl', async (t) 
       'https://custom.usetrackly.app',
       'user-configured baseUrl must survive a token refresh failure (Cursor Bugbot PR #20)'
     );
+  });
+});
+
+test('refresh invalidation removes OAuth and fails analytics closed without recursive auth', async (t) => {
+  const requests = [];
+  const { configDir, port } = await setupRefreshTestHarness(t, (req, res) => {
+    requests.push(req.url);
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/api/jobscout/analytics-preference') {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ shareUsageAnalytics: true }));
+      return;
+    }
+    res.statusCode = 401;
+    res.end(JSON.stringify({ error: 'invalid_grant' }));
+  });
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+    TRACKLY_HTTP_TIMEOUT_MS: '1000',
+  }, async () => {
+    client.saveConfig({
+      token: 'jwt_expired',
+      refreshToken: 'rt_invalid',
+      baseUrl: 'https://custom.usetrackly.app',
+      mcpAnalyticsOptOut: true,
+    });
+
+    assert.equal(await client.refreshAccessToken(), null);
+    assert.deepEqual(requests, ['/api/auth/refresh']);
+    assert.deepEqual(client.loadConfig(), {
+      baseUrl: 'https://custom.usetrackly.app',
+      mcpAnalyticsOptOut: true,
+    });
   });
 });
 
@@ -439,6 +480,131 @@ test('logout clearing preserves only the anonymous analytics opt-out', async (t)
     assert.equal(client.getToken(), null);
     assert.equal(client.getRefreshToken(), null);
     assert.equal(client.getApiKey(), null);
+  });
+});
+
+test('credential removal still unlinks the old credential file when opt-out preservation cannot write', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    client.saveConfig({ token: 'jwt', refreshToken: 'rt', mcpAnalyticsOptOut: true });
+    const configFile = client.getConfigPaths().file;
+    const originalWriteFileSync = fs.writeFileSync;
+    fs.writeFileSync = (file, ...args) => {
+      if (String(file).includes('.tmp.')) throw new Error('disk full');
+      return originalWriteFileSync(file, ...args);
+    };
+    try {
+      await assert.doesNotReject(client.removeCredentials({
+        scope: 'all',
+        request: async () => ({ shareUsageAnalytics: false }),
+        timeoutMs: 20,
+      }));
+    } finally {
+      fs.writeFileSync = originalWriteFileSync;
+    }
+
+    assert.equal(fs.existsSync(configFile), false, 'credential-bearing file must be removed');
+  });
+});
+
+test('final credential removal times out, aborts preference sync, and ignores late completion', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    client.saveConfig({ token: 'jwt', refreshToken: 'rt' });
+    let requestSignal;
+    let finishRequest;
+    const request = (...args) => {
+      requestSignal = args[7].signal;
+      return new Promise((resolve) => { finishRequest = resolve; });
+    };
+
+    const startedAt = Date.now();
+    await client.removeCredentials({ scope: 'all', request, timeoutMs: 20 });
+    assert.ok(Date.now() - startedAt < 500, 'logout must not wait for a hung preference request');
+    assert.equal(requestSignal.aborted, true, 'timeout must abort the underlying request');
+    assert.deepEqual(client.loadConfig(), { mcpAnalyticsOptOut: true });
+
+    finishRequest({ shareUsageAnalytics: true });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      client.loadConfig(),
+      { mcpAnalyticsOptOut: true },
+      'late success must not rewrite post-logout config',
+    );
+  });
+});
+
+test('failed final-credential sync keeps anonymous analytics off until authenticated opt-in sync', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    client.saveConfig({ apiKey: 'trk_last_credential' });
+    await client.removeCredentials({
+      scope: 'apiKey',
+      request: async () => { throw new Error('offline'); },
+      timeoutMs: 20,
+    });
+    assert.deepEqual(client.loadConfig(), { mcpAnalyticsOptOut: true });
+
+    await client.synchronizeAnalyticsPreferenceBeforeLogout(
+      async () => ({ shareUsageAnalytics: true }),
+      { timeoutMs: 20 },
+    );
+    assert.deepEqual(
+      client.loadConfig(),
+      { mcpAnalyticsOptOut: true },
+      'unauthenticated sync must not re-enable capture',
+    );
+
+    client.saveConfig({ ...client.loadConfig(), token: 'jwt_authenticated' });
+    await client.synchronizeAnalyticsPreferenceBeforeLogout(
+      async () => ({ shareUsageAnalytics: true }),
+      { timeoutMs: 20 },
+    );
+    assert.deepEqual(client.loadConfig(), { token: 'jwt_authenticated' });
+  });
+});
+
+test('known-invalid OAuth cleanup fails closed without recursively requesting preference', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    client.saveConfig({ token: 'dead_jwt', refreshToken: 'dead_rt' });
+    let requestCalls = 0;
+
+    await client.removeCredentials({
+      scope: 'oauth',
+      preferenceUnavailable: true,
+      request: async () => {
+        requestCalls += 1;
+        throw new Error('must not request with known-invalid credentials');
+      },
+    });
+
+    assert.equal(requestCalls, 0);
+    assert.deepEqual(client.loadConfig(), { mcpAnalyticsOptOut: true });
   });
 });
 

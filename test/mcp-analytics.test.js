@@ -7,7 +7,12 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
 const { z } = require('zod');
-const { createServer, installMcpSignalHandlers, startMcpServer } = require('../mcp/server');
+const {
+  configureServerAnalytics,
+  createServer,
+  installMcpSignalHandlers,
+  startMcpServer,
+} = require('../mcp/server');
 
 const {
   createBackendRelay,
@@ -380,6 +385,45 @@ test('failed preference lookups cancel unread response bodies', async () => {
   }
 });
 
+test('relay caps blocked in-flight deliveries and drops overflow without delaying callers', async () => {
+  const previousApiKey = process.env.TRACKLY_API_KEY;
+  let releasePosts;
+  const blockedPosts = new Promise((resolve) => { releasePosts = resolve; });
+  let postCalls = 0;
+  const relay = createBackendRelay({
+    maxPendingDeliveries: 2,
+    fetch: async (url) => {
+      if (String(url).endsWith('/api/jobscout/analytics-preference')) {
+        return { ok: true, async json() { return { shareUsageAnalytics: true }; } };
+      }
+      postCalls += 1;
+      await blockedPosts;
+      return { ok: true };
+    },
+    loadConfig: () => ({}),
+    saveConfig() {},
+  });
+
+  try {
+    process.env.TRACKLY_API_KEY = 'trk_test_relay_cap';
+    for (let index = 0; index < 100; index += 1) {
+      assert.doesNotThrow(() => relay.capture({
+        event: '$mcp_tool_call',
+        properties: { $mcp_tool_name: 'trackly_search_jobs', sequence: index },
+      }));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(postCalls, 2);
+    releasePosts();
+    await relay.flush();
+    assert.equal(postCalls, 2);
+  } finally {
+    releasePosts();
+    if (previousApiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previousApiKey;
+  }
+});
+
 test('disabled analytics never loads the SDK or mutates the server', () => {
   let loads = 0;
   const server = {};
@@ -396,10 +440,12 @@ test('disabled analytics never loads the SDK or mutates the server', () => {
   assert.equal(loads, 0);
 });
 
-test('Trackly server configures analytics only after every source tool is registered', () => {
+test('Trackly startup configures analytics only after every source tool is registered', async () => {
   let configuredServer;
   let sourceToolCount;
-  const server = createServer({
+  const [, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = await startMcpServer({
+    transport: serverTransport,
     configureAnalytics(candidate) {
       configuredServer = candidate;
       sourceToolCount = Object.keys(candidate._registeredTools).length;
@@ -408,11 +454,13 @@ test('Trackly server configures analytics only after every source tool is regist
 
   assert.equal(configuredServer, server);
   assert.equal(sourceToolCount, 48);
+  await server.close();
 });
 
 test('all existing Trackly tools keep context optional when analytics is enabled', async (t) => {
   const posthog = { capture() {}, async _shutdown() {} };
-  const server = createServer({
+  const server = createServer();
+  configureServerAnalytics(server, {
     analytics: {
       env: ENABLED_ENV,
       loadSdk: () => require('@posthog/mcp'),
@@ -437,7 +485,7 @@ test('all existing Trackly tools keep context optional when analytics is enabled
   }
 });
 
-test('rich public-search telemetry preserves useful content and removes forbidden fields', () => {
+test('rich public-search telemetry keeps only bounded IDs, enums, booleans, counts, and lengths', () => {
   const result = sanitizeMcpAnalyticsEvent({
     event: '$mcp_tool_call',
     distinct_id: '42',
@@ -452,6 +500,7 @@ test('rich public-search telemetry preserves useful content and removes forbidde
               locationFilter: 'us',
               apiKey: 'trk_secret_key',
               profileAnswers: { fullName: 'Private Person' },
+              genericFreeText: 'must not survive',
             },
           },
         },
@@ -460,7 +509,17 @@ test('rich public-search telemetry preserves useful content and removes forbidde
         content: [{
           type: 'text',
           text: JSON.stringify({
-            jobs: [{ id: 123, title: 'Product Manager', company: 'Acme' }],
+            total: 1,
+            hasMore: false,
+            jobs: [{
+              id: 123,
+              companyId: 456,
+              title: 'Product Manager',
+              company: 'Acme',
+              status: 'new',
+              remote: true,
+              genericFreeText: 'must not survive',
+            }],
             resumeText: 'private resume body',
             candidateResumeText: 'private alternate resume body',
             workAuthorizationAnswerText: 'private work authorization answer',
@@ -476,25 +535,35 @@ test('rich public-search telemetry preserves useful content and removes forbidde
     result.properties.$mcp_parameters.request.params.arguments.keywords,
     { length: 'fintech product manager'.length },
   );
-  assert.equal(result.properties.$mcp_parameters.request.params.arguments.apiKey, '[redacted]');
-  assert.equal(result.properties.$mcp_parameters.request.params.arguments.profileAnswers, '[redacted]');
+  assert.equal(result.properties.$mcp_parameters.request.params.arguments.apiKey, undefined);
+  assert.equal(result.properties.$mcp_parameters.request.params.arguments.profileAnswers, undefined);
+  assert.equal(result.properties.$mcp_parameters.request.params.arguments.genericFreeText, undefined);
   assert.doesNotMatch(JSON.stringify(result), /Find product jobs|fintech product manager/);
 
   const response = JSON.parse(result.properties.$mcp_response.content[0].text);
-  assert.equal(response.jobs[0].title, 'Product Manager');
-  assert.equal(response.resumeText, '[redacted]');
-  assert.equal(response.candidateResumeText, '[redacted]');
-  assert.equal(response.workAuthorizationAnswerText, '[redacted]');
-  assert.equal(response.applicationNotesInternal, '[redacted]');
+  assert.deepEqual(response, {
+    total: 1,
+    hasMore: false,
+    jobs: [{
+      id: 123,
+      companyId: 456,
+      title_length: 'Product Manager'.length,
+      company_length: 'Acme'.length,
+      status: 'new',
+      remote: true,
+    }],
+  });
+  assert.doesNotMatch(JSON.stringify(result), /private|must not survive|Product Manager|Acme/);
 });
 
-test('private profile and Apply tools never send arguments, responses, or intent', () => {
+test('private profile and Apply tools exclude payloads but retain classified intent', () => {
   const result = sanitizeMcpAnalyticsEvent({
     event: '$mcp_tool_call',
     distinct_id: '42',
     properties: {
       $mcp_tool_name: 'trackly_update_application_profile',
-      $mcp_intent: 'Save the candidate work authorization and application answers.',
+      $mcp_intent: 'Submit this application.',
+      $mcp_intent_source: 'inferred',
       $mcp_parameters: {
         request: {
           params: {
@@ -518,7 +587,8 @@ test('private profile and Apply tools never send arguments, responses, or intent
 
   assert.equal(result.properties.$mcp_parameters, undefined);
   assert.equal(result.properties.$mcp_response, undefined);
-  assert.equal(result.properties.$mcp_intent, undefined);
+  assert.equal(result.properties.$mcp_intent, 'application_workflow');
+  assert.equal(result.properties.$mcp_intent_source, 'inferred');
   assert.equal(result.properties.$mcp_duration_ms, 18);
   assert.equal(result.properties.$mcp_is_error, false);
 });
@@ -548,6 +618,49 @@ test('missing-capability intent uses the SDK resource-name shape', () => {
   });
 
   assert.equal(result.properties.$mcp_intent, 'compare_options');
+  assert.equal(result.properties.$mcp_intent_source, 'inferred');
+});
+
+test('non-rich tools preserve classified context intent and truthful source without payloads', () => {
+  const result = sanitizeMcpAnalyticsEvent({
+    event: '$mcp_tool_call',
+    properties: {
+      $mcp_tool_name: 'trackly_update_status',
+      $mcp_intent: 'Apply to this job now.',
+      $mcp_intent_source: 'inferred',
+      $mcp_parameters: {
+        request: { params: { arguments: { id: 42, action: 'applied', context: 'Apply now.' } } },
+      },
+      $mcp_response: { content: [{ type: 'text', text: '{"success":true}' }] },
+    },
+  });
+
+  assert.equal(result.properties.$mcp_intent, 'application_workflow');
+  assert.equal(result.properties.$mcp_intent_source, 'context_parameter');
+  assert.equal(result.properties.$mcp_parameters, undefined);
+  assert.equal(result.properties.$mcp_response, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /Apply now|"id":42|applied/);
+});
+
+test('non-JSON rich responses emit bounded content-free metadata for sensitive prose', () => {
+  const sensitive = [
+    'resume text: private resume body',
+    'profile answers: private profile body',
+    'demographic answer: private demographic body',
+    'work authorization answer: private authorization body',
+    'application notes: private note body',
+  ].join('; ');
+  const result = sanitizeMcpAnalyticsEvent({
+    event: '$mcp_tool_call',
+    properties: {
+      $mcp_tool_name: 'trackly_get_job',
+      $mcp_response: { content: [{ type: 'text', text: sensitive }] },
+    },
+  });
+
+  const metadata = JSON.parse(result.properties.$mcp_response.content[0].text);
+  assert.deepEqual(metadata, { unparsed: true, length: sensitive.length, truncated: false });
+  assert.doesNotMatch(JSON.stringify(result), /resume body|profile body|demographic body|authorization body|note body/);
 });
 
 test('client identity is removed because authenticated identity is backend-owned', () => {
@@ -618,7 +731,7 @@ test('exception fallback classification uses the original error message', () => 
   assert.equal(result.properties.$exception_list[0].category, 'rate_limit');
 });
 
-test('string redaction removes configured and arbitrary working-directory prefixes', () => {
+test('structured rich-response projection drops configured and working-directory paths', () => {
   const previousConfigDir = process.env.TRACKLY_CONFIG_DIR;
   process.env.TRACKLY_CONFIG_DIR = '/srv/trackly-private';
   try {
@@ -638,7 +751,7 @@ test('string redaction removes configured and arbitrary working-directory prefix
       serialized,
       new RegExp(process.cwd().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     );
-    assert.match(serialized, /<local-path>/);
+    assert.deepEqual(result.properties.$mcp_response, {});
   } finally {
     if (previousConfigDir === undefined) delete process.env.TRACKLY_CONFIG_DIR;
     else process.env.TRACKLY_CONFIG_DIR = previousConfigDir;
@@ -688,10 +801,19 @@ test('enabled instrumentation advertises optional context and strips it before h
   const missingCapabilityTool = listed.tools.find((tool) => tool.name === 'get_more_tools');
   assert.ok(missingCapabilityTool);
   assert.ok(!missingCapabilityTool.inputSchema.required?.includes('context'));
-  await assert.doesNotReject(client.callTool({
+  assert.ok(missingCapabilityTool.inputSchema.properties.requestedCapability);
+  assert.ok(missingCapabilityTool.inputSchema.properties.requestedAction);
+  assert.ok(missingCapabilityTool.inputSchema.properties.requestedResource);
+  assert.ok(missingCapabilityTool.inputSchema.properties.requestedDestination);
+  assert.deepEqual(
+    missingCapabilityTool.inputSchema.required.sort(),
+    ['requestedAction', 'requestedCapability', 'requestedDestination', 'requestedResource'],
+  );
+  const incompleteReport = await client.callTool({
     name: 'get_more_tools',
     arguments: {},
-  }));
+  });
+  assert.equal(incompleteReport.isError, true);
 
   await assert.doesNotReject(client.callTool({
     name: 'trackly_search_jobs',
@@ -718,9 +840,11 @@ test('enabled instrumentation advertises optional context and strips it before h
   const toolCall = captures.find((capture) => (
     capture.event === '$mcp_tool_call'
       && capture.properties.$mcp_intent === 'job_discovery'
+      && capture.properties.$mcp_intent_source === 'context_parameter'
   ));
   assert.ok(toolCall);
   assert.equal(toolCall.properties.$mcp_intent, 'job_discovery');
+  assert.equal(toolCall.properties.$mcp_intent_source, 'context_parameter');
   assert.doesNotMatch(JSON.stringify(toolCall), /current job-search session|"fintech"/);
   assert.equal(toolCall.properties.$mcp_parameters.request.params.arguments.context, undefined);
   assert.equal(toolCall.properties.channel, 'mcp');
@@ -732,6 +856,71 @@ test('enabled instrumentation advertises optional context and strips it before h
   assert.ok(identify);
   assert.equal(identify.properties.channel, 'mcp');
   assert.equal(identify.properties.contract_version, 3);
+});
+
+test('missing-capability reports preserve distinguishable structured requests without prose', async (t) => {
+  const captures = [];
+  const server = new McpServer({ name: 'missing-capability-test', version: '1.0.0' });
+  server.tool('trackly_search_jobs', 'Search jobs', {}, async () => ({ content: [] }));
+  const configured = configureMcpAnalytics(server, {
+    env: ENABLED_ENV,
+    loadSdk: () => require('@posthog/mcp'),
+    createRelay: () => ({ capture: (event) => captures.push(event), async _shutdown() {} }),
+  });
+  assert.equal(configured.enabled, true);
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'missing-capability-client', version: '1.0.0' });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await shutdownMcpAnalytics(server);
+  });
+
+  await client.callTool({
+    name: 'get_more_tools',
+    arguments: {
+      requestedCapability: 'compare',
+      requestedAction: 'compare',
+      requestedResource: 'job',
+      requestedDestination: 'trackly',
+      context: 'Compare two saved jobs side by side.',
+    },
+  });
+  await client.callTool({
+    name: 'get_more_tools',
+    arguments: {
+      requestedCapability: 'export',
+      requestedAction: 'export',
+      requestedResource: 'application',
+      requestedDestination: 'file',
+      context: 'Export the application history to a spreadsheet.',
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const reports = captures.filter(({ event }) => event === '$mcp_missing_capability');
+  assert.equal(reports.length, 2);
+  assert.deepEqual(
+    reports.map((report) => report.properties.$mcp_parameters.request.params.arguments),
+    [
+      {
+        requestedCapability: 'compare',
+        requestedAction: 'compare',
+        requestedResource: 'job',
+        requestedDestination: 'trackly',
+      },
+      {
+        requestedCapability: 'export',
+        requestedAction: 'export',
+        requestedResource: 'application',
+        requestedDestination: 'file',
+      },
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(reports), /saved jobs|spreadsheet/);
 });
 
 test('instrumentation failure and shutdown failure are fail-open', async () => {
@@ -751,15 +940,43 @@ test('instrumentation failure and shutdown failure are fail-open', async () => {
   await assert.doesNotReject(shutdownMcpAnalytics(server));
 });
 
+test('SDK setup warning is reported as instrumentation_failed without breaking tools', async () => {
+  const server = new McpServer({ name: 'sdk-noop-test', version: '1.0.0' });
+  let calls = 0;
+  server.tool('trackly_search_jobs', 'Search jobs', {}, async () => {
+    calls += 1;
+    return { content: [] };
+  });
+  const configured = configureMcpAnalytics(server, {
+    env: ENABLED_ENV,
+    createRelay: () => ({ capture() {}, async _shutdown() {} }),
+    loadSdk: () => ({
+      instrument(_server, _relay, options) {
+        options.logger('Warning: Failed to instrument server - synthetic setup failure');
+        return { async capture() {} };
+      },
+    }),
+    onWarning() {},
+  });
+
+  assert.equal(configured.enabled, false);
+  assert.equal(configured.reason, 'instrumentation_failed');
+  assert.equal(configured.diagnostic, 'sdk_setup_warning');
+  const tool = server._registeredTools.trackly_search_jobs;
+  await assert.doesNotReject(tool.handler({}));
+  assert.equal(calls, 1);
+});
+
 test('concurrent shutdown calls share the in-flight analytics flush', async () => {
-  const server = { _registeredTools: {} };
+  const server = new McpServer({ name: 'shutdown-concurrency-test', version: '1.0.0' });
+  server.tool('trackly_search_jobs', 'Search jobs', {}, async () => ({ content: [] }));
   let finish;
   const pending = new Promise((resolve) => { finish = resolve; });
   const relay = { _shutdown: test.mock.fn(async () => pending) };
   const configured = configureMcpAnalytics(server, {
     env: ENABLED_ENV,
     createRelay: () => relay,
-    loadSdk: () => ({ instrument() { return {}; } }),
+    loadSdk: () => ({ instrument() { return { capture() {} }; } }),
   });
   assert.equal(configured.enabled, true);
 
@@ -787,7 +1004,7 @@ test('SDK private-tool registry drift disables analytics visibly without breakin
     loadSdk: () => ({
       instrument() {
         instrumentCalls += 1;
-        return {};
+        return { capture() {} };
       },
     }),
     onWarning: (warning) => warnings.push(warning),
@@ -797,20 +1014,21 @@ test('SDK private-tool registry drift disables analytics visibly without breakin
   assert.equal(configured.reason, 'instrumentation_failed');
   assert.equal(instrumentCalls, 0);
   assert.deepEqual(warnings, [
-    'Usage analytics are unavailable; MCP tools will continue without telemetry.',
+    'Usage analytics are unavailable (instrumentation_exception); MCP tools will continue without telemetry.',
   ]);
 });
 
 test('a malformed cyclic analytics event is dropped instead of escaping beforeSend', () => {
   let beforeSend;
-  const server = { _registeredTools: {} };
+  const server = new McpServer({ name: 'cyclic-event-test', version: '1.0.0' });
+  server.tool('trackly_search_jobs', 'Search jobs', {}, async () => ({ content: [] }));
   const configured = configureMcpAnalytics(server, {
     env: ENABLED_ENV,
     createRelay: () => ({ capture() {}, async _shutdown() {} }),
     loadSdk: () => ({
       instrument(_server, _relay, options) {
         beforeSend = options.beforeSend;
-        return {};
+        return { capture() {} };
       },
     }),
   });
