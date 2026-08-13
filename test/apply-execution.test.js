@@ -263,6 +263,14 @@ test('recovery and handoff discovery reject ambiguous or cross-boundary identiti
   await assert.rejects(listHandoffs({
     success: true, executionId: 12, handoffs: [{ ...handoff, members: [{ ...member, handoffId: 42 }] }],
   }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true, executionId: 12, handoffs: [handoff, handoff],
+  }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true,
+    executionId: 12,
+    handoffs: [{ ...handoff, members: [member, { ...member, ordinal: 1, runId: 72 }] }],
+  }), /does not match/i);
 });
 
 test('handoff claim rejects a backend response for a different handoff or member set', async () => {

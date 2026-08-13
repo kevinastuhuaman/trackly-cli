@@ -1874,6 +1874,8 @@ test('Apply skill recovers exact members and reconciles only an explicit handoff
   assert.match(handoff, /trackly_claim_apply_review_handoff/);
   assert.match(handoff, /`detected`, `user_confirmed`, `unresolved`, or `contradictory`/);
   assert.match(handoff, /unchanged URL or page title is never evidence/i);
+  assert.match(handoff, /rediscovered receipt is `partially_reconciled`[\s\S]*inspect only members whose[\s\S]*stored result remains `unresolved`/i);
+  assert.match(handoff, /Do not replay the original claim with a[\s\S]*partial member list/i);
 });
 
 test('public Apply skill completes every ready member in a bound wave before handoff', () => {

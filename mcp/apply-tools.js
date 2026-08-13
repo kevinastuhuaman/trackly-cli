@@ -147,10 +147,13 @@ const handoffListResponseSchema = z.object({
 }).strict();
 
 function validateHandoffListResponse(requestedExecutionId, response) {
+  const handoffIds = response.handoffs.map(({ id }) => id);
   if (
     response.executionId !== requestedExecutionId
+    || new Set(handoffIds).size !== handoffIds.length
     || response.handoffs.some((handoff) => (
       handoff.executionId !== requestedExecutionId
+      || new Set(handoff.members.map(({ memberId }) => memberId)).size !== handoff.members.length
       || handoff.members.some((member) => member.handoffId !== handoff.id)
     ))
   ) {
