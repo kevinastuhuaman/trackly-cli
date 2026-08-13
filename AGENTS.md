@@ -69,7 +69,7 @@ not depend on a sibling private checkout that does not exist on its runner.
 
 ### MCP Server
 - Search/network tools plus the versioned Trackly Apply tool set. Hosted/local Apply schemas must remain in contract parity; `trackly_prepare_resume` is local-only behavior and hosted MCP returns an explicit local-agent/manual-upload requirement.
-- **Intentionally hosted-only:** `trackly_chat` is a backend agent for classic-UI surfaces, while CLI/MCP clients already are agents; `get_more_tools` is a hosted, value-free capability-gap analytics signal. Do NOT port either into the local MCP. These two exact asymmetries are reviewed by the hosted-contract verifier; no other hosted-only tool is allowed.
+- **Intentionally hosted-only:** `trackly_chat` is a backend agent for classic-UI surfaces, while CLI/MCP clients already are agents. `get_more_tools` is shared by hosted and local MCP as a value-free, structured capability-gap signal. This exact asymmetry is reviewed by the hosted-contract verifier; no other hosted-only tool is allowed.
 - MCP User-Agent: `trackly-mcp/<version>` (from package.json)
 - CLI User-Agent: `trackly-cli/<version>` (separate channel attribution)
 - Flag validation is **command-level** (`COMMAND_FLAGS` in `bin/trackly`): it rejects unknown/wrong-command flags + typos (with a "did you mean" hint), but does not reject a flag that's valid on a sibling subcommand yet ignored by the handler (e.g. `api-key list --name foo`). Deliberate — subcommand-strict scoping would risk false-rejects, which are worse than a silently-ignored flag.
@@ -101,7 +101,12 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 1. **No build step.** This is plain CommonJS JS. Do not add TypeScript, ESM, or a bundler.
 2. **Version is runtime-derived from `package.json`.** The `lib/client.js` and `mcp/server.js` files read version at runtime. Release-critical edits: `package.json` + `server.json`.
 3. **Auth tokens at `~/.trackly/config.json`.** File permissions are 0600. Do not change.
-4. **No dependencies beyond `@modelcontextprotocol/sdk` and `zod`.** Keep it minimal. HTTP uses raw `node:https`/`node:http`.
+4. **Keep dependencies minimal.** Direct runtime dependencies are
+   `@modelcontextprotocol/sdk`, `@posthog/mcp`, `posthog-node`, `zod`, Hono, and
+   exact `fast-uri` / `ip-address` security pins that guarantee the SDK's
+   audited patched resolution. PostHog is MCP-only and relays through Trackly's
+   backend; no project key or numeric user ID is stored locally. HTTP uses raw
+   `node:https`/`node:http`, and the local MCP transport remains stdio-only.
 5. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).
 6. **Direct dependencies stay minimal.** The CLI uses the MCP SDK and Zod.
    Hono is declared directly to guarantee the audited patched resolution used

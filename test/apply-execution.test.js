@@ -181,7 +181,24 @@ test('durable recovery tools use exact bounded HTTP contracts and validate resul
 test('exact recovery rejects a backend response for a different or duplicate candidate set', async () => {
   const sourceSnapshotHash = 'a'.repeat(64);
   const recover = async (response) => {
-    const { registrations } = registerRuntimeTools(response);
+    const { registrations } = registerRuntimeTools((method, route) => {
+      if (method === 'GET' && route.endsWith('/recoverable')) return {
+        success: true,
+        sources: [{
+          sourceExecutionId: 11,
+          sourceSnapshotHash,
+          recoverableUntil: '2026-09-01T12:00:00.000Z',
+          candidates: [21, 22].map((candidateId, queuePosition) => ({
+            candidateId,
+            jobId: candidateId + 10,
+            queuePosition,
+            eligibilityCode: 'recoverable',
+          })),
+        }],
+      };
+      return response;
+    });
+    await registrations.get('trackly_list_recoverable_apply_executions').handler({});
     return registrations.get('trackly_recover_exact_apply_members').handler({
       sourceExecutionId: 11,
       sourceSnapshotHash,
@@ -212,6 +229,42 @@ test('exact recovery rejects a backend response for a different or duplicate can
     ...base,
     eligibility: [base.eligibility[0], { ...base.eligibility[0] }],
   }), /does not match/);
+});
+
+test('exact recovery rejects undiscovered or substituted candidates before the write', async () => {
+  const sourceSnapshotHash = 'a'.repeat(64);
+  const { registrations, calls } = registerRuntimeTools((method, route) => {
+    if (method === 'GET' && route.endsWith('/recoverable')) return {
+      success: true,
+      sources: [{
+        sourceExecutionId: 11,
+        sourceSnapshotHash,
+        recoverableUntil: '2026-09-01T12:00:00.000Z',
+        candidates: [21, 22].map((candidateId, queuePosition) => ({
+          candidateId,
+          jobId: candidateId + 10,
+          queuePosition,
+          eligibilityCode: 'recoverable',
+        })),
+      }],
+    };
+    throw new Error(`unexpected write ${method} ${route}`);
+  });
+  const recover = (overrides = {}) => registrations.get('trackly_recover_exact_apply_members').handler({
+    sourceExecutionId: 11,
+    sourceSnapshotHash,
+    candidateIds: [21],
+    explicitExactSetConfirmation: true,
+    idempotencyKey: 'durable-recovery-key-0003',
+    ...overrides,
+  });
+
+  await assert.rejects(recover(), /latest discovery response/i);
+  await registrations.get('trackly_list_recoverable_apply_executions').handler({});
+  await assert.rejects(recover({ sourceExecutionId: 12 }), /latest discovery response/i);
+  await assert.rejects(recover({ sourceSnapshotHash: 'b'.repeat(64) }), /latest discovery response/i);
+  await assert.rejects(recover({ candidateIds: [23] }), /latest discovery response/i);
+  assert.equal(calls.length, 1);
 });
 
 test('recovery and handoff discovery reject ambiguous or cross-boundary identities', async () => {

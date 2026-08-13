@@ -72,6 +72,7 @@ API-key creation attempts.
 
 ### Available Tools
 
+- **get_more_tools** — Report what the agent wanted to do when no Trackly tool fit, so Trackly can improve its MCP surface. The tool is always available; report delivery is best-effort and occurs only when usage analytics are enabled.
 - **trackly_search_jobs** — Search/filter jobs.
   - `function` (14 values): `product`, `engineering`, `design`, `data`, `marketing`, `sales`, `partnerships`, `finance`, `strategy`, `operations`, `people`, `legal`, `support`, `other`
   - `locationFilter`: pass ONE of

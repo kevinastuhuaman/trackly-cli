@@ -7,6 +7,7 @@ const { z } = require('zod');
 const { apiRequest, createTracklyAccessError, hasAuth, maintenanceOutput } = require('../lib/client');
 const { version: PACKAGE_VERSION } = require('../package.json');
 const { registerApplyTools } = require('./apply-tools');
+const { configureMcpAnalytics, shutdownMcpAnalytics } = require('./analytics');
 
 const MCP_USER_AGENT = `trackly-mcp/${PACKAGE_VERSION}`;
 const MCP_MAINTENANCE_ERROR_CODE = -32002;
@@ -15,6 +16,8 @@ const MCP_AUTH_ERROR_CODE = -32004;
 const AUTH_HINT =
   'Existing members: run `trackly login` or set TRACKLY_API_KEY. ' +
   'New members need a private invite during the limited rollout; request access at https://usetrackly.app/early-access.';
+const MCP_ANALYTICS_CONTEXT_DESCRIPTION =
+  'Briefly explain why this tool helps the current job-search goal. Never include resume text, profile answers, demographic or work-authorization answers, application notes, credentials, or secrets.';
 
 // Mirrors `granola-followup-app/src/services/region-classifier.ts:8` REGION_TAGS.
 // Keep in sync when the backend enum changes.
@@ -47,6 +50,22 @@ const JOB_MODALITIES = ['full_time', 'internship', 'all'];
 // Independent from geography and employment type. Matches the backend's
 // workArrangements query contract and job_postings constraint.
 const WORK_ARRANGEMENTS = ['remote', 'hybrid', 'in_person', 'unspecified'];
+
+const MCP_MISSING_CAPABILITY_VALUES = [
+  'search', 'inspect', 'compare', 'rank', 'recommend', 'track', 'update', 'apply',
+  'submit', 'export', 'notify', 'schedule', 'integrate', 'authenticate', 'debug', 'other',
+];
+const MCP_MISSING_ACTION_VALUES = [
+  'find', 'read', 'compare', 'rank', 'create', 'update', 'delete', 'submit',
+  'export', 'notify', 'schedule', 'connect', 'debug', 'other',
+];
+const MCP_MISSING_RESOURCE_VALUES = [
+  'job', 'company', 'application', 'contact', 'profile', 'resume', 'preference',
+  'analytics', 'account', 'tool', 'other',
+];
+const MCP_MISSING_DESTINATION_VALUES = [
+  'trackly', 'external_site', 'file', 'email', 'calendar', 'crm', 'browser', 'other',
+];
 
 // `sort` enum matches backend handler at `jobscout.ts:3053` — NOT the pre-fix
 // `newest|oldest|company` (backend rejects oldest/company with HTTP 400).
@@ -169,7 +188,7 @@ function throwMcpResourceError(error) {
 }
 
 function wrapTool(handler, fallbackMessage) {
-  return async (params) => {
+  return async (params, extra) => {
     try {
       if (!hasAuth()) {
         return createAuthErrorResult();
@@ -180,6 +199,11 @@ function wrapTool(handler, fallbackMessage) {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };
     } catch (error) {
+      if (extra && typeof extra === 'object') {
+        extra.__mcp_analytics_error = error instanceof Error
+          ? error
+          : new Error(error?.message || fallbackMessage, { cause: error });
+      }
       return createErrorResult(
         error,
         fallbackMessage,
@@ -485,28 +509,119 @@ function createServer() {
     mcpUserAgent: MCP_USER_AGENT,
     throwMcpResourceError,
   });
+
+  server.tool(
+    'get_more_tools',
+    'Report a capability Trackly does not currently provide. Use structured categories; context is optional and is classified but never stored as raw text.',
+    {
+      requestedCapability: z.enum(MCP_MISSING_CAPABILITY_VALUES).optional(),
+      requestedAction: z.enum(MCP_MISSING_ACTION_VALUES).optional(),
+      requestedResource: z.enum(MCP_MISSING_RESOURCE_VALUES).optional(),
+      requestedDestination: z.enum(MCP_MISSING_DESTINATION_VALUES).optional(),
+      context: z.string().optional().describe(MCP_ANALYTICS_CONTEXT_DESCRIPTION),
+    },
+    async () => ({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ accepted: true, delivery: 'best_effort' }),
+      }],
+    }),
+  );
+
   return server;
 }
 
-async function startMcpServer() {
+// Keep `createServer` a deterministic catalog factory for embedders and
+// contract verification. Analytics belongs at the executable startup boundary,
+// after every source tool has been registered.
+function configureServerAnalytics(server, options = {}) {
+  if (typeof options.configureAnalytics === 'function') {
+    return options.configureAnalytics(server, options.analytics);
+  }
+  return configureMcpAnalytics(server, options.analytics);
+}
+
+async function startMcpServer(options = {}) {
   const server = createServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  configureServerAnalytics(server, options);
+  const transport = options.transport || new StdioServerTransport();
+  const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
+  const previousOnClose = server.server.onclose;
+  const beginAnalyticsShutdown = () => {
+    try {
+      Promise.resolve(shutdownAnalytics(server)).catch(() => {});
+    } catch {
+      // Analytics teardown must not affect transport teardown.
+    }
+  };
+  server.server.onclose = () => {
+    try {
+      previousOnClose?.();
+    } catch {
+      // Preserve fail-open behavior if an instrumentation callback misbehaves.
+    }
+    beginAnalyticsShutdown();
+  };
+
+  try {
+    await server.connect(transport);
+  } catch (error) {
+    try {
+      await shutdownAnalytics(server);
+    } catch {
+      // Preserve the original transport failure.
+    }
+    throw error;
+  }
   return server;
+}
+
+function installMcpSignalHandlers(server, options = {}) {
+  const signalTarget = options.signalTarget || process;
+  const exit = options.exit || ((code) => process.exit(code));
+  const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
+  let terminating = false;
+  const handlers = new Map();
+  const cleanup = () => {
+    for (const [signal, handler] of handlers) {
+      signalTarget.removeListener(signal, handler);
+    }
+    handlers.clear();
+  };
+  for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    const handler = () => {
+      if (terminating) return;
+      terminating = true;
+      void Promise.resolve()
+        .then(() => shutdownAnalytics(server))
+        .catch(() => {})
+        .finally(() => {
+          cleanup();
+          exit(exitCode);
+        });
+    };
+    handlers.set(signal, handler);
+    signalTarget.on(signal, handler);
+  }
+  return cleanup;
 }
 
 if (require.main === module) {
-  startMcpServer().catch((error) => {
-    console.error('MCP server error:', error);
-    process.exit(1);
-  });
+  startMcpServer()
+    .then((server) => installMcpSignalHandlers(server))
+    .catch((error) => {
+      console.error('MCP server error:', error);
+      process.exit(1);
+    });
 }
 
 module.exports = {
   AUTH_HINT,
   createAuthErrorResult,
   createErrorResult,
+  configureServerAnalytics,
   createServer,
+  installMcpSignalHandlers,
   startMcpServer,
   throwMcpResourceError,
 };

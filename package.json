@@ -1,6 +1,6 @@
 {
   "name": "trackly-cli",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "mcpName": "io.github.trackly-app/trackly",
   "description": "AI job search CLI + hosted MCP server with OAuth. 170K+ jobs, 3,800+ companies, 40+ ATS. Works with Claude, ChatGPT, Cursor, Windsurf, Codex via hosted streamable-http or local stdio.",
   "bin": {
@@ -63,13 +63,15 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@posthog/mcp": "0.11.0",
     "fast-uri": "3.1.5",
     "hono": "4.13.0",
     "ip-address": "10.4.0",
+    "posthog-node": "5.48.1",
     "zod": "^3.23.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^20.20.0 || >=22.22.0"
   },
   "overrides": {
     "@hono/node-server": "2.0.12",

@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.14.1] - 2026-08-12
+
+### Added
+
+- Added default-on, opt-out MCP analytics through Trackly's backend relay,
+  including lifecycle activity, tool outcomes, sanitized exceptions, runtime
+  metadata, agent-supplied intent, and missing-capability reports.
+- Every local MCP tool now accepts optional job-search `context`; sensitive
+  resume, profile, demographic/work-authorization, and application-note
+  content is excluded from rich analytics payloads.
+
+### Changed
+
+- The instrumented local MCP surface now exposes 55 tools, including
+  `get_more_tools` for missing-capability feedback.
+- The supported Node.js range is now `^20.20.0 || >=22.22.0`, matching the
+  pinned PostHog MCP instrumentation packages.
+
+### Fixed
+
+- Analytics capture fails closed when a tool name is absent and always fails
+  open relative to MCP calls, transport startup, and shutdown.
 
 ## [0.14.0] - 2026-08-12
 

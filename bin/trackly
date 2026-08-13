@@ -4,7 +4,6 @@
 const {
   DEFAULT_BASE_URL,
   apiRequest,
-  clearConfig,
   createTracklyAccessError,
   getApiKey,
   getAuthMethod,
@@ -13,6 +12,7 @@ const {
   hasAuth,
   maintenanceOutput,
   loadConfig,
+  removeCredentials,
   saveConfig,
 } = require('../lib/client');
 const { color, isJSON, outputJobs, outputCompanies, outputStats, outputContacts, outputReferralCampaign, outputNetworkBrief, outputCompanyBrief, outputCompanyWorkspace, outputError } = require('../lib/formatters');
@@ -544,7 +544,7 @@ p{color:#a1a1aa;font-size:15px;line-height:1.5}
 }
 
 async function cmdLogout() {
-  clearConfig();
+  await removeCredentials({ scope: 'all' });
   console.log(color('green', 'Logged out. Credentials cleared.'));
 }
 
@@ -1055,11 +1055,12 @@ async function cmdConfig(args) {
     failNow('Cannot use --base-url and --clear-base-url together.');
   }
 
-  const config = loadConfig();
+  let config = loadConfig();
   let updated = false;
 
   if (args['clear-api-key']) {
-    delete config.apiKey;
+    await removeCredentials({ scope: 'apiKey' });
+    config = loadConfig();
     updated = true;
     console.log(color('green', 'Stored API key cleared.'));
   }
@@ -1123,8 +1124,10 @@ async function cmdVersion() {
   console.log(VERSION);
 }
 
-async function cmdMcp() {
-  await require('../mcp/server').startMcpServer();
+async function cmdMcp(options = {}) {
+  const mcpServer = options.mcpServer || require('../mcp/server');
+  const server = await mcpServer.startMcpServer(options.startOptions);
+  return mcpServer.installMcpSignalHandlers(server, options.signalOptions);
 }
 
 async function cmdAgent(args) {
@@ -1504,6 +1507,7 @@ if (require.main === module) {
 module.exports = {
   COMMAND_FLAGS,
   UNIVERSAL_FLAGS,
+  cmdMcp,
   cmdLogin,
   formatMaintenanceForHuman,
   getPublicConfig,

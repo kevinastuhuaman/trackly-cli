@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '7a165d0257a61184bb662b75f66e270447faf1c645a48491da548a7770048266';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '0c8cb3d1fb3cb3ff636def78011acbb57367457c8eccd32d6ee2a3af4d5af875';
 
 const parsedSourceCache = new Map();
 
@@ -603,14 +603,14 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
   const sourceCommit = fixture.sourceRuntime.commit;
   const mergeCommit = fixture.mergedRuntime.commit;
   assert.equal(
-    gitOutput(backendRoot, ['rev-parse', 'HEAD']).trim(),
-    sourceCommit,
-    `${backendRoot} must be checked out at the exact reviewed runtime source commit`,
-  );
-  assert.equal(
     gitOutput(backendRoot, ['status', '--porcelain', '--untracked-files=all']).trim(),
     '',
-    `${backendRoot} must be completely clean so every inspected backend byte comes from the reviewed commit`,
+    `${backendRoot} must be completely clean so every inspected backend byte comes from the deployed merge commit`,
+  );
+  assert.equal(
+    gitOutput(backendRoot, ['rev-parse', 'HEAD']).trim(),
+    mergeCommit,
+    `${backendRoot} must be checked out at the exact deployed runtime merge commit`,
   );
   for (const commit of [sourceCommit, fixture.sourceRuntime.parent, mergeCommit, ...fixture.mergedRuntime.parents]) {
     gitOutput(backendRoot, ['cat-file', '-e', `${commit}^{commit}`]);
@@ -629,16 +629,10 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
   for (const relativePath of HOSTED_DEPLOYABLE_PATHS) {
     assert.equal(
       sha256ExactBytes(fs.readFileSync(path.join(backendRoot, relativePath))),
-      sha256ExactBytes(gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null)),
-      `${relativePath} working bytes must exactly match the reviewed runtime commit`,
+      sha256ExactBytes(gitOutput(backendRoot, ['show', `${mergeCommit}:${relativePath}`], null)),
+      `${relativePath} working bytes must exactly match the deployed runtime merge commit`,
     );
   }
-  assertMergeCommitPreservesPaths(
-    backendRoot,
-    sourceCommit,
-    mergeCommit,
-    HOSTED_DEPLOYABLE_PATHS,
-  );
   const lockedSources = {
     pluginServer: 'src/mcp/plugin-server.ts',
     pluginScopes: 'src/mcp/plugin-scopes.ts',
@@ -650,11 +644,11 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     applicationProfileService: 'src/services/application-profile/service.ts',
   };
   for (const [lockName, relativePath] of Object.entries(lockedSources)) {
-    const committedBytes = gitOutput(backendRoot, ['show', `${sourceCommit}:${relativePath}`], null);
+    const committedBytes = gitOutput(backendRoot, ['show', `${mergeCommit}:${relativePath}`], null);
     assert.equal(
       sha256ExactBytes(committedBytes),
       fixture.sourceSha256[lockName],
-      `${relativePath} bytes at ${sourceCommit} drifted from the reviewed hosted snapshot`,
+      `${relativePath} bytes at deployed merge ${mergeCommit} drifted from the reviewed hosted snapshot`,
     );
   }
 }
@@ -4729,7 +4723,6 @@ const LOCAL_ONLY_CONSTANTS = [
 ];
 const HOSTED_ONLY_TOOLS = [
   'trackly_chat',
-  'get_more_tools',
 ];
 
 for (const constantName of [
@@ -6258,6 +6251,25 @@ assert.deepEqual(
   'Executable local MCP registrations must exactly match the locked hosted catalog minus hosted-only chat plus local-only tools',
 );
 const hostedRegistrationNames = new Set(executableHostedRegistrations.map(({ name }) => name));
+const localMissingCapabilityRegistration = executableLocalBaseRegistrations
+  .find(({ name }) => name === 'get_more_tools');
+const hostedMissingCapabilityRegistration = executableHostedRegistrations
+  .find(({ name }) => name === 'get_more_tools');
+assert.ok(localMissingCapabilityRegistration, 'Local MCP must register get_more_tools statically');
+assert.ok(hostedMissingCapabilityRegistration, 'Hosted MCP must register get_more_tools');
+assert.deepEqual(
+  canonicalSchemaAst(registrationInputSchemaAst(
+    localServerSource,
+    localMissingCapabilityRegistration,
+    localServerSourcePath,
+  )),
+  canonicalSchemaAst(registrationInputSchemaAst(
+    hostedApplySource,
+    hostedMissingCapabilityRegistration,
+    hostedApplySourcePath,
+  )),
+  'get_more_tools hosted/local input schemas drifted',
+);
 const sharedApplyToolNames = executableLocalApplyToolNames.filter((name) => hostedRegistrationNames.has(name));
 assert.equal(
   new Set(sharedApplyToolNames).size,

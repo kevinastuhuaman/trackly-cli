@@ -20,7 +20,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
-
 // --- pure helpers (also exercised against a synthetic fixture below) ---
 
 // Extract MCP tool names from server.js source. Supports ', ", and ` string quotes.
