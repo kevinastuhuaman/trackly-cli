@@ -69,11 +69,17 @@ const recoverableExecutionSourceSchema = z.object({
   sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
   recoverableUntil: z.string().datetime(),
   candidates: z.array(recoverableCandidateSchema).max(APPLY_EXECUTION_MAX_TARGET),
-}).strict();
+}).strict().refine(({ candidates }) => (
+  new Set(candidates.map(({ candidateId }) => candidateId)).size === candidates.length
+), { message: 'recoverable source candidate IDs must be unique' });
 const recoverableExecutionsResponseSchema = z.object({
   success: z.literal(true),
   sources: z.array(recoverableExecutionSourceSchema).max(APPLY_EXECUTION_MAX_TARGET),
-}).strict();
+}).strict().refine(({ sources }) => (
+  new Set(sources.map(({ sourceExecutionId }) => sourceExecutionId)).size === sources.length
+), { message: 'recoverable source execution IDs must be unique' });
+// Discovery responses are strict and value-free so unexpected fields never enter agent context.
+// Mutation responses permit additive top-level metadata, but keep safety-critical nested rows strict.
 const exactRecoveryResponseSchema = z.object({
   success: z.literal(true),
   replay: z.boolean(),
@@ -104,6 +110,7 @@ function validateExactRecoveryResponse(input, response) {
     || !matchesRequested(asserted)
     || !matchesRequested(eligible)
     || !matchesRequested(eligibilityIds)
+    || response.eligibility.some(({ eligibilityCode }) => eligibilityCode !== 'recoverable')
   ) {
     throw new Error('Exact recovery response does not match the requested candidate set.');
   }
@@ -138,6 +145,19 @@ const handoffListResponseSchema = z.object({
     members: z.array(handoffMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
   }).strict()).max(APPLY_EXECUTION_MAX_TARGET),
 }).strict();
+
+function validateHandoffListResponse(requestedExecutionId, response) {
+  if (
+    response.executionId !== requestedExecutionId
+    || response.handoffs.some((handoff) => (
+      handoff.executionId !== requestedExecutionId
+      || handoff.members.some((member) => member.handoffId !== handoff.id)
+    ))
+  ) {
+    throw new Error('Review handoff response does not match the requested execution and receipt bindings.');
+  }
+  return response;
+}
 const handoffClaimResponseSchema = z.object({
   success: z.literal(true),
   handoffId: z.number().int().min(1),
@@ -422,9 +442,12 @@ function registerApplyTools(
     'trackly_list_apply_review_handoffs',
     'List active, nonexpired review-handoff receipts for one execution after context loss. Returns only stable IDs, lifecycle metadata, and member bindings; never browser values, URLs, or local paths.',
     { executionId: z.number().int().min(1) },
-    wrapTool(async ({ executionId }) => handoffListResponseSchema.parse(await applyControlRequest(
-      'GET', `/api/jobscout/apply/executions/${executionId}/review-handoffs`,
-    )), 'Failed to list apply review handoffs')
+    wrapTool(async ({ executionId }) => validateHandoffListResponse(
+      executionId,
+      handoffListResponseSchema.parse(await applyControlRequest(
+        'GET', `/api/jobscout/apply/executions/${executionId}/review-handoffs`,
+      )),
+    ), 'Failed to list apply review handoffs')
   );
 
   server.tool(

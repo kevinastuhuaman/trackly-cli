@@ -12,14 +12,13 @@ attachment, committed-filename inspection, and parser-field recheck. If any is
 missing, fail closed before opening the chooser and hand the upload to the user. Never
 navigate to a `file://` URL or paste a local path into an ordinary text field.
 
-Immediately before attachment, run `trackly_verify_prepared_resume`. Then
-perform these stages in exact order:
+Perform these stages in exact order:
 
 1. identify the exact semantic Resume or CV control;
 2. arm the file chooser before clicking that control;
 3. prove the chooser opened;
-4. attach the immediately verified file through the adapter's documented
-   file-setting primitive;
+4. run `trackly_verify_prepared_resume`, then immediately attach that verified
+   file through the adapter's documented file-setting primitive;
 5. verify the employer-facing filename committed; and
 6. recheck every contact, employment, education, and other field that resume
    parsing may have changed.

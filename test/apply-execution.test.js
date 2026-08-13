@@ -170,10 +170,12 @@ test('durable recovery tools use exact bounded HTTP contracts and validate resul
     mode: 'recover_exact_members', sourceExecutionId: 11, sourceSnapshotHash, candidateIds: [21],
     explicitExactSetConfirmation: true,
   }]);
+  assert.deepEqual(calls[1].at(-1), { 'Idempotency-Key': idempotencyKey });
   assert.deepEqual(calls[2].slice(0, 2), ['GET', '/api/jobscout/apply/executions/12/review-handoffs']);
   assert.deepEqual(calls[3].slice(0, 3), ['POST', '/api/jobscout/apply/review-handoffs/41/claim', {
     members: [{ memberId: 51, classification: 'detected' }],
   }]);
+  assert.deepEqual(calls[3].at(-1), { 'Idempotency-Key': idempotencyKey });
 });
 
 test('exact recovery rejects a backend response for a different or duplicate candidate set', async () => {
@@ -201,10 +203,66 @@ test('exact recovery rejects a backend response for a different or duplicate can
   };
   await assert.rejects(recover({ ...base, assertedCandidateIds: [21, 23] }), /does not match/);
   await assert.rejects(recover({ ...base, assertedCandidateIds: [21, 21] }), /does not match/);
+  await assert.rejects(recover({ ...base, eligibleCandidateIds: [21, 21] }), /does not match/);
+  await assert.rejects(recover({
+    ...base,
+    eligibility: [base.eligibility[0], { ...base.eligibility[1], eligibilityCode: 'revoked' }],
+  }), /does not match/);
   await assert.rejects(recover({
     ...base,
     eligibility: [base.eligibility[0], { ...base.eligibility[0] }],
   }), /does not match/);
+});
+
+test('recovery and handoff discovery reject ambiguous or cross-boundary identities', async () => {
+  const source = {
+    sourceExecutionId: 11,
+    sourceSnapshotHash: 'a'.repeat(64),
+    recoverableUntil: '2026-09-01T12:00:00.000Z',
+    candidates: [{ candidateId: 21, jobId: 31, queuePosition: 0, eligibilityCode: 'recoverable' }],
+  };
+  const parseRecoverable = async (response) => {
+    const { registrations } = registerRuntimeTools(response);
+    return registrations.get('trackly_list_recoverable_apply_executions').handler({});
+  };
+  await assert.rejects(parseRecoverable({
+    success: true,
+    sources: [{ ...source, candidates: [source.candidates[0], { ...source.candidates[0], jobId: 32 }] }],
+  }), /unique/i);
+  await assert.rejects(parseRecoverable({ success: true, sources: [source, source] }), /unique/i);
+
+  const member = {
+    handoffId: 41,
+    ordinal: 0,
+    batchId: 61,
+    memberId: 51,
+    runId: 71,
+    memberVersion: 1,
+    inspectionEpoch: 0,
+    reconciliationClassification: null,
+    reconciliationResultStatus: null,
+  };
+  const handoff = {
+    id: 41,
+    executionId: 12,
+    orderedMemberSetHash: 'b'.repeat(64),
+    generation: 1,
+    status: 'active',
+    claimedAt: null,
+    expiresAt: '2026-09-01T12:00:00.000Z',
+    members: [member],
+  };
+  const listHandoffs = async (response) => {
+    const { registrations } = registerRuntimeTools(response);
+    return registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+  };
+  await assert.rejects(listHandoffs({ success: true, executionId: 13, handoffs: [] }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true, executionId: 12, handoffs: [{ ...handoff, executionId: 13 }],
+  }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true, executionId: 12, handoffs: [{ ...handoff, members: [{ ...member, handoffId: 42 }] }],
+  }), /does not match/i);
 });
 
 test('handoff claim rejects a backend response for a different handoff or member set', async () => {
