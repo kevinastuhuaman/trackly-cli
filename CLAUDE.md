@@ -100,6 +100,7 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `GET /api/jobscout/apply/executions/:executionId` -- Read authoritative execution progress (`trackly_get_apply_execution`)
 - `GET /api/jobscout/apply/executions/recoverable` -- List bounded exact-member recovery candidates (`trackly_list_recoverable_apply_executions`)
 - `POST /api/jobscout/apply/executions/recover` -- Recover only one explicitly confirmed candidate set (`trackly_recover_exact_apply_members`)
+- `GET /api/jobscout/apply/executions/:executionId/review-handoffs` -- List active grouped reconciliation receipts (`trackly_list_apply_review_handoffs`)
 - `POST /api/jobscout/apply/review-handoffs/:handoffId/claim` -- Claim one exact grouped reconciliation receipt (`trackly_claim_apply_review_handoff`)
 - `POST /api/jobscout/apply/executions/:executionId/snapshot` -- Read a bounded execution/profile projection (`trackly_get_apply_execution_snapshot`)
 - `POST /api/jobscout/apply/executions/:executionId/parked/:memberId/resume` -- Request a fresh probe for an explicitly resumed parked job (`trackly_resume_parked_apply_member`)

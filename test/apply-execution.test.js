@@ -207,6 +207,39 @@ test('exact recovery rejects a backend response for a different or duplicate can
   }), /does not match/);
 });
 
+test('handoff claim rejects a backend response for a different handoff or member set', async () => {
+  const claim = async (response) => {
+    const { registrations } = registerRuntimeTools(response);
+    return registrations.get('trackly_claim_apply_review_handoff').handler({
+      handoffId: 41,
+      idempotencyKey: 'handoff-claim-key-0001',
+      members: [
+        { memberId: 51, classification: 'detected' },
+        { memberId: 52, classification: 'user_confirmed' },
+      ],
+    });
+  };
+  const base = {
+    success: true,
+    handoffId: 41,
+    executionId: 12,
+    orderedMemberSetHash: 'b'.repeat(64),
+    members: [
+      { memberId: 51, classification: 'detected' },
+      { memberId: 52, classification: 'user_confirmed' },
+    ],
+    transition: 'claimed',
+  };
+
+  await assert.rejects(claim({ ...base, handoffId: 42 }), /does not match/i);
+  await assert.rejects(claim({ ...base, members: base.members.slice(0, 1) }), /does not match/i);
+  await assert.rejects(claim({ ...base, members: [base.members[0], base.members[0]] }), /does not match/i);
+  await assert.rejects(claim({
+    ...base,
+    members: [base.members[0], { memberId: 52, classification: 'contradictory' }],
+  }), /does not match/i);
+});
+
 test('local tab keep-set tool canonicalizes IDs without making a Trackly API call', async () => {
   const { registrations, calls } = registerRuntimeTools();
   const tool = registrations.get('trackly_validate_apply_tab_keep_set');
