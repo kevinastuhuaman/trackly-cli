@@ -275,7 +275,44 @@ test('recovery and handoff discovery reject ambiguous or cross-boundary identiti
 
 test('handoff claim rejects a backend response for a different handoff or member set', async () => {
   const claim = async (response) => {
-    const { registrations } = registerRuntimeTools(response);
+    const { registrations } = registerRuntimeTools((method, route) => {
+      if (method === 'GET' && route.endsWith('/review-handoffs')) return {
+        success: true,
+        executionId: 12,
+        handoffs: [{
+          id: 41,
+          executionId: 12,
+          orderedMemberSetHash: 'b'.repeat(64),
+          generation: 1,
+          status: 'active',
+          claimedAt: null,
+          expiresAt: '2026-09-01T12:00:00.000Z',
+          members: [{
+            handoffId: 41,
+            ordinal: 0,
+            batchId: 61,
+            memberId: 51,
+            runId: 71,
+            memberVersion: 1,
+            inspectionEpoch: 0,
+            reconciliationClassification: null,
+            reconciliationResultStatus: null,
+          }, {
+            handoffId: 41,
+            ordinal: 1,
+            batchId: 62,
+            memberId: 52,
+            runId: 72,
+            memberVersion: 1,
+            inspectionEpoch: 0,
+            reconciliationClassification: null,
+            reconciliationResultStatus: null,
+          }],
+        }],
+      };
+      return response;
+    });
+    await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
     return registrations.get('trackly_claim_apply_review_handoff').handler({
       handoffId: 41,
       idempotencyKey: 'handoff-claim-key-0001',
@@ -298,6 +335,8 @@ test('handoff claim rejects a backend response for a different handoff or member
   };
 
   await assert.rejects(claim({ ...base, handoffId: 42 }), /does not match/i);
+  await assert.rejects(claim({ ...base, executionId: 13 }), /does not match/i);
+  await assert.rejects(claim({ ...base, orderedMemberSetHash: 'c'.repeat(64) }), /does not match/i);
   await assert.rejects(claim({ ...base, members: base.members.slice(0, 1) }), /does not match/i);
   await assert.rejects(claim({ ...base, members: [base.members[0], base.members[0]] }), /does not match/i);
   await assert.rejects(claim({

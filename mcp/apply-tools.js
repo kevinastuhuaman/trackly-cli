@@ -175,6 +175,8 @@ function validateHandoffClaimResponse(request, response) {
   const returnedMembers = response.members.map(({ memberId, classification }) => `${memberId}:${classification}`);
   if (
     response.handoffId !== request.handoffId
+    || response.executionId !== request.executionId
+    || response.orderedMemberSetHash !== request.orderedMemberSetHash
     || new Set(returnedMembers).size !== returnedMembers.length
     || requestedMembers.length !== returnedMembers.length
     || !requestedMembers.every((member) => returnedMembers.includes(member))
@@ -282,6 +284,7 @@ function registerApplyTools(
       idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     )
   );
+  const discoveredHandoffBindings = new Map();
   server.tool(
     'trackly_get_apply_queue',
     'Get the deterministic queue of jobs the user already approved by saving as check later. Do not rescore or veto these jobs.',
@@ -445,12 +448,22 @@ function registerApplyTools(
     'trackly_list_apply_review_handoffs',
     'List active, nonexpired review-handoff receipts for one execution after context loss. Returns only stable IDs, lifecycle metadata, and member bindings; never browser values, URLs, or local paths.',
     { executionId: z.number().int().min(1) },
-    wrapTool(async ({ executionId }) => validateHandoffListResponse(
-      executionId,
-      handoffListResponseSchema.parse(await applyControlRequest(
+    wrapTool(async ({ executionId }) => {
+      const response = validateHandoffListResponse(
+        executionId,
+        handoffListResponseSchema.parse(await applyControlRequest(
         'GET', `/api/jobscout/apply/executions/${executionId}/review-handoffs`,
-      )),
-    ), 'Failed to list apply review handoffs')
+        )),
+      );
+      discoveredHandoffBindings.clear();
+      for (const handoff of response.handoffs) {
+        discoveredHandoffBindings.set(handoff.id, {
+          executionId: handoff.executionId,
+          orderedMemberSetHash: handoff.orderedMemberSetHash,
+        });
+      }
+      return response;
+    }, 'Failed to list apply review handoffs')
   );
 
   server.tool(
@@ -467,12 +480,18 @@ function registerApplyTools(
         }),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
     },
-    wrapTool(async ({ handoffId, idempotencyKey, members }) => validateHandoffClaimResponse(
-      { handoffId, members },
-      handoffClaimResponseSchema.parse(await applyControlRequest(
+    wrapTool(async ({ handoffId, idempotencyKey, members }) => {
+      const binding = discoveredHandoffBindings.get(handoffId);
+      if (!binding) {
+        throw new Error('Review handoff must be selected from the latest discovery response.');
+      }
+      return validateHandoffClaimResponse(
+        { handoffId, members, ...binding },
+        handoffClaimResponseSchema.parse(await applyControlRequest(
         'POST', `/api/jobscout/apply/review-handoffs/${handoffId}/claim`, { members }, idempotencyKey,
-      )),
-    ), 'Failed to claim apply review handoff')
+        )),
+      );
+    }, 'Failed to claim apply review handoff')
   );
 
   server.tool(
