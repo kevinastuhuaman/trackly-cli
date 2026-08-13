@@ -742,8 +742,9 @@ function createBackendRelay(options = {}) {
       if (!authenticated && !ANONYMOUS_RELAY_EVENTS.has(event.event)) return;
       // Another MCP process can persist an opt-out before this process loses
       // authentication. Refresh the anonymous gate from disk before every
-      // unauthenticated delivery so stale in-memory consent never wins.
-      if (!authenticated) cachedOptOut = readCachedAnalyticsOptOut();
+      // unauthenticated delivery, while preserving a known in-memory opt-out
+      // if its earlier persistence attempt failed.
+      if (!authenticated) cachedOptOut ||= readCachedAnalyticsOptOut();
       if (!authenticated && cachedOptOut) return;
       if (pending.size >= maxPendingDeliveries) return;
 

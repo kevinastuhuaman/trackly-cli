@@ -238,6 +238,103 @@ test('apiRequest preserves Idempotency-Key across OAuth refresh retry', async (t
   });
 });
 
+test('apiRequest preserves timeout bounds across OAuth refresh retry', async (t) => {
+  let protectedRequestCount = 0;
+  const { configDir, port } = await setupRefreshTestHarness(t, (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/api/auth/refresh') {
+      res.end(JSON.stringify({ success: true, token: 'jwt_new', refreshToken: 'rt_new' }));
+      return;
+    }
+    if (req.url === '/protected') {
+      protectedRequestCount++;
+      if (protectedRequestCount === 1) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Expired access token' }));
+      }
+      // Intentionally leave the retried request open so its caller-supplied timeout fires.
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+    TRACKLY_HTTP_TIMEOUT_MS: '1000',
+  }, async () => {
+    client.saveConfig({ token: 'jwt_old', refreshToken: 'rt_old' });
+
+    await assert.rejects(
+      client.apiRequest(
+        'GET',
+        '/protected',
+        null,
+        false,
+        false,
+        null,
+        null,
+        { timeoutMs: 25 },
+      ),
+      /Trackly request timed out after 25ms/,
+    );
+    assert.equal(protectedRequestCount, 2, 'the bounded request should reach the OAuth retry');
+  });
+});
+
+test('apiRequest preserves abort signals across OAuth refresh retry', async (t) => {
+  let protectedRequestCount = 0;
+  let observeRetry;
+  const retryObserved = new Promise((resolve) => { observeRetry = resolve; });
+  const { configDir, port } = await setupRefreshTestHarness(t, (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/api/auth/refresh') {
+      res.end(JSON.stringify({ success: true, token: 'jwt_new', refreshToken: 'rt_new' }));
+      return;
+    }
+    if (req.url === '/protected') {
+      protectedRequestCount++;
+      if (protectedRequestCount === 1) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: 'Expired access token' }));
+      } else {
+        observeRetry();
+      }
+      // Intentionally leave the retry open until its caller-supplied signal aborts it.
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: undefined,
+    TRACKLY_BASE_URL: `http://127.0.0.1:${port}`,
+    TRACKLY_HTTP_TIMEOUT_MS: '1000',
+  }, async () => {
+    client.saveConfig({ token: 'jwt_old', refreshToken: 'rt_old' });
+    const controller = new AbortController();
+    const request = client.apiRequest(
+      'GET',
+      '/protected',
+      null,
+      false,
+      false,
+      null,
+      null,
+      { signal: controller.signal },
+    );
+    await retryObserved;
+    controller.abort();
+
+    await assert.rejects(request, /Trackly request aborted/);
+    assert.equal(protectedRequestCount, 2, 'the abortable request should reach the OAuth retry');
+  });
+});
+
 test('apiRequest aborts oversized response body (PR v0.2.4)', async (t) => {
   // The 10 MB body cap prevents a malicious TRACKLY_BASE_URL from OOM'ing the long-lived
   // MCP process via unbounded streaming. We simulate by returning chunks that exceed the
