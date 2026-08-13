@@ -61,4 +61,6 @@ test('passed upload stage carrying a failure code fails closed', () => {
   const result = validateApplyResumeUpload({ capabilities, events });
   assert.equal(result.safeToClaimAttachment, false);
   assert.ok(result.failureCodes.includes('parser_field_regression'));
+  assert.equal(result.lastPassedStage, 'user_facing_filename_committed');
+  assert.equal(result.completedStageCount, 5);
 });
