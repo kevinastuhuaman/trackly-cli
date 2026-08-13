@@ -117,6 +117,30 @@ test('durable recovery tools use exact bounded HTTP contracts and validate resul
       eligibleCandidateIds: [21],
       eligibility: [{ candidateId: 21, jobId: 31, queuePosition: 0, eligibilityCode: 'recoverable' }],
     };
+    if (route.endsWith('/review-handoffs')) return {
+      success: true,
+      executionId: 12,
+      handoffs: [{
+        id: 41,
+        executionId: 12,
+        orderedMemberSetHash,
+        generation: 1,
+        status: 'active',
+        claimedAt: null,
+        expiresAt: '2026-09-01T12:00:00.000Z',
+        members: [{
+          handoffId: 41,
+          ordinal: 0,
+          batchId: 61,
+          memberId: 51,
+          runId: 71,
+          memberVersion: 1,
+          inspectionEpoch: 0,
+          reconciliationClassification: null,
+          reconciliationResultStatus: null,
+        }],
+      }],
+    };
     return {
       success: true,
       handoffId: 41,
@@ -132,6 +156,7 @@ test('durable recovery tools use exact bounded HTTP contracts and validate resul
     sourceExecutionId: 11, sourceSnapshotHash, candidateIds: [21],
     explicitExactSetConfirmation: true, idempotencyKey,
   });
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
   await registrations.get('trackly_claim_apply_review_handoff').handler({
     handoffId: 41,
     idempotencyKey,
@@ -145,7 +170,8 @@ test('durable recovery tools use exact bounded HTTP contracts and validate resul
     mode: 'recover_exact_members', sourceExecutionId: 11, sourceSnapshotHash, candidateIds: [21],
     explicitExactSetConfirmation: true,
   }]);
-  assert.deepEqual(calls[2].slice(0, 3), ['POST', '/api/jobscout/apply/review-handoffs/41/claim', {
+  assert.deepEqual(calls[2].slice(0, 2), ['GET', '/api/jobscout/apply/executions/12/review-handoffs']);
+  assert.deepEqual(calls[3].slice(0, 3), ['POST', '/api/jobscout/apply/review-handoffs/41/claim', {
     members: [{ memberId: 51, classification: 'detected' }],
   }]);
 });
@@ -187,7 +213,7 @@ test('local tab keep-set tool canonicalizes IDs without making a Trackly API cal
   assert.ok(tool);
 
   const input = tool.schema.parse({
-    expectedTabIds: [101, 'tab-b'],
+    expectedTabIds: ['101', 'tab-b'],
     keepTabIds: ['101', 'tab-b'],
     controllerInventory: { complete: true, tabIds: ['101', 'unrelated-controller-tab'] },
     userInventory: { complete: true, tabIds: ['tab-b', 'unrelated-user-tab'] },
@@ -255,7 +281,11 @@ test('profile jurisdiction tools validate ISO codes and forward the accepted spe
 });
 
 test('execution tools validate and send the exact HTTP contract', async () => {
-  const { registrations, calls } = registerRuntimeTools();
+  const { registrations, calls } = registerRuntimeTools((method, route) => (
+    route.endsWith('/review-handoffs')
+      ? { success: true, executionId: 41, handoffs: [] }
+      : { ok: true }
+  ));
   const idempotencyKey = 'runtime-contract-key-0001';
   const cases = [
     ['trackly_start_apply_execution',

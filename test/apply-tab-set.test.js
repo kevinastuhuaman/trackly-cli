@@ -10,7 +10,7 @@ const {
 
 function validate(overrides = {}) {
   return validateApplyTabKeepSet({
-    expectedTabIds: [101, 'tab-b'],
+    expectedTabIds: ['101', 'tab-b'],
     keepTabIds: ['101', 'tab-b'],
     controllerInventory: { complete: true, tabIds: ['101'] },
     userInventory: { complete: true, tabIds: ['tab-b', 'unrelated-tab'] },
@@ -96,6 +96,17 @@ test('rejects duplicates independently in every caller-supplied list', () => {
   assert.ok(result.failureCodes.includes(APPLY_TAB_SET_FAILURE_CODES.DUPLICATE_KEEP_TAB_ID));
   assert.ok(result.failureCodes.includes(APPLY_TAB_SET_FAILURE_CODES.DUPLICATE_CONTROLLER_TAB_ID));
   assert.ok(result.failureCodes.includes(APPLY_TAB_SET_FAILURE_CODES.DUPLICATE_USER_TAB_ID));
+});
+
+test('fails closed when numeric and string IDs share one lexical value', () => {
+  const result = validate({
+    expectedTabIds: [101, 'tab-b'],
+    keepTabIds: ['101', 'tab-b'],
+  });
+  assert.equal(result.safeToFinalize, false);
+  assert.ok(result.failureCodes.includes(
+    APPLY_TAB_SET_FAILURE_CODES.AMBIGUOUS_CROSS_TYPE_TAB_ID,
+  ));
 });
 
 test('fails closed when the expected and keep sets differ', () => {

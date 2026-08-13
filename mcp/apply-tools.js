@@ -113,6 +113,31 @@ const handoffClaimMemberSchema = z.object({
   memberId: z.number().int().min(1),
   classification: z.enum(APPLY_HANDOFF_RECONCILIATION_CLASSIFICATION_CODES),
 }).strict();
+const handoffMemberSchema = z.object({
+  handoffId: z.number().int().min(1),
+  ordinal: z.number().int().min(0),
+  batchId: z.number().int().min(1),
+  memberId: z.number().int().min(1),
+  runId: z.number().int().min(1),
+  memberVersion: z.number().int().min(1),
+  inspectionEpoch: z.number().int().min(0),
+  reconciliationClassification: z.enum(APPLY_HANDOFF_RECONCILIATION_CLASSIFICATION_CODES).nullable(),
+  reconciliationResultStatus: z.string().max(100).nullable(),
+}).strict();
+const handoffListResponseSchema = z.object({
+  success: z.literal(true),
+  executionId: z.number().int().min(1),
+  handoffs: z.array(z.object({
+    id: z.number().int().min(1),
+    executionId: z.number().int().min(1),
+    orderedMemberSetHash: z.string().regex(/^[a-f0-9]{64}$/),
+    generation: z.number().int().min(1),
+    status: z.enum(['active', 'partially_reconciled']),
+    claimedAt: z.string().datetime().nullable(),
+    expiresAt: z.string().datetime(),
+    members: z.array(handoffMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+  }).strict()).max(APPLY_EXECUTION_MAX_TARGET),
+}).strict();
 const handoffClaimResponseSchema = z.object({
   success: z.literal(true),
   handoffId: z.number().int().min(1),
@@ -383,9 +408,9 @@ function registerApplyTools(
     'trackly_list_apply_review_handoffs',
     'List active, nonexpired review-handoff receipts for one execution after context loss. Returns only stable IDs, lifecycle metadata, and member bindings; never browser values, URLs, or local paths.',
     { executionId: z.number().int().min(1) },
-    wrapTool(async ({ executionId }) => applyControlRequest(
+    wrapTool(async ({ executionId }) => handoffListResponseSchema.parse(await applyControlRequest(
       'GET', `/api/jobscout/apply/executions/${executionId}/review-handoffs`,
-    ), 'Failed to list apply review handoffs')
+    )), 'Failed to list apply review handoffs')
   );
 
   server.tool(
