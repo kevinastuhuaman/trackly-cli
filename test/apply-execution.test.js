@@ -388,6 +388,69 @@ test('handoff claim rejects incomplete or foreign request members before the wri
   assert.equal(calls.length, 1);
 });
 
+test('handoff discovery remains claimable across independent executions', async () => {
+  const handoffs = new Map([
+    [12, { handoffId: 41, memberId: 51 }],
+    [13, { handoffId: 42, memberId: 52 }],
+  ]);
+  const { registrations, calls } = registerRuntimeTools((method, route, body) => {
+    const executionMatch = route.match(/^\/api\/jobscout\/apply\/executions\/(\d+)\/review-handoffs$/);
+    if (method === 'GET' && executionMatch) {
+      const executionId = Number(executionMatch[1]);
+      const { handoffId, memberId } = handoffs.get(executionId);
+      return {
+        success: true,
+        executionId,
+        handoffs: [{
+          id: handoffId,
+          executionId,
+          orderedMemberSetHash: String(executionId).padStart(64, '0'),
+          generation: 1,
+          status: 'active',
+          claimedAt: null,
+          expiresAt: '2026-09-01T12:00:00.000Z',
+          members: [{
+            handoffId,
+            ordinal: 0,
+            batchId: memberId + 10,
+            memberId,
+            runId: memberId + 20,
+            memberVersion: 1,
+            inspectionEpoch: 0,
+            reconciliationClassification: null,
+            reconciliationResultStatus: null,
+          }],
+        }],
+      };
+    }
+    const claimMatch = route.match(/^\/api\/jobscout\/apply\/review-handoffs\/(\d+)\/claim$/);
+    if (method === 'POST' && claimMatch) {
+      const handoffId = Number(claimMatch[1]);
+      const [executionId, handoff] = [...handoffs].find(([, value]) => value.handoffId === handoffId);
+      return {
+        success: true,
+        handoffId,
+        executionId,
+        orderedMemberSetHash: String(executionId).padStart(64, '0'),
+        members: body.members,
+        transition: 'claimed',
+      };
+    }
+    throw new Error(`unexpected request ${method} ${route}`);
+  });
+
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 13 });
+  const result = await registrations.get('trackly_claim_apply_review_handoff').handler({
+    handoffId: 41,
+    idempotencyKey: 'handoff-claim-key-0003',
+    members: [{ memberId: 51, classification: 'detected' }],
+  });
+
+  assert.equal(result.handoffId, 41);
+  assert.equal(calls.length, 3);
+});
+
 test('local tab keep-set tool canonicalizes IDs without making a Trackly API call', async () => {
   const { registrations, calls } = registerRuntimeTools();
   const tool = registrations.get('trackly_validate_apply_tab_keep_set');

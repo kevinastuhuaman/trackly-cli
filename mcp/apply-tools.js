@@ -285,6 +285,7 @@ function registerApplyTools(
     )
   );
   const discoveredHandoffBindings = new Map();
+  const discoveredHandoffIdsByExecution = new Map();
   server.tool(
     'trackly_get_apply_queue',
     'Get the deterministic queue of jobs the user already approved by saving as check later. Do not rescore or veto these jobs.',
@@ -455,14 +456,19 @@ function registerApplyTools(
         'GET', `/api/jobscout/apply/executions/${executionId}/review-handoffs`,
         )),
       );
-      discoveredHandoffBindings.clear();
+      for (const handoffId of discoveredHandoffIdsByExecution.get(executionId) || []) {
+        discoveredHandoffBindings.delete(handoffId);
+      }
+      const discoveredHandoffIds = new Set();
       for (const handoff of response.handoffs) {
         discoveredHandoffBindings.set(handoff.id, {
           executionId: handoff.executionId,
           orderedMemberSetHash: handoff.orderedMemberSetHash,
           memberIds: handoff.members.map(({ memberId }) => memberId),
         });
+        discoveredHandoffIds.add(handoff.id);
       }
+      discoveredHandoffIdsByExecution.set(executionId, discoveredHandoffIds);
       return response;
     }, 'Failed to list apply review handoffs')
   );
