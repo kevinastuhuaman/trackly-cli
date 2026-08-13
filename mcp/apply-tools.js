@@ -460,6 +460,7 @@ function registerApplyTools(
         discoveredHandoffBindings.set(handoff.id, {
           executionId: handoff.executionId,
           orderedMemberSetHash: handoff.orderedMemberSetHash,
+          memberIds: handoff.members.map(({ memberId }) => memberId),
         });
       }
       return response;
@@ -485,8 +486,16 @@ function registerApplyTools(
       if (!binding) {
         throw new Error('Review handoff must be selected from the latest discovery response.');
       }
+      const { memberIds, ...receiptBinding } = binding;
+      const requestedMemberIds = new Set(members.map(({ memberId }) => memberId));
+      if (
+        requestedMemberIds.size !== memberIds.length
+        || memberIds.some((memberId) => !requestedMemberIds.has(memberId))
+      ) {
+        throw new Error('Handoff claim must classify every discovered member exactly once.');
+      }
       return validateHandoffClaimResponse(
-        { handoffId, members, ...binding },
+        { handoffId, members, ...receiptBinding },
         handoffClaimResponseSchema.parse(await applyControlRequest(
         'POST', `/api/jobscout/apply/review-handoffs/${handoffId}/claim`, { members }, idempotencyKey,
         )),

@@ -201,14 +201,6 @@ Inspect every member in the selected receipt and classify exactly one of:
 `detected`, `user_confirmed`, `unresolved`, or `contradictory`. Use
 provider-positive evidence only:
 
-If a rediscovered receipt is `partially_reconciled`, preserve every member that
-already has a stored reconciliation result and inspect only members whose
-stored result remains `unresolved`. Do not replay the original claim with a
-partial member list: the claim receipt is an immutable exact-set idempotency
-record. Record later positive evidence and submitted outcomes through the
-normal per-member outcome path, naming the receipt and only its unresolved
-members in any follow-up confirmation.
-
 - Greenhouse: a same-requisition thank-you page, confirmation route, or
   semantic success state;
 - Ashby: a same-requisition explicit application-success banner or page,
@@ -220,6 +212,14 @@ any local `DetectedSubmission` only from a versioned provider strategy, the
 handoff/member identity, current inspection epoch, evidence type, confidence,
 and a value-free fingerprint derived from those identifiers. Never hash DOM
 text, URLs, local paths, or raw tab IDs into that record.
+
+If a rediscovered receipt is `partially_reconciled`, preserve every member that
+already has a stored reconciliation result and inspect only members whose
+stored result remains `unresolved`. Do not replay the original claim with a
+partial member list: the claim receipt is an immutable exact-set idempotency
+record. Record later positive evidence and submitted outcomes through the
+normal per-member outcome path, naming the receipt and only its unresolved
+members in any follow-up confirmation.
 
 Call `trackly_claim_apply_review_handoff` with the exact receipt and a
 classification for every member. Write submission evidence and outcomes only

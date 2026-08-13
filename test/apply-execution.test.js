@@ -345,6 +345,49 @@ test('handoff claim rejects a backend response for a different handoff or member
   }), /does not match/i);
 });
 
+test('handoff claim rejects incomplete or foreign request members before the write', async () => {
+  const { registrations, calls } = registerRuntimeTools((method, route) => {
+    if (method === 'GET' && route.endsWith('/review-handoffs')) return {
+      success: true,
+      executionId: 12,
+      handoffs: [{
+        id: 41,
+        executionId: 12,
+        orderedMemberSetHash: 'b'.repeat(64),
+        generation: 1,
+        status: 'active',
+        claimedAt: null,
+        expiresAt: '2026-09-01T12:00:00.000Z',
+        members: [51, 52].map((memberId, ordinal) => ({
+          handoffId: 41,
+          ordinal,
+          batchId: 61 + ordinal,
+          memberId,
+          runId: 71 + ordinal,
+          memberVersion: 1,
+          inspectionEpoch: 0,
+          reconciliationClassification: null,
+          reconciliationResultStatus: null,
+        })),
+      }],
+    };
+    throw new Error(`unexpected write ${method} ${route}`);
+  });
+  const claim = (members) => registrations.get('trackly_claim_apply_review_handoff').handler({
+    handoffId: 41,
+    idempotencyKey: 'handoff-claim-key-0002',
+    members,
+  });
+
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+  await assert.rejects(claim([{ memberId: 51, classification: 'detected' }]), /every discovered member/i);
+  await assert.rejects(claim([
+    { memberId: 51, classification: 'detected' },
+    { memberId: 53, classification: 'unresolved' },
+  ]), /every discovered member/i);
+  assert.equal(calls.length, 1);
+});
+
 test('local tab keep-set tool canonicalizes IDs without making a Trackly API call', async () => {
   const { registrations, calls } = registerRuntimeTools();
   const tool = registrations.get('trackly_validate_apply_tab_keep_set');
