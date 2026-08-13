@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">trackly</title>
+  <desc id="desc">The white trackly arrow mark on a black square.</desc>
+  <rect width="1024" height="1024" fill="#000"/>
+  <path fill="#fff" d="M512 320 622 396v58l-86-59v308h-48V395l-86 59v-58l110-76Z"/>
+  <path fill="#fff" d="m454 461-130 90v60l130-91v-59Zm116 0v59l130 91v-60l-130-90Z"/>
+</svg>

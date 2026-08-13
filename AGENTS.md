@@ -69,7 +69,7 @@ not depend on a sibling private checkout that does not exist on its runner.
 
 ### MCP Server
 - Search/network tools plus the versioned Trackly Apply tool set. Hosted/local Apply schemas must remain in contract parity; `trackly_prepare_resume` is local-only behavior and hosted MCP returns an explicit local-agent/manual-upload requirement.
-- **Intentionally NOT here: `trackly_chat`** (the hosted connector has one extra tool). It's a backend agent over these same primitives — built for classic-UI surfaces that have no agent. CLI/MCP clients ARE the agent, so it'd be an agent-in-an-agent. Do NOT port it; this single-tool asymmetry is by design.
+- **Intentionally hosted-only:** `trackly_chat` is a backend agent for classic-UI surfaces, while CLI/MCP clients already are agents; `get_more_tools` is a hosted, value-free capability-gap analytics signal. Do NOT port either into the local MCP. These two exact asymmetries are reviewed by the hosted-contract verifier; no other hosted-only tool is allowed.
 - MCP User-Agent: `trackly-mcp/<version>` (from package.json)
 - CLI User-Agent: `trackly-cli/<version>` (separate channel attribution)
 - Flag validation is **command-level** (`COMMAND_FLAGS` in `bin/trackly`): it rejects unknown/wrong-command flags + typos (with a "did you mean" hint), but does not reject a flag that's valid on a sibling subcommand yet ignored by the handler (e.g. `api-key list --name foo`). Deliberate — subcommand-strict scoping would risk false-rejects, which are worse than a silently-ignored flag.

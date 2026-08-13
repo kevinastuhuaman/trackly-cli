@@ -899,7 +899,10 @@ function registerApplyTools(
         leaseToken: z.string().min(1).max(1024),
         outcome: z.enum(['review_ready', 'submitted', 'failed', 'blocked']),
         confirmation: z.enum(['user_confirmation', 'success_page']).optional(),
-      })).min(1).max(APPLY_BATCH_MAX_BULK_MUTATIONS),
+      })).min(1).max(APPLY_BATCH_MAX_BULK_MUTATIONS).refine(
+        (values) => new Set(values.map(({ runId }) => runId)).size === values.length,
+        { message: 'outcomes must contain unique runId values' }
+      ),
     },
     wrapTool(
       async ({ idempotencyKey, ...params }) => applyControlRequest(
