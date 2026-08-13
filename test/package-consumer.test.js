@@ -142,6 +142,7 @@ test('clean npm install runs the packed CLI, MCP, agent setup, and audit command
     cwd: consumerDir,
     env: {
       ...process.env,
+      TRACKLY_MCP_ANALYTICS_DISABLED: '1',
       TRACKLY_CONFIG_DIR: path.join(tempDir, 'mcp-config'),
     },
     stdio: ['pipe', 'pipe', 'pipe'],

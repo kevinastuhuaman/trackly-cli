@@ -546,6 +546,30 @@ test('final credential removal times out, aborts preference sync, and ignores la
   });
 });
 
+test('all-scope logout preserves opt-out when authentication is environment-only', async (t) => {
+  const configDir = createTempConfigDir();
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  await withEnv({
+    TRACKLY_CONFIG_DIR: configDir,
+    TRACKLY_API_KEY: 'trk_ephemeral_logout_key',
+    TRACKLY_BASE_URL: undefined,
+  }, async () => {
+    let requestCalls = 0;
+    await client.removeCredentials({
+      scope: 'all',
+      request: async () => {
+        requestCalls += 1;
+        return { shareUsageAnalytics: false };
+      },
+      timeoutMs: 20,
+    });
+
+    assert.equal(requestCalls, 1);
+    assert.deepEqual(client.loadConfig(), { mcpAnalyticsOptOut: true });
+  });
+});
+
 test('failed final-credential sync keeps anonymous analytics off until authenticated opt-in sync', async (t) => {
   const configDir = createTempConfigDir();
   t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));

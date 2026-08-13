@@ -146,7 +146,7 @@ test('documented local MCP tool count matches every registered tool', () => {
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
-  assert.equal(registeredTools.length, 54);
+  assert.equal(registeredTools.length, 55);
   assert.equal(new Set(registeredTools).size, registeredTools.length);
 });
 
@@ -1369,10 +1369,14 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   handlerDrift.publicTools[0][2] = 'f'.repeat(64);
   assert.throws(verifyFixture(handlerDrift), /handler snapshot drifted/);
   const ancestryDrift = structuredClone(originalFixture);
-  ancestryDrift.mergedRuntime.parents[1] = 'a'.repeat(40);
+  const sourceParentIndex = ancestryDrift.mergedRuntime.parents.indexOf(
+    ancestryDrift.sourceRuntime.commit,
+  );
+  assert.notEqual(sourceParentIndex, -1);
+  ancestryDrift.mergedRuntime.parents[sourceParentIndex] = 'a'.repeat(40);
   assert.throws(verifyFixture(ancestryDrift), /must prove the reviewed runtime commit is a direct parent/);
   const staleCapture = structuredClone(originalFixture);
-  staleCapture.capturedAt = '2026-08-14T21:26:41-07:00';
+  staleCapture.capturedAt = '2026-08-13T22:10:40-07:00';
   assert.throws(verifyFixture(staleCapture), /must be captured within 24 hours of its recorded runtime merge/);
 });
 

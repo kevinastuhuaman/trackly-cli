@@ -17,6 +17,9 @@ const RELAY_TIMEOUT_MS = 2_000;
 const DEFAULT_MAX_PENDING_DELIVERIES = 32;
 const MAX_CAPTURED_ITEMS = 50;
 const MAX_CONTENT_LENGTH = 100_000;
+const MAX_SANITIZE_DEPTH = 8;
+const MAX_SANITIZE_ITEMS = 500;
+const MAX_SANITIZE_STRING_LENGTH = 4_096;
 const AUTHENTICATED_RELAY_PATH = '/api/jobscout/mcp-analytics';
 const ANONYMOUS_RELAY_PATH = '/api/jobscout/mcp-analytics/anonymous';
 const ANALYTICS_PREFERENCE_PATH = '/api/jobscout/analytics-preference';
@@ -115,6 +118,19 @@ const SAFE_ENUM_KEYS = new Set([
   'region', 'regiontag', 'locationfilter', 'sort',
 ]);
 const SDK_FAILURE_WARNING = /Warning: (?:Failed to instrument server|Failed to setup tool call instrumentation|No PostHog client passed)/i;
+
+const ALLOWED_EVENT_PROPERTY_KEYS = new Set([
+  '$exception_list', '$lib', '$lib_version', '$mcp_client_name',
+  '$mcp_client_user_agent', '$mcp_client_version', '$mcp_duration_ms',
+  '$mcp_error_message', '$mcp_error_type', '$mcp_intent', '$mcp_intent_source',
+  '$mcp_is_error', '$mcp_listed_tool_names', '$mcp_parameters',
+  '$mcp_protocol_version', '$mcp_resource_name', '$mcp_response',
+  '$mcp_server_name', '$mcp_server_version', '$mcp_source', '$mcp_tool_category',
+  '$mcp_tool_description', '$mcp_tool_name', '$mcp_vendor_client',
+  '$process_person_profile', '$session_id', 'app_version', 'build', 'channel',
+  'contract_version', 'cpu_architecture', 'environment', 'node_version',
+  'operating_system', 'trackly_mcp_analytics_contract', 'trackly_package_version',
+]);
 
 const FORBIDDEN_KEYS = new Set([
   // Credentials and authentication material.
@@ -301,14 +317,44 @@ function projectExceptionList(value, errorValue) {
   });
 }
 
-function redactValue(value) {
-  if (typeof value === 'string') return scrubString(value);
-  if (Array.isArray(value)) return value.map(redactValue);
+function redactValue(
+  value,
+  depth = 0,
+  budget = { remaining: MAX_SANITIZE_ITEMS },
+  seen = new WeakSet(),
+) {
+  if (typeof value === 'string') {
+    return scrubString(value.slice(0, MAX_SANITIZE_STRING_LENGTH));
+  }
   if (!value || typeof value !== 'object') return value;
+  if (depth >= MAX_SANITIZE_DEPTH || budget.remaining <= 0 || seen.has(value)) {
+    return undefined;
+  }
+
+  seen.add(value);
+  budget.remaining -= 1;
+  if (Array.isArray(value)) {
+    const projected = [];
+    for (const nested of value.slice(0, MAX_CAPTURED_ITEMS)) {
+      if (budget.remaining <= 0) break;
+      const redacted = redactValue(nested, depth + 1, budget, seen);
+      if (redacted !== undefined) projected.push(redacted);
+    }
+    return projected;
+  }
 
   const result = {};
-  for (const [key, nested] of Object.entries(value)) {
-    result[key] = isForbiddenKey(key) ? REDACTED : redactValue(nested);
+  let capturedItems = 0;
+  for (const key in value) {
+    capturedItems += 1;
+    if (capturedItems > MAX_CAPTURED_ITEMS) break;
+    if (!Object.hasOwn(value, key)) continue;
+    if (budget.remaining <= 0) break;
+    const nested = value[key];
+    const redacted = isForbiddenKey(key)
+      ? REDACTED
+      : redactValue(nested, depth + 1, budget, seen);
+    if (redacted !== undefined) result[key] = redacted;
   }
   return result;
 }
@@ -465,6 +511,14 @@ function projectMcpParameters(toolName, parameters) {
 function sanitizeMcpAnalyticsEvent(event) {
   if (!event || typeof event !== 'object') return null;
   const sanitized = redactValue(event);
+  if (!sanitized || typeof sanitized !== 'object') return null;
+  const sourceProperties = sanitized.properties;
+  if (sourceProperties && typeof sourceProperties === 'object') {
+    sanitized.properties = Object.fromEntries(
+      Object.entries(sourceProperties)
+        .filter(([key]) => ALLOWED_EVENT_PROPERTY_KEYS.has(key)),
+    );
+  }
   const properties = sanitized.properties;
   if (!properties || typeof properties !== 'object') return sanitized;
 
@@ -483,6 +537,11 @@ function sanitizeMcpAnalyticsEvent(event) {
   delete properties.hostname;
   delete properties.username;
   delete properties.$mcp_conversation_id;
+
+  if (typeof properties.$session_id === 'string') {
+    const sdkSession = /^ses_([0-9a-f-]{36})$/i.exec(properties.$session_id);
+    if (sdkSession) properties.$session_id = sdkSession[1];
+  }
 
   const toolName = properties.$mcp_tool_name ?? properties.$mcp_resource_name;
   const sourceArguments = findArguments(properties.$mcp_parameters);
@@ -506,6 +565,13 @@ function sanitizeMcpAnalyticsEvent(event) {
     }
   }
   if (typeof toolName === 'string' && toolName.length > 0) {
+    if (toolName === 'get_more_tools') {
+      properties.$mcp_resource_name = toolName;
+      delete properties.$mcp_tool_name;
+    } else {
+      properties.$mcp_tool_name = toolName;
+      delete properties.$mcp_resource_name;
+    }
     properties.$mcp_intent = classifyIntent(toolName, properties.$mcp_intent);
     properties.$mcp_intent_source = hasContext ? 'context_parameter' : 'inferred';
     if (toolName === 'get_more_tools' && event.event === '$mcp_tool_call') {
@@ -546,17 +612,15 @@ function addOptionalContextToTools(server) {
   for (const [toolName, tool] of Object.entries(tools)) {
     const shape = tool?.inputSchema?.shape;
     if (!shape || typeof shape !== 'object') continue;
-    const isMissingCapabilityTool = toolName === 'get_more_tools';
-    if (Object.hasOwn(shape, 'context') && !isMissingCapabilityTool) continue;
+    if (Object.hasOwn(shape, 'context')) continue;
 
     const originalHandler = tool.handler;
     tool.update({
       paramsSchema: {
         ...shape,
-        context: z.string().max(1_000).optional().describe(CONTEXT_DESCRIPTION),
+        context: z.string().optional().describe(CONTEXT_DESCRIPTION),
       },
       callback: (args, extra) => {
-        if (isMissingCapabilityTool) return originalHandler(args, extra);
         if (!args || typeof args !== 'object' || !Object.hasOwn(args, 'context')) {
           return originalHandler(args, extra);
         }
@@ -565,24 +629,6 @@ function addOptionalContextToTools(server) {
       },
     });
   }
-}
-
-function ensureMissingCapabilityTool(server) {
-  if (server?._registeredTools?.get_more_tools) return;
-  if (typeof server?.tool !== 'function') throw new Error('unsupported_mcp_sdk_tool_registration');
-  server.tool(
-    'get_more_tools',
-    'Report a capability Trackly does not currently provide. Use structured categories; context is optional and is classified but never stored as raw text.',
-    {
-      requestedCapability: z.enum(MISSING_CAPABILITY_VALUES.requestedCapability),
-      requestedAction: z.enum(MISSING_CAPABILITY_VALUES.requestedAction),
-      requestedResource: z.enum(MISSING_CAPABILITY_VALUES.requestedResource),
-      requestedDestination: z.enum(MISSING_CAPABILITY_VALUES.requestedDestination),
-    },
-    async () => ({
-      content: [{ type: 'text', text: JSON.stringify({ reported: true }) }],
-    }),
-  );
 }
 
 function runtimeEventProperties(env = process.env) {
@@ -750,7 +796,6 @@ function configureMcpAnalytics(server, options = {}) {
     const anonymousDistinctId = `mcp-anon-${randomUUID()}`;
     relay = (options.createRelay || createBackendRelay)({ fetch: options.fetch });
     const eventProperties = runtimeEventProperties(env);
-    ensureMissingCapabilityTool(server);
     addOptionalContextToTools(server);
     const sdkFailureWarnings = [];
     const analytics = sdk.instrument(server, relay, {

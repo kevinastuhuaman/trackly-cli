@@ -87,6 +87,7 @@ test('stdio MCP initialize never loads HTTP transport or static-file modules', {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
+      TRACKLY_MCP_ANALYTICS_DISABLED: '1',
       NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${hookPath}`.trim(),
       TRACKLY_CONFIG_DIR: configDir,
       TRACKLY_MODULE_TRACE: tracePath,

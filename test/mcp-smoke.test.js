@@ -324,6 +324,7 @@ test('trackly mcp starts and stays attached to stdio', async (t) => {
     cwd: path.join(__dirname, '..'),
     env: {
       ...process.env,
+      TRACKLY_MCP_ANALYTICS_DISABLED: '1',
       TRACKLY_CONFIG_DIR: configDir,
     },
     stdio: ['pipe', 'pipe', 'pipe'],

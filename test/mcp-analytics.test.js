@@ -453,8 +453,29 @@ test('Trackly startup configures analytics only after every source tool is regis
   });
 
   assert.equal(configuredServer, server);
-  assert.equal(sourceToolCount, 54);
+  assert.equal(sourceToolCount, 55);
   await server.close();
+});
+
+test('static Trackly catalog always exposes the structured missing-capability tool', () => {
+  const server = createServer();
+  const tool = server._registeredTools.get_more_tools;
+  assert.ok(tool);
+  const shape = tool.inputSchema.shape;
+  assert.deepEqual(
+    Object.keys(shape).filter((key) => !shape[key].isOptional()).sort(),
+    [],
+  );
+  assert.equal(shape.context.isOptional(), true);
+});
+
+test('missing-capability acknowledgement is truthful about best-effort delivery', async () => {
+  const tool = createServer()._registeredTools.get_more_tools;
+  const result = await tool.handler({});
+  assert.deepEqual(JSON.parse(result.content[0].text), {
+    accepted: true,
+    delivery: 'best_effort',
+  });
 });
 
 test('all existing Trackly tools keep context optional when analytics is enabled', async (t) => {
@@ -683,6 +704,22 @@ test('client identity is removed because authenticated identity is backend-owned
   assert.equal(result.properties.$set, undefined);
 });
 
+test('SDK session and ordinary tool attribution are canonicalized for the relay', () => {
+  const sessionId = '4fbe81a9-6b5b-4b4c-9d6f-2e349529f056';
+  const result = sanitizeMcpAnalyticsEvent({
+    event: '$mcp_tool_call',
+    properties: {
+      $session_id: `ses_${sessionId}`,
+      $mcp_tool_name: 'trackly_search_jobs',
+      $mcp_resource_name: 'trackly_search_jobs',
+    },
+  });
+
+  assert.equal(result.properties.$session_id, sessionId);
+  assert.equal(result.properties.$mcp_tool_name, 'trackly_search_jobs');
+  assert.equal(result.properties.$mcp_resource_name, undefined);
+});
+
 test('error telemetry removes secrets, user paths, and sensitive payload values', () => {
   const result = sanitizeMcpAnalyticsEvent({
     event: '$exception',
@@ -715,6 +752,45 @@ test('error telemetry removes secrets, user paths, and sensitive payload values'
     category: 'unknown',
     stacktrace: { frames: [{ function_name: 'wrapTool' }] },
   }]);
+});
+
+test('sanitization bounds oversized strings and nested collections before projection', () => {
+  const oversized = 'private-free-text-'.repeat(100_000);
+  const result = sanitizeMcpAnalyticsEvent({
+    event: '$mcp_tool_call',
+    properties: {
+      $mcp_tool_name: 'trackly_search_jobs',
+      $mcp_intent: oversized,
+      $mcp_parameters: {
+        request: {
+          params: {
+            arguments: {
+              keywords: oversized,
+              ignored: Array.from({ length: 10_000 }, () => oversized),
+            },
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(result.properties.$mcp_intent, 'job_discovery');
+  assert.ok(JSON.stringify(result).length < 10_000);
+  assert.deepEqual(
+    result.properties.$mcp_parameters.request.params.arguments.keywords,
+    { length: 4_096 },
+  );
+});
+
+test('sanitization ignores inherited properties within the same traversal bound', () => {
+  const inherited = Object.fromEntries(
+    Array.from({ length: 10_000 }, (_, index) => [`polluted${index}`, 'private']),
+  );
+  const properties = Object.create(inherited);
+  properties.$mcp_tool_name = 'trackly_search_jobs';
+  const result = sanitizeMcpAnalyticsEvent({ event: '$mcp_tool_call', properties });
+  assert.equal(result.properties.$mcp_tool_name, 'trackly_search_jobs');
+  assert.doesNotMatch(JSON.stringify(result), /polluted|private/);
 });
 
 test('exception fallback classification uses the original error message', () => {
@@ -798,23 +874,6 @@ test('enabled instrumentation advertises optional context and strips it before h
   assert.ok(searchTool);
   assert.ok(searchTool.inputSchema.properties.context);
   assert.ok(!searchTool.inputSchema.required.includes('context'));
-  const missingCapabilityTool = listed.tools.find((tool) => tool.name === 'get_more_tools');
-  assert.ok(missingCapabilityTool);
-  assert.ok(!missingCapabilityTool.inputSchema.required?.includes('context'));
-  assert.ok(missingCapabilityTool.inputSchema.properties.requestedCapability);
-  assert.ok(missingCapabilityTool.inputSchema.properties.requestedAction);
-  assert.ok(missingCapabilityTool.inputSchema.properties.requestedResource);
-  assert.ok(missingCapabilityTool.inputSchema.properties.requestedDestination);
-  assert.deepEqual(
-    missingCapabilityTool.inputSchema.required.sort(),
-    ['requestedAction', 'requestedCapability', 'requestedDestination', 'requestedResource'],
-  );
-  const incompleteReport = await client.callTool({
-    name: 'get_more_tools',
-    arguments: {},
-  });
-  assert.equal(incompleteReport.isError, true);
-
   await assert.doesNotReject(client.callTool({
     name: 'trackly_search_jobs',
     arguments: { keywords: 'fintech' },
@@ -824,6 +883,12 @@ test('enabled instrumentation advertises optional context and strips it before h
   await assert.doesNotReject(client.callTool({
     name: 'trackly_search_jobs',
     arguments: { keywords: 'fintech', context: '' },
+  }));
+  assert.deepEqual(handlerArgs, { keywords: 'fintech' });
+
+  await assert.doesNotReject(client.callTool({
+    name: 'trackly_search_jobs',
+    arguments: { keywords: 'fintech', context: 'x'.repeat(10_000) },
   }));
   assert.deepEqual(handlerArgs, { keywords: 'fintech' });
 
@@ -860,8 +925,7 @@ test('enabled instrumentation advertises optional context and strips it before h
 
 test('missing-capability reports preserve distinguishable structured requests without prose', async (t) => {
   const captures = [];
-  const server = new McpServer({ name: 'missing-capability-test', version: '1.0.0' });
-  server.tool('trackly_search_jobs', 'Search jobs', {}, async () => ({ content: [] }));
+  const server = createServer();
   const configured = configureMcpAnalytics(server, {
     env: ENABLED_ENV,
     loadSdk: () => require('@posthog/mcp'),
@@ -995,6 +1059,81 @@ test('concurrent shutdown calls share the in-flight analytics flush', async () =
   assert.equal(secondSettled, true);
 });
 
+for (const relayMethod of ['_shutdown', 'flush']) {
+  test(`analytics shutdown bounds a never-settling ${relayMethod}`, async () => {
+    const server = new McpServer({ name: 'shutdown-timeout-test', version: '1.0.0' });
+    server.tool('trackly_search_jobs', 'Search jobs', {}, async () => ({ content: [] }));
+    const relay = { [relayMethod]: test.mock.fn(() => new Promise(() => {})) };
+    configureMcpAnalytics(server, {
+      env: ENABLED_ENV,
+      createRelay: () => relay,
+      loadSdk: () => ({ instrument() { return { capture() {} }; } }),
+    });
+
+    const keepEventLoopAlive = setTimeout(() => {}, 100);
+    await assert.doesNotReject(shutdownMcpAnalytics(server, 5));
+    clearTimeout(keepEventLoopAlive);
+    assert.equal(relay[relayMethod].mock.callCount(), 1);
+    await assert.doesNotReject(shutdownMcpAnalytics(server, 5));
+    assert.equal(relay[relayMethod].mock.callCount(), 1);
+  });
+}
+
+test('handled Trackly tool failures retain sanitized stack frames for analytics', async (t) => {
+  const previous = {
+    apiKey: process.env.TRACKLY_API_KEY,
+    baseUrl: process.env.TRACKLY_BASE_URL,
+    fetch: global.fetch,
+  };
+  const captures = [];
+  process.env.TRACKLY_API_KEY = 'trk_stack_test';
+  process.env.TRACKLY_BASE_URL = 'https://closeai.mba';
+  global.fetch = async () => ({
+    ok: false,
+    status: 500,
+    async text() { return 'synthetic backend failure'; },
+  });
+  t.after(() => {
+    if (previous.apiKey === undefined) delete process.env.TRACKLY_API_KEY;
+    else process.env.TRACKLY_API_KEY = previous.apiKey;
+    if (previous.baseUrl === undefined) delete process.env.TRACKLY_BASE_URL;
+    else process.env.TRACKLY_BASE_URL = previous.baseUrl;
+    global.fetch = previous.fetch;
+  });
+
+  const server = createServer();
+  configureServerAnalytics(server, {
+    analytics: {
+      env: ENABLED_ENV,
+      loadSdk: () => require('@posthog/mcp'),
+      createRelay: () => ({
+        capture(event) { captures.push(event); },
+        async _shutdown() {},
+      }),
+    },
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'stack-test-client', version: '1.0.0' });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await shutdownMcpAnalytics(server);
+  });
+
+  const result = await client.callTool({
+    name: 'trackly_get_preferences',
+    arguments: {},
+  });
+  assert.equal(result.isError, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  const exception = captures.find((event) => event.event === '$exception');
+  assert.ok(exception);
+  assert.ok(exception.properties.$exception_list[0].stacktrace.frames.length > 0);
+  assert.doesNotMatch(JSON.stringify(exception), /trk_stack_test|synthetic backend failure/);
+});
+
 test('SDK private-tool registry drift disables analytics visibly without breaking tools', () => {
   let instrumentCalls = 0;
   const warnings = [];
@@ -1018,7 +1157,7 @@ test('SDK private-tool registry drift disables analytics visibly without breakin
   ]);
 });
 
-test('a malformed cyclic analytics event is dropped instead of escaping beforeSend', () => {
+test('unknown cyclic analytics properties are dropped instead of escaping beforeSend', () => {
   let beforeSend;
   const server = new McpServer({ name: 'cyclic-event-test', version: '1.0.0' });
   server.tool('trackly_search_jobs', 'Search jobs', {}, async () => ({ content: [] }));
@@ -1037,7 +1176,9 @@ test('a malformed cyclic analytics event is dropped instead of escaping beforeSe
   const event = { event: '$exception', properties: {} };
   event.properties.cycle = event;
   assert.doesNotThrow(() => beforeSend(event));
-  assert.equal(beforeSend(event), null);
+  const result = beforeSend(event);
+  assert.equal(result.event, '$exception');
+  assert.equal(result.properties.cycle, undefined);
 });
 
 test('capture failures never fail an MCP tool call', async (t) => {

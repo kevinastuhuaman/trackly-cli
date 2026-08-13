@@ -301,7 +301,7 @@ test('coordinated hosted provenance rejects a dirty reviewed-runtime checkout', 
   fs.writeFileSync(path.join(backendRoot, 'unreviewed.txt'), 'dirty\n');
   assert.throws(
     () => verifyHostedSnapshotGitProvenance(cliRoot, backendRoot),
-    /must be completely clean so every inspected backend byte comes from the reviewed commit/,
+    /must be completely clean so every inspected backend byte comes from the deployed merge commit/,
   );
 });
 

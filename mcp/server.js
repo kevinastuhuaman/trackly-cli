@@ -16,6 +16,8 @@ const MCP_AUTH_ERROR_CODE = -32004;
 const AUTH_HINT =
   'Existing members: run `trackly login` or set TRACKLY_API_KEY. ' +
   'New members need a private invite during the limited rollout; request access at https://usetrackly.app/early-access.';
+const MCP_ANALYTICS_CONTEXT_DESCRIPTION =
+  'Briefly explain why this tool helps the current job-search goal. Never include resume text, profile answers, demographic or work-authorization answers, application notes, credentials, or secrets.';
 
 // Mirrors `granola-followup-app/src/services/region-classifier.ts:8` REGION_TAGS.
 // Keep in sync when the backend enum changes.
@@ -48,6 +50,22 @@ const JOB_MODALITIES = ['full_time', 'internship', 'all'];
 // Independent from geography and employment type. Matches the backend's
 // workArrangements query contract and job_postings constraint.
 const WORK_ARRANGEMENTS = ['remote', 'hybrid', 'in_person', 'unspecified'];
+
+const MCP_MISSING_CAPABILITY_VALUES = [
+  'search', 'inspect', 'compare', 'rank', 'recommend', 'track', 'update', 'apply',
+  'submit', 'export', 'notify', 'schedule', 'integrate', 'authenticate', 'debug', 'other',
+];
+const MCP_MISSING_ACTION_VALUES = [
+  'find', 'read', 'compare', 'rank', 'create', 'update', 'delete', 'submit',
+  'export', 'notify', 'schedule', 'connect', 'debug', 'other',
+];
+const MCP_MISSING_RESOURCE_VALUES = [
+  'job', 'company', 'application', 'contact', 'profile', 'resume', 'preference',
+  'analytics', 'account', 'tool', 'other',
+];
+const MCP_MISSING_DESTINATION_VALUES = [
+  'trackly', 'external_site', 'file', 'email', 'calendar', 'crm', 'browser', 'other',
+];
 
 // `sort` enum matches backend handler at `jobscout.ts:3053` — NOT the pre-fix
 // `newest|oldest|company` (backend rejects oldest/company with HTTP 400).
@@ -170,7 +188,7 @@ function throwMcpResourceError(error) {
 }
 
 function wrapTool(handler, fallbackMessage) {
-  return async (params) => {
+  return async (params, extra) => {
     try {
       if (!hasAuth()) {
         return createAuthErrorResult();
@@ -181,6 +199,11 @@ function wrapTool(handler, fallbackMessage) {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };
     } catch (error) {
+      if (extra && typeof extra === 'object') {
+        extra.__mcp_analytics_error = error instanceof Error
+          ? error
+          : new Error(error?.message || fallbackMessage, { cause: error });
+      }
       return createErrorResult(
         error,
         fallbackMessage,
@@ -486,6 +509,24 @@ function createServer() {
     mcpUserAgent: MCP_USER_AGENT,
     throwMcpResourceError,
   });
+
+  server.tool(
+    'get_more_tools',
+    'Report a capability Trackly does not currently provide. Use structured categories; context is optional and is classified but never stored as raw text.',
+    {
+      requestedCapability: z.enum(MCP_MISSING_CAPABILITY_VALUES).optional(),
+      requestedAction: z.enum(MCP_MISSING_ACTION_VALUES).optional(),
+      requestedResource: z.enum(MCP_MISSING_RESOURCE_VALUES).optional(),
+      requestedDestination: z.enum(MCP_MISSING_DESTINATION_VALUES).optional(),
+      context: z.string().optional().describe(MCP_ANALYTICS_CONTEXT_DESCRIPTION),
+    },
+    async () => ({
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ accepted: true, delivery: 'best_effort' }),
+      }],
+    }),
+  );
 
   return server;
 }
