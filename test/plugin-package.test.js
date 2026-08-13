@@ -3582,8 +3582,8 @@ test('public skills reference only the locked 18-tool facade', () => {
   const lock = json('plugins/trackly/skill-lock.json');
   const actual = referencedTools(path.join(PLUGIN, 'skills'));
   assert.equal(lock.publicToolAllowlist.length, 18);
-  assert.equal(lock.hostedMcpToolAllowlist.length, 48);
-  assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 48);
+  assert.equal(lock.hostedMcpToolAllowlist.length, 52);
+  assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 52);
   assert.deepEqual(actual, [...lock.publicToolAllowlist].sort());
   assert.ok(!actual.some((name) => name.includes('referral')));
   assert.deepEqual(lock.publicLifecycleContract, {

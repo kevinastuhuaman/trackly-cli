@@ -106,6 +106,10 @@ API-key creation attempts.
 - **trackly_start_apply_execution** — Start a server-owned `complete_next_n_accessible` execution with a target from 1–20, then consume the returned authoritative `progress` and `nextAction` before doing browser work.
 - **trackly_get_active_apply_execution** — Recover the active execution before legacy batch recovery.
 - **trackly_get_apply_execution** — Read an execution's latest current-wave identity and authoritative aggregate progress funnel.
+- **trackly_list_recoverable_apply_executions** — List a bounded, value-free menu of exact recovery candidates after local context loss.
+- **trackly_recover_exact_apply_members** — Recover only the explicitly confirmed candidates from one retained source snapshot, with no substitutions.
+- **trackly_list_apply_review_handoffs** — Rediscover active, nonexpired review-handoff receipts for one execution without browser or profile values.
+- **trackly_claim_apply_review_handoff** — Claim one exact handoff receipt and classify every member before grouped submission reconciliation.
 - **trackly_get_apply_execution_snapshot**: Fetch a compact bounded projection of current members, requested profile keys, mutability, allowed operations, milestones, lease timing, and the authoritative funnel.
 - **trackly_resume_parked_apply_member**: Resume one parked member only after explicit user instruction; a fresh non-mutating access probe remains required before form mutation.
 - **trackly_approve_apply_execution_resume**: Approve one exact resume identity for an execution's unchanged original snapshot while preserving immediate per-run local verification before upload.
@@ -134,8 +138,15 @@ API-key creation attempts.
 - **trackly_verify_prepared_resume** — Local MCP only: immediately before attachment, recompute the user-confirmed resume hash and size, validate the exact path/run/expiration, and lock the file read-only. Any mismatch requires a fresh preview and confirmation.
 - **trackly_lint_application_text**: Local MCP only: require an explicitly complete claim-reference packet, then return a draft hash, length, and stable value-free writing violations without sending or echoing application text to Trackly.
 - **trackly_diagnose_local_path**: Local MCP only: measure the exact implicated path's filesystem, inode, quota observability, and write-probe result without deleting user files or claiming a global disk cause.
+- **trackly_validate_apply_tab_keep_set**: Local MCP only: fail closed unless a caller-supplied nonempty expected tab set exactly matches the keep set and is covered by complete controller and user inventories. This pure helper allows unrelated tabs, performs no browser action, and never sends tab IDs to Trackly.
+- **trackly_validate_apply_resume_upload**: Local MCP only: validate the browser adapter's capabilities and ordered, value-free attachment proof stages without opening a chooser, reading a path, controlling a browser, or sending form data to Trackly.
 
 Apply contract v3 intentionally gives this verifier different local and hosted schemas: local MCP receives the full proof needed to inspect the private file, while hosted MCP accepts only run and confirmation identifiers and returns the manual/local-agent requirement. Local paths are never sent remotely. Resume fingerprints are sent only to authenticated Trackly resume approval and truth-certification endpoints, never observations or employer forms. Version 3.1 also records universal value-free evidence for critical-contact integrity and the manual-submit boundary. Version 3.2 authorizes the exact stored HTTPS origin for jobs Trackly ingested from employer careers sources, without granting redirect, iframe, or hostname-suffix privileges. Version 3.3.1 adds active-batch recovery, epoch-bound observations/outcomes, and truth certification for forms with no resume control. Version 3.4 adds server-owned accessible executions above immutable child batches, typed access dispositions, and an authoritative target-completion funnel.
+
+Version 3.7 adds public exact-member recovery and scoped review-handoff claims,
+plus local tab-finalizer and resume-upload proof validators. Recovery candidates
+are bounded and value-free. The local helpers perform no browser actions and
+send no tab IDs, filenames, paths, page text, or form values to Trackly.
 
 ### Maintenance behavior
 

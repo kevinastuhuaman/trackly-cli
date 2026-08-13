@@ -1,20 +1,20 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-08-11T19:35:02-07:00",
+  "capturedAt": "2026-08-12T21:31:00-07:00",
   "sourceRuntime": {
-    "commit": "cfdeb514e3a9879e43bb41a7ca112f0809e6e358",
-    "parent": "03e1588d9ea7f9de2cfb9593d092cd903a6cf2b8",
-    "committedAt": "2026-08-11T11:38:21-07:00"
+    "commit": "8c54e526c2e89cdb78b022ebb787dd3f84efd578",
+    "parent": "0136ed8dcba18063b2280ac076bdce30074b31f0",
+    "committedAt": "2026-08-12T21:12:32-07:00"
   },
   "mergedRuntime": {
-    "commit": "d0b67d30e1674a5213044c252e55aea369e01d6e",
+    "commit": "b23d290e84939221358f0693e8cf7cd93f2f7c39",
     "parents": [
-      "db95e44584d3531d232573cdccbbf03664e2c41f",
-      "cfdeb514e3a9879e43bb41a7ca112f0809e6e358"
+      "e42c4a30331bed9aeaa9dec530b67055216fd4ca",
+      "8c54e526c2e89cdb78b022ebb787dd3f84efd578"
     ],
-    "committedAt": "2026-08-11T11:56:01-07:00"
+    "committedAt": "2026-08-12T21:26:40-07:00"
   },
-  "applyContractVersion": "3.6.3",
+  "applyContractVersion": "3.7.1",
   "pluginContractVersion": "1.0.0",
   "publicTools": [
     ["trackly_search_jobs", "6e72672960c93c127fcd38588fcd2444ba59dea169c0d46d300c70201b6aca1a", "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481"],
@@ -59,6 +59,10 @@
     "trackly_start_apply_execution",
     "trackly_get_active_apply_execution",
     "trackly_get_apply_execution",
+    "trackly_list_recoverable_apply_executions",
+    "trackly_recover_exact_apply_members",
+    "trackly_list_apply_review_handoffs",
+    "trackly_claim_apply_review_handoff",
     "trackly_get_apply_execution_snapshot",
     "trackly_resume_parked_apply_member",
     "trackly_approve_apply_execution_resume",
@@ -95,6 +99,6 @@
     "databaseBinding": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
     "reviewIdentity": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
-    "applicationProfileService": "f32f4f26550988eef3751613c22dc6a4be9b6b1273e535a042f8859ea94f63b8"
+    "applicationProfileService": "4f25cc21119197123141b19a3d8807952a0b7b56dad56d862dde121384956d85"
   }
 }

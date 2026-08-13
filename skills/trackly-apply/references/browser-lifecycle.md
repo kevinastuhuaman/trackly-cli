@@ -92,6 +92,13 @@ Before resuming, handing off, or closing a tab:
 5. Reclaim a matching tab only after employer, role, requisition, HTTPS origin,
    ATS tenant when applicable, run ID, and browser binding all revalidate.
 
+Immediately before a session-finalizer call, pass the complete expected and
+keep sets plus complete controller and user inventories through
+`trackly_validate_apply_tab_keep_set`. Continue only when it returns
+`safeToFinalize: true`. This helper is a local validator, not a browser
+controller: it does not discover, focus, close, hand off, or finalize tabs.
+Unrelated tabs may remain in the inventories. Raw tab IDs stay local.
+
 For every initial tab and every recovery, call `trackly_bind_apply_surface`
 with the existing frozen member and run. Use `initial_binding` for the first
 surface and `recovery_binding` after a missing tab or handoff. The returned URL
@@ -252,6 +259,13 @@ When an incomplete member's tab is missing:
    gate. If the page shows a changed success URL or submission state,
    revalidate the exact requisition before recording any outcome and never
    activate Submit again.
+
+When protocol 3.6 exact-member recovery created the current execution, prove
+three facts separately in the operator receipt: whether the tab was restored,
+whether the employer form state was restored or reconstructed, and whether
+current mutation authority was reacquired. A recovered tab alone never grants
+write authority. A recovered server member alone never proves the draft or tab
+survived.
 
 If the recovered origin or identity differs, semantic controls are
 unobservable, or access is blocked by credentials or a pre-form challenge,

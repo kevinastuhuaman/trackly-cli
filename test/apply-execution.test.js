@@ -31,6 +31,10 @@ const executionTools = [
   'trackly_get_apply_execution_snapshot',
   'trackly_resume_parked_apply_member',
   'trackly_approve_apply_execution_resume',
+  'trackly_list_recoverable_apply_executions',
+  'trackly_recover_exact_apply_members',
+  'trackly_list_apply_review_handoffs',
+  'trackly_claim_apply_review_handoff',
 ];
 
 function registerRuntimeTools(apiResponse = { ok: true }) {
@@ -56,14 +60,14 @@ function registerRuntimeTools(apiResponse = { ok: true }) {
     throwMcpResourceError: (error) => { throw error; },
     applyApiRequest: async (...args) => {
       calls.push(args);
-      return apiResponse;
+      return typeof apiResponse === 'function' ? apiResponse(...args) : apiResponse;
     },
   });
   return { registrations, calls };
 }
 
-test('protocol 3.4 publishes all accessible execution tools', () => {
-  assert.equal(contract.contractVersion, '3.6.3');
+test('protocol 3.6 publishes all accessible execution and recovery tools', () => {
+  assert.equal(contract.contractVersion, '3.7.1');
   for (const name of executionTools) {
     assert.ok(contract.tools[name], `${name} missing from contract fixture`);
     assert.match(tools, new RegExp(`['"]${name}['"]`));
@@ -72,6 +76,397 @@ test('protocol 3.4 publishes all accessible execution tools', () => {
   assert.match(tools, /\/advance/);
   assert.match(tools, /\/dispositions/);
   assert.match(tools, /\/stop/);
+});
+
+test('local upload proof validates ordered value-free stages without a Trackly API call', async () => {
+  const { registrations, calls } = registerRuntimeTools();
+  const tool = registrations.get('trackly_validate_apply_resume_upload');
+  assert.ok(tool);
+  const result = await tool.handler(tool.schema.parse({
+    capabilities: {
+      semanticControlDiscovery: true,
+      chooserArming: true,
+      fileAttachment: true,
+      committedFilenameInspection: true,
+      parserFieldRecheck: true,
+    },
+    events: contract.constants.applyUploadStages.map((stage) => ({ stage, outcome: 'passed' })),
+  }));
+  assert.equal(result.safeToClaimAttachment, true);
+  assert.deepEqual(calls, []);
+});
+
+test('durable recovery tools use exact bounded HTTP contracts and validate results', async () => {
+  const sourceSnapshotHash = 'a'.repeat(64);
+  const orderedMemberSetHash = 'b'.repeat(64);
+  const { registrations, calls } = registerRuntimeTools((method, route) => {
+    if (route.endsWith('/recoverable')) return {
+      success: true,
+      sources: [{
+        sourceExecutionId: 11,
+        sourceSnapshotHash,
+        recoverableUntil: '2026-09-01T12:00:00.000Z',
+        candidates: [{ candidateId: 21, jobId: 31, queuePosition: 0, eligibilityCode: 'recoverable' }],
+      }],
+    };
+    if (route.endsWith('/recover')) return {
+      success: true,
+      replay: false,
+      execution: { id: 12, mode: 'recover_exact_members' },
+      assertedCandidateIds: [21],
+      eligibleCandidateIds: [21],
+      eligibility: [{ candidateId: 21, jobId: 31, queuePosition: 0, eligibilityCode: 'recoverable' }],
+    };
+    if (route.endsWith('/review-handoffs')) return {
+      success: true,
+      executionId: 12,
+      handoffs: [{
+        id: 41,
+        executionId: 12,
+        orderedMemberSetHash,
+        generation: 1,
+        status: 'active',
+        claimedAt: null,
+        expiresAt: '2026-09-01T12:00:00.000Z',
+        members: [{
+          handoffId: 41,
+          ordinal: 0,
+          batchId: 61,
+          memberId: 51,
+          runId: 71,
+          memberVersion: 1,
+          inspectionEpoch: 0,
+          reconciliationClassification: null,
+          reconciliationResultStatus: null,
+        }],
+      }],
+    };
+    return {
+      success: true,
+      handoffId: 41,
+      executionId: 12,
+      orderedMemberSetHash,
+      members: [{ memberId: 51, classification: 'detected' }],
+      transition: 'claimed',
+    };
+  });
+  const idempotencyKey = 'durable-recovery-key-0001';
+  await registrations.get('trackly_list_recoverable_apply_executions').handler({});
+  await registrations.get('trackly_recover_exact_apply_members').handler({
+    sourceExecutionId: 11, sourceSnapshotHash, candidateIds: [21],
+    explicitExactSetConfirmation: true, idempotencyKey,
+  });
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+  await registrations.get('trackly_claim_apply_review_handoff').handler({
+    handoffId: 41,
+    idempotencyKey,
+    members: [{ memberId: 51, classification: 'detected' }],
+  });
+  assert.deepEqual(calls[0], [
+    'GET', '/api/jobscout/apply/executions/recoverable', null, false, false,
+    'trackly-mcp/test', undefined,
+  ]);
+  assert.deepEqual(calls[1].slice(0, 3), ['POST', '/api/jobscout/apply/executions/recover', {
+    mode: 'recover_exact_members', sourceExecutionId: 11, sourceSnapshotHash, candidateIds: [21],
+    explicitExactSetConfirmation: true,
+  }]);
+  assert.deepEqual(calls[1].at(-1), { 'Idempotency-Key': idempotencyKey });
+  assert.deepEqual(calls[2].slice(0, 2), ['GET', '/api/jobscout/apply/executions/12/review-handoffs']);
+  assert.deepEqual(calls[3].slice(0, 3), ['POST', '/api/jobscout/apply/review-handoffs/41/claim', {
+    members: [{ memberId: 51, classification: 'detected' }],
+  }]);
+  assert.deepEqual(calls[3].at(-1), { 'Idempotency-Key': idempotencyKey });
+});
+
+test('exact recovery rejects a backend response for a different or duplicate candidate set', async () => {
+  const sourceSnapshotHash = 'a'.repeat(64);
+  const recover = async (response) => {
+    const { registrations } = registerRuntimeTools(response);
+    return registrations.get('trackly_recover_exact_apply_members').handler({
+      sourceExecutionId: 11,
+      sourceSnapshotHash,
+      candidateIds: [21, 22],
+      explicitExactSetConfirmation: true,
+      idempotencyKey: 'durable-recovery-key-0002',
+    });
+  };
+  const base = {
+    success: true,
+    replay: false,
+    execution: { id: 12, mode: 'recover_exact_members' },
+    assertedCandidateIds: [21, 22],
+    eligibleCandidateIds: [21, 22],
+    eligibility: [
+      { candidateId: 21, jobId: 31, queuePosition: 0, eligibilityCode: 'recoverable' },
+      { candidateId: 22, jobId: 32, queuePosition: 1, eligibilityCode: 'recoverable' },
+    ],
+  };
+  await assert.rejects(recover({ ...base, assertedCandidateIds: [21, 23] }), /does not match/);
+  await assert.rejects(recover({ ...base, assertedCandidateIds: [21, 21] }), /does not match/);
+  await assert.rejects(recover({ ...base, eligibleCandidateIds: [21, 21] }), /does not match/);
+  await assert.rejects(recover({
+    ...base,
+    eligibility: [base.eligibility[0], { ...base.eligibility[1], eligibilityCode: 'revoked' }],
+  }), /does not match/);
+  await assert.rejects(recover({
+    ...base,
+    eligibility: [base.eligibility[0], { ...base.eligibility[0] }],
+  }), /does not match/);
+});
+
+test('recovery and handoff discovery reject ambiguous or cross-boundary identities', async () => {
+  const source = {
+    sourceExecutionId: 11,
+    sourceSnapshotHash: 'a'.repeat(64),
+    recoverableUntil: '2026-09-01T12:00:00.000Z',
+    candidates: [{ candidateId: 21, jobId: 31, queuePosition: 0, eligibilityCode: 'recoverable' }],
+  };
+  const parseRecoverable = async (response) => {
+    const { registrations } = registerRuntimeTools(response);
+    return registrations.get('trackly_list_recoverable_apply_executions').handler({});
+  };
+  await assert.rejects(parseRecoverable({
+    success: true,
+    sources: [{ ...source, candidates: [source.candidates[0], { ...source.candidates[0], jobId: 32 }] }],
+  }), /unique/i);
+  await assert.rejects(parseRecoverable({ success: true, sources: [source, source] }), /unique/i);
+
+  const member = {
+    handoffId: 41,
+    ordinal: 0,
+    batchId: 61,
+    memberId: 51,
+    runId: 71,
+    memberVersion: 1,
+    inspectionEpoch: 0,
+    reconciliationClassification: null,
+    reconciliationResultStatus: null,
+  };
+  const handoff = {
+    id: 41,
+    executionId: 12,
+    orderedMemberSetHash: 'b'.repeat(64),
+    generation: 1,
+    status: 'active',
+    claimedAt: null,
+    expiresAt: '2026-09-01T12:00:00.000Z',
+    members: [member],
+  };
+  const listHandoffs = async (response) => {
+    const { registrations } = registerRuntimeTools(response);
+    return registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+  };
+  await assert.rejects(listHandoffs({ success: true, executionId: 13, handoffs: [] }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true, executionId: 12, handoffs: [{ ...handoff, executionId: 13 }],
+  }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true, executionId: 12, handoffs: [{ ...handoff, members: [{ ...member, handoffId: 42 }] }],
+  }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true, executionId: 12, handoffs: [handoff, handoff],
+  }), /does not match/i);
+  await assert.rejects(listHandoffs({
+    success: true,
+    executionId: 12,
+    handoffs: [{ ...handoff, members: [member, { ...member, ordinal: 1, runId: 72 }] }],
+  }), /does not match/i);
+});
+
+test('handoff claim rejects a backend response for a different handoff or member set', async () => {
+  const claim = async (response) => {
+    const { registrations } = registerRuntimeTools((method, route) => {
+      if (method === 'GET' && route.endsWith('/review-handoffs')) return {
+        success: true,
+        executionId: 12,
+        handoffs: [{
+          id: 41,
+          executionId: 12,
+          orderedMemberSetHash: 'b'.repeat(64),
+          generation: 1,
+          status: 'active',
+          claimedAt: null,
+          expiresAt: '2026-09-01T12:00:00.000Z',
+          members: [{
+            handoffId: 41,
+            ordinal: 0,
+            batchId: 61,
+            memberId: 51,
+            runId: 71,
+            memberVersion: 1,
+            inspectionEpoch: 0,
+            reconciliationClassification: null,
+            reconciliationResultStatus: null,
+          }, {
+            handoffId: 41,
+            ordinal: 1,
+            batchId: 62,
+            memberId: 52,
+            runId: 72,
+            memberVersion: 1,
+            inspectionEpoch: 0,
+            reconciliationClassification: null,
+            reconciliationResultStatus: null,
+          }],
+        }],
+      };
+      return response;
+    });
+    await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+    return registrations.get('trackly_claim_apply_review_handoff').handler({
+      handoffId: 41,
+      idempotencyKey: 'handoff-claim-key-0001',
+      members: [
+        { memberId: 51, classification: 'detected' },
+        { memberId: 52, classification: 'user_confirmed' },
+      ],
+    });
+  };
+  const base = {
+    success: true,
+    handoffId: 41,
+    executionId: 12,
+    orderedMemberSetHash: 'b'.repeat(64),
+    members: [
+      { memberId: 51, classification: 'detected' },
+      { memberId: 52, classification: 'user_confirmed' },
+    ],
+    transition: 'claimed',
+  };
+
+  await assert.rejects(claim({ ...base, handoffId: 42 }), /does not match/i);
+  await assert.rejects(claim({ ...base, executionId: 13 }), /does not match/i);
+  await assert.rejects(claim({ ...base, orderedMemberSetHash: 'c'.repeat(64) }), /does not match/i);
+  await assert.rejects(claim({ ...base, members: base.members.slice(0, 1) }), /does not match/i);
+  await assert.rejects(claim({ ...base, members: [base.members[0], base.members[0]] }), /does not match/i);
+  await assert.rejects(claim({
+    ...base,
+    members: [base.members[0], { memberId: 52, classification: 'contradictory' }],
+  }), /does not match/i);
+});
+
+test('handoff claim rejects incomplete or foreign request members before the write', async () => {
+  const { registrations, calls } = registerRuntimeTools((method, route) => {
+    if (method === 'GET' && route.endsWith('/review-handoffs')) return {
+      success: true,
+      executionId: 12,
+      handoffs: [{
+        id: 41,
+        executionId: 12,
+        orderedMemberSetHash: 'b'.repeat(64),
+        generation: 1,
+        status: 'active',
+        claimedAt: null,
+        expiresAt: '2026-09-01T12:00:00.000Z',
+        members: [51, 52].map((memberId, ordinal) => ({
+          handoffId: 41,
+          ordinal,
+          batchId: 61 + ordinal,
+          memberId,
+          runId: 71 + ordinal,
+          memberVersion: 1,
+          inspectionEpoch: 0,
+          reconciliationClassification: null,
+          reconciliationResultStatus: null,
+        })),
+      }],
+    };
+    throw new Error(`unexpected write ${method} ${route}`);
+  });
+  const claim = (members) => registrations.get('trackly_claim_apply_review_handoff').handler({
+    handoffId: 41,
+    idempotencyKey: 'handoff-claim-key-0002',
+    members,
+  });
+
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+  await assert.rejects(claim([{ memberId: 51, classification: 'detected' }]), /every discovered member/i);
+  await assert.rejects(claim([
+    { memberId: 51, classification: 'detected' },
+    { memberId: 53, classification: 'unresolved' },
+  ]), /every discovered member/i);
+  assert.equal(calls.length, 1);
+});
+
+test('handoff discovery remains claimable across independent executions', async () => {
+  const handoffs = new Map([
+    [12, { handoffId: 41, memberId: 51 }],
+    [13, { handoffId: 42, memberId: 52 }],
+  ]);
+  const { registrations, calls } = registerRuntimeTools((method, route, body) => {
+    const executionMatch = route.match(/^\/api\/jobscout\/apply\/executions\/(\d+)\/review-handoffs$/);
+    if (method === 'GET' && executionMatch) {
+      const executionId = Number(executionMatch[1]);
+      const { handoffId, memberId } = handoffs.get(executionId);
+      return {
+        success: true,
+        executionId,
+        handoffs: [{
+          id: handoffId,
+          executionId,
+          orderedMemberSetHash: String(executionId).padStart(64, '0'),
+          generation: 1,
+          status: 'active',
+          claimedAt: null,
+          expiresAt: '2026-09-01T12:00:00.000Z',
+          members: [{
+            handoffId,
+            ordinal: 0,
+            batchId: memberId + 10,
+            memberId,
+            runId: memberId + 20,
+            memberVersion: 1,
+            inspectionEpoch: 0,
+            reconciliationClassification: null,
+            reconciliationResultStatus: null,
+          }],
+        }],
+      };
+    }
+    const claimMatch = route.match(/^\/api\/jobscout\/apply\/review-handoffs\/(\d+)\/claim$/);
+    if (method === 'POST' && claimMatch) {
+      const handoffId = Number(claimMatch[1]);
+      const [executionId, handoff] = [...handoffs].find(([, value]) => value.handoffId === handoffId);
+      return {
+        success: true,
+        handoffId,
+        executionId,
+        orderedMemberSetHash: String(executionId).padStart(64, '0'),
+        members: body.members,
+        transition: 'claimed',
+      };
+    }
+    throw new Error(`unexpected request ${method} ${route}`);
+  });
+
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 12 });
+  await registrations.get('trackly_list_apply_review_handoffs').handler({ executionId: 13 });
+  const result = await registrations.get('trackly_claim_apply_review_handoff').handler({
+    handoffId: 41,
+    idempotencyKey: 'handoff-claim-key-0003',
+    members: [{ memberId: 51, classification: 'detected' }],
+  });
+
+  assert.equal(result.handoffId, 41);
+  assert.equal(calls.length, 3);
+});
+
+test('local tab keep-set tool canonicalizes IDs without making a Trackly API call', async () => {
+  const { registrations, calls } = registerRuntimeTools();
+  const tool = registrations.get('trackly_validate_apply_tab_keep_set');
+  assert.ok(tool);
+
+  const input = tool.schema.parse({
+    expectedTabIds: ['101', 'tab-b'],
+    keepTabIds: ['101', 'tab-b'],
+    controllerInventory: { complete: true, tabIds: ['101', 'unrelated-controller-tab'] },
+    userInventory: { complete: true, tabIds: ['tab-b', 'unrelated-user-tab'] },
+  });
+  const result = await tool.handler(input);
+
+  assert.equal(result.safeToFinalize, true);
+  assert.deepEqual(result.canonicalKeepTabIds, ['101', 'tab-b']);
+  assert.deepEqual(calls, []);
 });
 
 test('profile jurisdiction tools validate ISO codes and forward the accepted spelling', async () => {
@@ -130,7 +525,11 @@ test('profile jurisdiction tools validate ISO codes and forward the accepted spe
 });
 
 test('execution tools validate and send the exact HTTP contract', async () => {
-  const { registrations, calls } = registerRuntimeTools();
+  const { registrations, calls } = registerRuntimeTools((method, route) => (
+    route.endsWith('/review-handoffs')
+      ? { success: true, executionId: 41, handoffs: [] }
+      : { ok: true }
+  ));
   const idempotencyKey = 'runtime-contract-key-0001';
   const cases = [
     ['trackly_start_apply_execution',
@@ -140,6 +539,8 @@ test('execution tools validate and send the exact HTTP contract', async () => {
       ['GET', '/api/jobscout/apply/executions/active', null, false, false, 'trackly-mcp/test', undefined]],
     ['trackly_get_apply_execution', { executionId: 41 },
       ['GET', '/api/jobscout/apply/executions/41', null, false, false, 'trackly-mcp/test', undefined]],
+    ['trackly_list_apply_review_handoffs', { executionId: 41 },
+      ['GET', '/api/jobscout/apply/executions/41/review-handoffs', null, false, false, 'trackly-mcp/test', undefined]],
     ['trackly_get_apply_execution_snapshot', {
       executionId: 41,
       memberIds: [2, 3],
@@ -241,6 +642,59 @@ test('execution tools validate and send the exact HTTP contract', async () => {
       'POST',
       '/api/jobscout/apply/executions/41/stop',
       { expectedRevision: 5, reasonCode: 'user_requested' },
+      false,
+      false,
+      'trackly-mcp/test',
+      { 'Idempotency-Key': idempotencyKey },
+    ]],
+    ['trackly_record_application_outcome', {
+      runId: 372,
+      batchId: 19,
+      memberId: 4,
+      inspectionEpoch: 2,
+      leaseToken: 'lease-token',
+      outcome: 'submitted',
+      confirmation: 'user_confirmation',
+      idempotencyKey,
+    }, [
+      'POST',
+      '/api/jobscout/apply/runs/372/outcome',
+      {
+        batchId: 19,
+        memberId: 4,
+        inspectionEpoch: 2,
+        leaseToken: 'lease-token',
+        outcome: 'submitted',
+        confirmation: 'user_confirmation',
+      },
+      false,
+      false,
+      'trackly-mcp/test',
+      { 'Idempotency-Key': idempotencyKey },
+    ]],
+    ['trackly_record_application_outcomes', {
+      idempotencyKey,
+      outcomes: [{
+        runId: 373,
+        batchId: 19,
+        memberId: 5,
+        inspectionEpoch: 2,
+        leaseToken: 'lease-token',
+        outcome: 'review_ready',
+      }],
+    }, [
+      'POST',
+      '/api/jobscout/apply/outcomes/bulk',
+      {
+        outcomes: [{
+          runId: 373,
+          batchId: 19,
+          memberId: 5,
+          inspectionEpoch: 2,
+          leaseToken: 'lease-token',
+          outcome: 'review_ready',
+        }],
+      },
       false,
       false,
       'trackly-mcp/test',
@@ -465,10 +919,10 @@ test('advance replay returns the backend current revision and progress unchanged
   assert.deepEqual(result, response);
 });
 
-test('skill 4.4.2 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
-  assert.match(agent, /const SKILL_VERSION = '4\.4\.2'/);
-  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.5\.0'/);
-  assert.match(skill, /Skill 4\.4\.2 requires protocol 3\.5\.0 or newer/);
+test('skill 4.5.0 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
+  assert.match(agent, /const SKILL_VERSION = '4\.5\.0'/);
+  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.6\.0'/);
+  assert.match(skill, /Skill 4\.5\.0 requires protocol 3\.6\.0 or newer/);
   assert.match(skill, /trackly_get_active_apply_execution[\s\S]*before[\s\S]*trackly_get_active_apply_batch/i);
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);
