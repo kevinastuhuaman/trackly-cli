@@ -284,6 +284,7 @@ function registerApplyTools(
       idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     )
   );
+  const discoveredRecoverableSources = new Map();
   const discoveredHandoffBindings = new Map();
   const discoveredHandoffIdsByExecution = new Map();
   server.tool(
@@ -418,9 +419,19 @@ function registerApplyTools(
     'trackly_list_recoverable_apply_executions',
     'List bounded, value-free exact-member recovery candidates after local context loss. Show the stable job identities to the user and obtain explicit confirmation before recovery; never infer or substitute candidates.',
     {},
-    wrapTool(async () => recoverableExecutionsResponseSchema.parse(await applyControlRequest(
-      'GET', '/api/jobscout/apply/executions/recoverable',
-    )), 'Failed to list recoverable apply executions')
+    wrapTool(async () => {
+      const response = recoverableExecutionsResponseSchema.parse(await applyControlRequest(
+        'GET', '/api/jobscout/apply/executions/recoverable',
+      ));
+      discoveredRecoverableSources.clear();
+      for (const source of response.sources) {
+        discoveredRecoverableSources.set(source.sourceExecutionId, {
+          sourceSnapshotHash: source.sourceSnapshotHash,
+          candidateIds: new Set(source.candidates.map(({ candidateId }) => candidateId)),
+        });
+      }
+      return response;
+    }, 'Failed to list recoverable apply executions')
   );
 
   server.tool(
@@ -436,13 +447,23 @@ function registerApplyTools(
       explicitExactSetConfirmation: z.literal(true),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
     },
-    wrapTool(async ({ idempotencyKey, ...input }) => validateExactRecoveryResponse(
-      input,
-      exactRecoveryResponseSchema.parse(await applyControlRequest('POST', '/api/jobscout/apply/executions/recover', {
-        mode: 'recover_exact_members',
-        ...input,
-      }, idempotencyKey)),
-    ), 'Failed to recover exact apply members')
+    wrapTool(async ({ idempotencyKey, ...input }) => {
+      const source = discoveredRecoverableSources.get(input.sourceExecutionId);
+      if (
+        !source
+        || source.sourceSnapshotHash !== input.sourceSnapshotHash
+        || input.candidateIds.some((candidateId) => !source.candidateIds.has(candidateId))
+      ) {
+        throw new Error('Exact recovery must use one source and candidate set from the latest discovery response.');
+      }
+      return validateExactRecoveryResponse(
+        input,
+        exactRecoveryResponseSchema.parse(await applyControlRequest('POST', '/api/jobscout/apply/executions/recover', {
+          mode: 'recover_exact_members',
+          ...input,
+        }, idempotencyKey)),
+      );
+    }, 'Failed to recover exact apply members')
   );
 
   server.tool(
