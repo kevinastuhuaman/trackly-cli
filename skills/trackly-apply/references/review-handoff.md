@@ -15,6 +15,53 @@ Funnel: target=; ready=; submitted=; filling=; awaitingAnswer=; authParked=; exc
 
 Use the compact execution snapshot as authority. Give a bounded next-update estimate, not an invented overall completion time.
 
+## Deterministic operator receipts
+
+Every handoff names the browser surface and authoritative funnel. Use the
+matching template; do not improvise internal routing language.
+
+### Recovery
+
+```text
+Recovery in progress — not submitted
+Completed: exact Trackly source and user-confirmed candidate set recovered
+Tab restored: yes/no
+Form state restored: yes/no
+Current mutation authority: yes/no
+Unresolved:
+Your next action: wait / inspect / answer
+Resume: exact approved resume / no attachment / manual upload required
+Browser surface:
+Funnel:
+My next action:
+```
+
+### Upload requires the user
+
+```text
+Application preserved — resume upload requires you
+Completed:
+Unresolved: browser surface cannot prove the required attachment stages
+Your next action: attach the exact approved resume and confirm the committed filename
+Resume: exact approved resume
+Browser surface:
+Funnel:
+My next action: recheck parser-modified fields, finish integrity sweep, stop at review
+```
+
+### Submission reconciled
+
+```text
+Submission confirmed and reconciled
+Completed: success evidence recorded; member=submitted; job=applied_confirmed
+Unresolved: tab cleanup pending / none
+Your next action: none
+Resume: exact approved resume / no attachment
+Browser surface:
+Funnel:
+My next action: verify authorized tab disposition only
+```
+
 ## Approval scope receipt
 
 Before persisting a broad statement such as “always,” show which separate categories it will update: personal facts, consent choices, writing preferences, resume approval, and truthfulness certification. Never let approval of one category authorize another. Consolidate genuinely unknown questions into one packet after filling everything already known. Explain legal terms in plain language using the protocol glossary; do not expose internal action codes or routing labels.
@@ -140,6 +187,46 @@ truth-certified `review_ready` subset as soon as it is durable, keep its tabs
 open for manual submission, and list remaining human actions separately.
 Members that become ready later require a new certification for the exact
 then-current `review_ready` subset.
+
+## Group submission reconciliation
+
+A broad statement such as “I submitted all of them” applies only to one
+explicit review-handoff receipt. Call `trackly_list_apply_review_handoffs` for
+the execution, then resolve it to the receipt the user names or to the sole
+active receipt returned by Trackly. If multiple receipts could
+match, ask the user to choose; never fan the statement across executions or
+tabs.
+
+Inspect every member in the selected receipt and classify exactly one of:
+`detected`, `user_confirmed`, `unresolved`, or `contradictory`. Use
+provider-positive evidence only:
+
+- Greenhouse: a same-requisition thank-you page, confirmation route, or
+  semantic success state;
+- Ashby: a same-requisition explicit application-success banner or page,
+  including when the route does not change; and
+- Lever: a same-requisition confirmation redirect or semantic success state.
+
+An unchanged URL or page title is never evidence that submission failed. Build
+any local `DetectedSubmission` only from a versioned provider strategy, the
+handoff/member identity, current inspection epoch, evidence type, confidence,
+and a value-free fingerprint derived from those identifiers. Never hash DOM
+text, URLs, local paths, or raw tab IDs into that record.
+
+If a rediscovered receipt is `partially_reconciled`, preserve every member that
+already has a stored reconciliation result and inspect only members whose
+stored result remains `unresolved`. Do not replay the original claim with a
+partial member list: the claim receipt is an immutable exact-set idempotency
+record. Record later positive evidence and submitted outcomes through the
+normal per-member outcome path, naming the receipt and only its unresolved
+members in any follow-up confirmation.
+
+Call `trackly_claim_apply_review_handoff` with the exact receipt and a
+classification for every member. Write submission evidence and outcomes only
+for `detected` and `user_confirmed`. Ask one consolidated question containing
+only the `unresolved` members. Preserve every `contradictory` member and its
+tab without an outcome. Refetch and require member `submitted` plus job
+`applied_confirmed` before any authorized closure.
 
 Do not include restricted answers in chat unless needed for the user’s review.
 Never include credentials, an OTP, or a CAPTCHA response.

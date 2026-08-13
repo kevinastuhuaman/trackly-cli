@@ -146,12 +146,12 @@ test('documented local MCP tool count matches every registered tool', () => {
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
-  assert.equal(registeredTools.length, 48);
+  assert.equal(registeredTools.length, 54);
   assert.equal(new Set(registeredTools).size, registeredTools.length);
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.6.3');
+  assert.equal(contract.contractVersion, '3.7.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -182,9 +182,19 @@ function contractDigest(candidate) {
   return crypto.createHash('sha256').update(JSON.stringify(executableContract)).digest('hex');
 }
 
+function toolsDigest(candidate) {
+  const crypto = require('node:crypto');
+  const executableTools = canonicalJsonValue(candidate.tools);
+  return crypto.createHash('sha256').update(JSON.stringify(executableTools)).digest('hex');
+}
+
 function assertNoHistoricalVersionReuse(candidate) {
   for (const [version, historical] of Object.entries(contractHistory)) {
-    if (contractDigest(candidate) !== historical.contractSha256) {
+    const matchesContract = historical.contractSha256
+      && contractDigest(candidate) === historical.contractSha256;
+    const matchesLegacyTools = !historical.contractSha256 && historical.toolsSha256
+      && toolsDigest(candidate) === historical.toolsSha256;
+    if (!matchesContract && !matchesLegacyTools) {
       assert.notEqual(candidate.contractVersion, version);
     }
   }
@@ -435,7 +445,7 @@ test('hosted Git provenance reads outputs larger than the synchronous default bu
   const packageLockBytes = gitOutput(repository, ['show', 'HEAD:package-lock.json'], null);
   const defaultMaxBuffer = 1024 * 1024;
   const repetitionCount = Math.ceil((defaultMaxBuffer + 1) / packageLockBytes.length);
-  const repeatedSpecs = Array.from({ length: repetitionCount }, () => 'HEAD:package-lock.json');
+  const repeatedSpecs = Array.from({ length: repetitionCount + 1 }, () => 'HEAD:package-lock.json');
   const output = gitOutput(repository, ['show', ...repeatedSpecs], null);
   assert.ok(output.length > defaultMaxBuffer);
   assert.ok(output.length < HOSTED_GIT_MAX_BUFFER);
@@ -1160,6 +1170,14 @@ test('hosted parity verifier compares execution disposition body, alias, and con
   );
 });
 
+test('hosted parity verifier covers recovery-only local tools and constants', () => {
+  const verifier = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-hosted-contract.js'), 'utf8');
+  assert.match(verifier, /trackly_validate_apply_tab_keep_set/);
+  assert.match(verifier, /trackly_validate_apply_resume_upload/);
+  assert.match(verifier, /'applyExecutionRecoveryEligibilityCodes'/);
+  assert.match(verifier, /'applyHandoffReconciliationClassifications'/);
+});
+
 test('hosted parity verifier proves published wrapper compatibility from parsed ASTs', () => {
   const locked = `function projectPublishedSchema(schema) {
     return schema.superRefine(validatePublishedInput);
@@ -1354,7 +1372,7 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   ancestryDrift.mergedRuntime.parents[1] = 'a'.repeat(40);
   assert.throws(verifyFixture(ancestryDrift), /must prove the reviewed runtime commit is a direct parent/);
   const staleCapture = structuredClone(originalFixture);
-  staleCapture.capturedAt = '2026-08-12T12:56:02-07:00';
+  staleCapture.capturedAt = '2026-08-14T21:26:41-07:00';
   assert.throws(verifyFixture(staleCapture), /must be captured within 24 hours of its recorded runtime merge/);
 });
 
@@ -1458,13 +1476,13 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.4.2 requires protocol 3.5.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.5.0 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.2 requires protocol 3\.5\.0 or newer/);
+  assert.match(skill, /Skill 4\.5\.0 requires protocol 3\.6\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.4\.2/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.5\.0/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
@@ -1824,12 +1842,12 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.4.2 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.5.0 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.4\.2/);
+  assert.match(skill, /Skill 4\.5\.0/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);
@@ -1842,6 +1860,22 @@ test('Apply skill 4.4.2 uses compact snapshots, parked-member controls, local li
   assert.match(review, /at least once every 60 seconds/i);
   assert.match(upload, /file chooser/i);
   assert.match(upload, /fail closed/i);
+  assert.match(upload, /trackly_validate_apply_resume_upload/);
+});
+
+test('Apply skill recovers exact members and reconciles only an explicit handoff receipt', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
+  const orchestration = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'), 'utf8');
+  const handoff = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
+  assert.match(skill, /trackly_list_recoverable_apply_executions/);
+  assert.match(skill, /trackly_recover_exact_apply_members/);
+  assert.match(orchestration, /tab was restored/);
+  assert.match(orchestration, /mutation authority/);
+  assert.match(handoff, /trackly_claim_apply_review_handoff/);
+  assert.match(handoff, /`detected`, `user_confirmed`, `unresolved`, or `contradictory`/);
+  assert.match(handoff, /unchanged URL or page title is never evidence/i);
+  assert.match(handoff, /rediscovered receipt is `partially_reconciled`[\s\S]*inspect only members whose[\s\S]*stored result remains `unresolved`/i);
+  assert.match(handoff, /Do not replay the original claim with a[\s\S]*partial member list/i);
 });
 
 test('public Apply skill completes every ready member in a bound wave before handoff', () => {

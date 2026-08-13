@@ -3,8 +3,8 @@
   "adaptationVersion": "1.0.0",
   "source": {
     "path": "skills/trackly-apply",
-    "skillVersion": "4.4.2",
-    "treeSha256": "d965b263adf0b8bd98a98aa9de167d2ffacd9320f4e37d580769a5a423ff6c89"
+    "skillVersion": "4.5.0",
+    "treeSha256": "afbdb927b8f3fd8b620eeedd48d4f04a28aa8dbc1b92641b6b02f1fdf3c27e7c"
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
@@ -121,7 +121,7 @@
     "databaseBindingSha256": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
     "reviewIdentitySha256": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptionsSha256": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
-    "applicationProfileServiceSha256": "f32f4f26550988eef3751613c22dc6a4be9b6b1273e535a042f8859ea94f63b8",
+    "applicationProfileServiceSha256": "4f25cc21119197123141b19a3d8807952a0b7b56dad56d862dde121384956d85",
     "schemaSha256": {
       "SAFE_IDEMPOTENCY_KEY": "046859665306e5aeaf57032c76268934e1b98c95d4c17a88434062c9b6a4547a",
       "SAFE_CODE": "a35176c6c3f6ee563d4b6f6f68e4c546d8b03b03915d37bf55dd5a7011927574",
@@ -202,6 +202,10 @@
     "trackly_start_apply_execution",
     "trackly_get_active_apply_execution",
     "trackly_get_apply_execution",
+    "trackly_list_recoverable_apply_executions",
+    "trackly_recover_exact_apply_members",
+    "trackly_list_apply_review_handoffs",
+    "trackly_claim_apply_review_handoff",
     "trackly_get_apply_execution_snapshot",
     "trackly_resume_parked_apply_member",
     "trackly_approve_apply_execution_resume",

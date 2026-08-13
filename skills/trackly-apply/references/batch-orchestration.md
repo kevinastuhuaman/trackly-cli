@@ -1,6 +1,11 @@
 # Batch orchestration
 
 Protocol 3.4 adds a server-owned Apply execution above immutable child batches.
+Protocol 3.6 adds exact-member recovery after local context loss and scoped
+review-handoff reconciliation.
+After context loss, rediscover active handoff receipts with
+`trackly_list_apply_review_handoffs`; never reconstruct or guess a handoff ID
+from chat history, tab order, or application similarity.
 The execution is the target-completion ledger; each child batch remains the
 auditable browser-work unit. Protocol 3.3 fixed batches and protocol 3.2 single
 runs remain recovery-only compatibility paths.
@@ -56,6 +61,35 @@ the complete recovery set. For an advance response that creates a wave, use
 its top-level `response.batchId`. Never guess across those response shapes. If
 the applicable field is null or `unresolvedWaves` is empty, follow
 `response.progress.nextAction` rather than guessing a prior batch.
+
+## Exact recovery after local context loss
+
+When no active execution exists but unfinished lineage may still be retained,
+call `trackly_list_recoverable_apply_executions`. The returned source snapshot
+and candidates are the complete bounded recovery menu. Resolve every distinct
+returned `jobId` through `trackly_get_job`, bind that Trackly-owned record to
+its `candidateId`, and present its company, role, requisition identity when
+available, and source execution to the user. A missing or mismatched Trackly
+job record blocks confirmation. Require explicit confirmation of the exact
+candidate set. Never infer the set from browser tabs, conversation memory,
+search results, page copy, employer similarity, or queue position.
+
+Call `trackly_recover_exact_apply_members` with one source execution, its exact
+snapshot hash, the confirmed candidate IDs, and a fresh idempotency key. The
+response may never replace candidates. Verify that `assertedCandidateIds`,
+`eligibleCandidateIds`, and the eligibility candidate IDs each contain exactly
+the user-confirmed set with no duplicates before browser work.
+
+Recovery has three independent proof dimensions:
+
+1. the exact browser tab was restored;
+2. the employer form state was restored or safely reconstructed; and
+3. Trackly granted current mutation authority.
+
+Never let one imply another. Rebind each recovered surface, accept the new
+inspection epoch, inventory the form, preserve every user-edited and unknown
+non-empty field, and rerun required integrity evidence. All prior-epoch
+browser, upload, field, review, and submission evidence is stale.
 
 ## Replace an obsolete fixed batch
 

@@ -26,7 +26,7 @@ bin/trackly          # CLI entrypoint (shebang script). All CLI commands + arg p
 lib/agent.js         # Agent setup, doctor, private resume cache, and public skill installation
 lib/client.js        # HTTP client: config loading, token refresh, apiRequest()
 lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies(), outputStats(), outputContacts(), outputReferralCampaign(), outputNetworkBrief()
-mcp/server.js        # MCP server: 49 tools, launched via `trackly mcp`
+mcp/server.js        # MCP server: 55 tools, launched via `trackly mcp`
 contracts/           # Versioned hosted/local Trackly Apply MCP schema contract
 skills/trackly-apply/  # Sanitized public browser-mechanics skill bundled with the CLI
 scripts/             # Maintainer checks; the packaged audit verifier is the named exception
@@ -48,7 +48,7 @@ There is a small Node test suite (`npm test`), but no linter and no build step. 
 
 1. User runs `trackly mcp` (or AI agent spawns it via stdio)
 2. `bin/trackly` delegates to `mcp/server.js`
-3. `mcp/server.js` creates an `McpServer` with 49 tools, connects via `StdioServerTransport`
+3. `mcp/server.js` creates an `McpServer` with 55 tools, connects via `StdioServerTransport`
 4. Each tool calls `apiRequest()` from `lib/client.js` with a `trackly-mcp/<version>` User-Agent derived from `package.json`
 5. CLI commands use `trackly-cli/<version>` User-Agent derived from `package.json` (separate channel attribution)
 
@@ -57,10 +57,10 @@ MCP setup for Claude Code:
 claude mcp add --scope user trackly -- trackly mcp
 ```
 
-The 49 MCP tools include 48 Trackly search, network, profile, and Trackly Apply
-tools plus the analytics-owned `get_more_tools` missing-capability tool. Keep
-this count synchronized with `mcp/server.js`, `README.md`, and the docs-drift
-tests.
+The 55 MCP tools include the complete search, network, profile, and Trackly
+Apply set documented in `docs/trackly-tools.md` plus the analytics-owned
+`get_more_tools` missing-capability tool. Keep this count synchronized with
+`mcp/server.js`, `README.md`, and the docs-drift tests.
 
 Job function values — **14 canonical values** that match backend `ALL_JOB_FUNCTIONS` at `granola-followup-app/src/routes/jobscout-filter-utils.ts:17-21`, the backend `job_function` DB column, and the local mirror `JOB_FUNCTIONS` in `mcp/server.js`: `product`, `engineering`, `design`, `data`, `marketing`, `sales`, `partnerships`, `finance`, `strategy`, `operations`, `people`, `legal`, `support`, `other`. `partnerships` is documented in CHANGELOG `0.2.1`; any doc still listing 13 values is stale. The MCP test at `test/mcp-schema.test.js` locks this local/backend mapping.
 
@@ -101,6 +101,10 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/jobscout/apply/executions` -- Start a server-owned accessible execution (`trackly_start_apply_execution`)
 - `GET /api/jobscout/apply/executions/active` -- Recover the active accessible execution (`trackly_get_active_apply_execution`)
 - `GET /api/jobscout/apply/executions/:executionId` -- Read authoritative execution progress (`trackly_get_apply_execution`)
+- `GET /api/jobscout/apply/executions/recoverable` -- List bounded exact-member recovery candidates (`trackly_list_recoverable_apply_executions`)
+- `POST /api/jobscout/apply/executions/recover` -- Recover only one explicitly confirmed candidate set (`trackly_recover_exact_apply_members`)
+- `GET /api/jobscout/apply/executions/:executionId/review-handoffs` -- List active grouped reconciliation receipts (`trackly_list_apply_review_handoffs`)
+- `POST /api/jobscout/apply/review-handoffs/:handoffId/claim` -- Claim one exact grouped reconciliation receipt (`trackly_claim_apply_review_handoff`)
 - `POST /api/jobscout/apply/executions/:executionId/snapshot` -- Read a bounded execution/profile projection (`trackly_get_apply_execution_snapshot`)
 - `POST /api/jobscout/apply/executions/:executionId/parked/:memberId/resume` -- Request a fresh probe for an explicitly resumed parked job (`trackly_resume_parked_apply_member`)
 - `POST /api/jobscout/apply/executions/:executionId/resume-approval` -- Approve one exact resume across an immutable execution snapshot (`trackly_approve_apply_execution_resume`)

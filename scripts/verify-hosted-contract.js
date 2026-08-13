@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'b7acd0248e78f4117dd1ee2bd67531198e98e40eab42879759f93eba1168eefb';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '7a165d0257a61184bb662b75f66e270447faf1c645a48491da548a7770048266';
 
 const parsedSourceCache = new Map();
 
@@ -2912,7 +2912,7 @@ function assertPluginReviewReadyPersistenceSemantics(
   expectedRouteStatement,
   {
     routeAstSha256 = 'a4b0a5ba28a0c80c2ddbc438b3cde25f61a7bb092ead4efe1813384f9e7d46ec',
-    certifyAstSha256 = '6c0c19a3c05794b0fa8e1ed7917fa9de4322e32ecef1006869e026394cb90ffd',
+    certifyAstSha256 = '28c7b9132231755052051724fd0fde9a2fc24b2ac5b9902db10aa98301deab12',
     serviceSourceSha256 = null,
   } = {},
 ) {
@@ -4720,6 +4720,12 @@ verifyCoordinatedBackendCore({
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
   'trackly_diagnose_local_path',
+  'trackly_validate_apply_tab_keep_set',
+  'trackly_validate_apply_resume_upload',
+];
+const LOCAL_ONLY_CONSTANTS = [
+  'applyUploadStages',
+  'applyUploadFailureCodes',
 ];
 const HOSTED_ONLY_TOOLS = [
   'trackly_chat',
@@ -4733,6 +4739,8 @@ for (const constantName of [
   'applyExecutionDispositionSources',
   'applyExecutionStopReasonCodes',
   'applyProbeCleanupPreferences',
+  'applyExecutionRecoveryEligibilityCodes',
+  'applyHandoffReconciliationClassifications',
 ]) {
   assert.deepEqual(
     hosted.constants[constantName],
@@ -4752,6 +4760,9 @@ for (const toolName of LOCAL_ONLY_TOOLS) {
 }
 const sharedLocal = {
   ...local,
+  constants: Object.fromEntries(
+    Object.entries(local.constants).filter(([name]) => !LOCAL_ONLY_CONSTANTS.includes(name)),
+  ),
   tools: Object.fromEntries(Object.entries(local.tools).filter(([name]) => !LOCAL_ONLY_TOOLS.includes(name))),
 };
 assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented local-only tools');
