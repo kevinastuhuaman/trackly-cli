@@ -66,16 +66,19 @@ the applicable field is null or `unresolvedWaves` is empty, follow
 
 When no active execution exists but unfinished lineage may still be retained,
 call `trackly_list_recoverable_apply_executions`. The returned source snapshot
-and candidates are the complete bounded recovery menu. Present stable job
-identity to the user and require explicit confirmation of the exact candidate
-set. Never infer the set from browser tabs, conversation memory, employer
-similarity, or queue position.
+and candidates are the complete bounded recovery menu. Resolve every distinct
+returned `jobId` through `trackly_get_job`, bind that Trackly-owned record to
+its `candidateId`, and present its company, role, requisition identity when
+available, and source execution to the user. A missing or mismatched Trackly
+job record blocks confirmation. Require explicit confirmation of the exact
+candidate set. Never infer the set from browser tabs, conversation memory,
+search results, page copy, employer similarity, or queue position.
 
 Call `trackly_recover_exact_apply_members` with one source execution, its exact
 snapshot hash, the confirmed candidate IDs, and a fresh idempotency key. The
-response may exclude ineligible candidates, but it may never replace them.
-Verify that `assertedCandidateIds` equals the user-confirmed set and explain any
-non-recoverable eligibility result before browser work.
+response may never replace candidates. Verify that `assertedCandidateIds`,
+`eligibleCandidateIds`, and the eligibility candidate IDs each contain exactly
+the user-confirmed set with no duplicates before browser work.
 
 Recovery has three independent proof dimensions:
 

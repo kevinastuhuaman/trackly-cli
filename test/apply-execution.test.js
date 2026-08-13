@@ -150,6 +150,37 @@ test('durable recovery tools use exact bounded HTTP contracts and validate resul
   }]);
 });
 
+test('exact recovery rejects a backend response for a different or duplicate candidate set', async () => {
+  const sourceSnapshotHash = 'a'.repeat(64);
+  const recover = async (response) => {
+    const { registrations } = registerRuntimeTools(response);
+    return registrations.get('trackly_recover_exact_apply_members').handler({
+      sourceExecutionId: 11,
+      sourceSnapshotHash,
+      candidateIds: [21, 22],
+      explicitExactSetConfirmation: true,
+      idempotencyKey: 'durable-recovery-key-0002',
+    });
+  };
+  const base = {
+    success: true,
+    replay: false,
+    execution: { id: 12, mode: 'recover_exact_members' },
+    assertedCandidateIds: [21, 22],
+    eligibleCandidateIds: [21, 22],
+    eligibility: [
+      { candidateId: 21, jobId: 31, queuePosition: 0, eligibilityCode: 'recoverable' },
+      { candidateId: 22, jobId: 32, queuePosition: 1, eligibilityCode: 'recoverable' },
+    ],
+  };
+  await assert.rejects(recover({ ...base, assertedCandidateIds: [21, 23] }), /does not match/);
+  await assert.rejects(recover({ ...base, assertedCandidateIds: [21, 21] }), /does not match/);
+  await assert.rejects(recover({
+    ...base,
+    eligibility: [base.eligibility[0], { ...base.eligibility[0] }],
+  }), /does not match/);
+});
+
 test('local tab keep-set tool canonicalizes IDs without making a Trackly API call', async () => {
   const { registrations, calls } = registerRuntimeTools();
   const tool = registrations.get('trackly_validate_apply_tab_keep_set');

@@ -51,3 +51,14 @@ test('stable browser failure code is preserved', () => {
   assert.equal(result.lastPassedStage, 'file_chooser_opened');
   assert.equal(result.completedStageCount, 3);
 });
+
+test('passed upload stage carrying a failure code fails closed', () => {
+  const events = passedEvents.map((event) => (
+    event.stage === 'parser_fields_rechecked'
+      ? { ...event, failureCode: 'parser_field_regression' }
+      : event
+  ));
+  const result = validateApplyResumeUpload({ capabilities, events });
+  assert.equal(result.safeToClaimAttachment, false);
+  assert.ok(result.failureCodes.includes('parser_field_regression'));
+});

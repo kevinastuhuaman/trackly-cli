@@ -192,7 +192,7 @@ function assertNoHistoricalVersionReuse(candidate) {
   for (const [version, historical] of Object.entries(contractHistory)) {
     const matchesContract = historical.contractSha256
       && contractDigest(candidate) === historical.contractSha256;
-    const matchesLegacyTools = historical.toolsSha256
+    const matchesLegacyTools = !historical.contractSha256 && historical.toolsSha256
       && toolsDigest(candidate) === historical.toolsSha256;
     if (!matchesContract && !matchesLegacyTools) {
       assert.notEqual(candidate.contractVersion, version);

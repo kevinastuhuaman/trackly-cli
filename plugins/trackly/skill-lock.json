@@ -3,8 +3,8 @@
   "adaptationVersion": "1.0.0",
   "source": {
     "path": "skills/trackly-apply",
-    "skillVersion": "4.4.2",
-    "treeSha256": "26ecf574dc9006c0a472364697d756af3a5aab90b707706cfb4fa2870a5e5bc0"
+    "skillVersion": "4.5.0",
+    "treeSha256": "f14a7468d887d9f8934d5a035a278f599535cf9ca9bc1a6fc0b62ce01b54f290"
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",

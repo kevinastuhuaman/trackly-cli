@@ -85,6 +85,30 @@ const exactRecoveryResponseSchema = z.object({
   eligibleCandidateIds: z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET),
   eligibility: z.array(recoverableCandidateSchema).max(APPLY_EXECUTION_MAX_TARGET),
 }).passthrough();
+
+function validateExactRecoveryResponse(input, response) {
+  const requested = [...input.candidateIds].sort((a, b) => a - b);
+  const asserted = [...response.assertedCandidateIds].sort((a, b) => a - b);
+  const eligible = [...response.eligibleCandidateIds].sort((a, b) => a - b);
+  const eligibilityIds = response.eligibility
+    .map(({ candidateId }) => candidateId)
+    .sort((a, b) => a - b);
+  const matchesRequested = (values) => (
+    values.length === requested.length
+    && values.every((value, index) => value === requested[index])
+  );
+  if (
+    new Set(response.assertedCandidateIds).size !== response.assertedCandidateIds.length
+    || new Set(response.eligibleCandidateIds).size !== response.eligibleCandidateIds.length
+    || new Set(eligibilityIds).size !== eligibilityIds.length
+    || !matchesRequested(asserted)
+    || !matchesRequested(eligible)
+    || !matchesRequested(eligibilityIds)
+  ) {
+    throw new Error('Exact recovery response does not match the requested candidate set.');
+  }
+  return response;
+}
 const handoffClaimMemberSchema = z.object({
   memberId: z.number().int().min(1),
   classification: z.enum(APPLY_HANDOFF_RECONCILIATION_CLASSIFICATION_CODES),
@@ -346,11 +370,12 @@ function registerApplyTools(
       explicitExactSetConfirmation: z.literal(true),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
     },
-    wrapTool(async ({ idempotencyKey, ...input }) => exactRecoveryResponseSchema.parse(
-      await applyControlRequest('POST', '/api/jobscout/apply/executions/recover', {
+    wrapTool(async ({ idempotencyKey, ...input }) => validateExactRecoveryResponse(
+      input,
+      exactRecoveryResponseSchema.parse(await applyControlRequest('POST', '/api/jobscout/apply/executions/recover', {
         mode: 'recover_exact_members',
         ...input,
-      }, idempotencyKey),
+      }, idempotencyKey)),
     ), 'Failed to recover exact apply members')
   );
 
