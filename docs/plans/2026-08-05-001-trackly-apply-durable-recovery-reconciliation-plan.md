@@ -49,7 +49,7 @@ None of these receipts implies another.
 - R1. Trackly must persist one cumulative completion credit per execution candidate after the candidate first reaches durable manual review or a valid submitted-state repair.
 - R2. A credited candidate must continue counting after manual submission; submitting it must not create replacement capacity.
 - R3. Execution status, raw cumulative achievement count, target-capped `completed`, current ready/submitted counts, reservations, `targetReached`, and `nextAction` must come from one transactionally consistent state.
-- R4. Trackly must recover an exact set of eligible members from one prior terminal or expired execution without changing queue recency or selecting newer jobs.
+- R4. Trackly must recover the exact confirmed set from one prior terminal or expired execution only when every confirmed member is eligible, without changing queue recency or selecting newer jobs; otherwise it must create no recovery execution.
 - R5. Exact recovery must assert the requested source membership, report each member's eligibility, create no substitutes, reuse valid run identity, and require a fresh browser binding and inspection epoch.
 - R6. Exact recovery must reject foreign-user, revoked, changed-requisition, duplicate, and concurrently owned members. Already-applied members are reconciliation-only and inactive or access-blocked members remain typed non-counting dispositions.
 - R7. Tab restoration, form restoration, and mutation authority must be exposed as separate value-free recovery facts.
@@ -84,8 +84,8 @@ None of these receipts implies another.
 - F1. Exact interrupted-member recovery
   - **Trigger:** A prior execution expired or ended after tabs or form state were lost.
   - **Actors:** User, Trackly backend, MCP client, browser harness.
-  - **Steps:** The client lists bounded backend-owned recoverable source summaries when local identity is absent; the user confirms the exact candidate set; the client requests those source candidates; the backend validates the immutable source set and returns eligibility; the backend creates one exact recovery execution; the harness verifies returned membership; the harness obtains fresh browser and mutation receipts; the harness rehydrates only blank or agent-owned controls.
-  - **Outcome:** Only the requested eligible jobs become mutable. Queue ordering is unchanged.
+  - **Steps:** The client lists bounded backend-owned recoverable source summaries when local identity is absent; the user confirms the exact candidate set; the client requests those source candidates; before creation, the backend validates the immutable source set and confirms that every requested candidate is eligible; only then does the backend create one exact recovery execution; the harness verifies returned membership; the harness obtains fresh browser and mutation receipts; the harness rehydrates only blank or agent-owned controls.
+  - **Outcome:** Either the full confirmed set becomes mutable or no recovery execution is created. Queue ordering is unchanged.
   - **Covered by:** R4-R7, R18, R22-R23.
 
 - F2. Cumulative two-job completion
@@ -132,9 +132,9 @@ None of these receipts implies another.
 
 - AE3. **Exact recovery with newer jobs present**
   - **Covers:** R4-R7.
-  - **Given:** Two expired source members and newer Check Later jobs exist.
+  - **Given:** Two eligible expired source members and newer Check Later jobs exist.
   - **When:** The user requests recovery of those two source members.
-  - **Then:** Only the eligible requested jobs enter the recovery execution and queue timestamps remain unchanged.
+  - **Then:** Both requested jobs, and no others, enter the recovery execution; queue timestamps remain unchanged.
 
 - AE4. **Mixed exact recovery set**
   - **Covers:** R5-R7, R13.
