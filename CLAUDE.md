@@ -26,7 +26,7 @@ bin/trackly          # CLI entrypoint (shebang script). All CLI commands + arg p
 lib/agent.js         # Agent setup, doctor, private resume cache, and public skill installation
 lib/client.js        # HTTP client: config loading, token refresh, apiRequest()
 lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies(), outputStats(), outputContacts(), outputReferralCampaign(), outputNetworkBrief()
-mcp/server.js        # MCP server entrypoint, launched via `trackly mcp`
+mcp/server.js        # MCP server entrypoint and search/network tools, launched via `trackly mcp`
 mcp/apply-tools.js   # Trackly Apply MCP schemas, validators, and tool registration
 contracts/           # Versioned hosted/local Trackly Apply MCP schema contract
 skills/trackly-apply/  # Sanitized public browser-mechanics skill bundled with the CLI
@@ -115,8 +115,8 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/jobscout/apply/batches/:batchId/cancel` -- Retire a legacy fixed batch after explicit user confirmation (`trackly_cancel_apply_batch`)
 - `GET /api/jobscout/apply/batches/:batchId` -- Page one exact frozen batch (`trackly_get_apply_batch`)
 - `POST /api/jobscout/apply/batches/:batchId/claim` -- Acquire or renew its browser-mutation lease (`trackly_claim_apply_batch`)
-- `POST /api/jobscout/apply/runs` -- Start an agent-assisted application run (`trackly_start_apply_run`)
 - `POST /api/jobscout/apply/batches/:batchId/members/:memberId/surface-binding` -- Bind an initial or recovered browser surface to the existing frozen member/run (`trackly_bind_apply_surface`)
+- `POST /api/jobscout/apply/runs` -- Start an agent-assisted application run (`trackly_start_apply_run`)
 - `GET /api/jobscout/apply/protocol` -- Get the versioned browser workflow (`trackly_get_apply_protocol`)
 - `POST /api/jobscout/apply/observations` -- Report a redacted ATS observation (`trackly_report_apply_observation`)
 - `POST /api/jobscout/apply/runs/:runId/outcome` -- Record review or submission outcome (`trackly_record_application_outcome`)
