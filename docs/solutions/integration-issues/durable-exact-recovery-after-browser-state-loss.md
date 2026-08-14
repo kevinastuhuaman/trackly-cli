@@ -29,9 +29,9 @@ The shipped recovery contract separates those layers. Exact recovery restores on
 
 - Session evidence from the August 4–5 Apply run: after Chrome relaunched, previously filled Ontic and Lila forms appeared empty even though their tabs had been restored. The tab list survived, but the unsaved application DOM did not.
 - Session evidence from the same run: a Zoox submission attempt navigated to Chrome's `ERR_FILE_NOT_FOUND`. The failed upload stage and underlying cause were not captured, so the cause remains unknown.
-- A tab could remain visible to the user while disappearing from the automation controller, or the controller could retain a stale handle after navigation or a renderer restart. Application identity must not be inferred from window position, a transient tab number, or title text alone (`skills/trackly-apply/references/browser-lifecycle.md:3-6`).
-- Earlier field checks, upload evidence, and review receipts could look plausible after recovery while belonging to an obsolete inspection epoch (`skills/trackly-apply/references/batch-orchestration.md:83-92`).
-- Authentication, account creation, OTP, and pre-form CAPTCHA pages could be mistakenly counted toward the review-ready target even though no safely accessible form existed. These classifications consume no completed slot (`skills/trackly-apply/references/batch-orchestration.md:133-140`).
+- A tab could remain visible to the user while disappearing from the automation controller, or the controller could retain a stale handle after navigation or a renderer restart. Application identity must not be inferred from window position, a transient tab number, or title text alone (`skills/trackly-apply/references/browser-lifecycle.md`, opening identity rules).
+- Earlier field checks, upload evidence, and review receipts could look plausible after recovery while belonging to an obsolete inspection epoch (`skills/trackly-apply/references/batch-orchestration.md`, “Exact recovery after local context loss”).
+- Authentication, account creation, OTP, and pre-form CAPTCHA pages could be mistakenly counted toward the review-ready target even though no safely accessible form existed. These classifications consume no completed slot (`skills/trackly-apply/references/batch-orchestration.md`, “Parent execution and child waves”).
 
 ## What Didn't Work
 
@@ -41,19 +41,19 @@ Neither browser is a durable store. External Chrome can restore tabs without res
 
 ### Treating tab presence as proof of saved form state
 
-A restored URL proves only that a page can be reopened. It does not prove that the employer saved the draft, that the same requisition is loaded, that user edits survived, or that Trackly still authorizes mutation. Recovery therefore requires three separate proofs: tab restoration, form-state restoration or safe reconstruction, and current mutation authority (`skills/trackly-apply/references/browser-lifecycle.md:263-268`).
+A restored URL proves only that a page can be reopened. It does not prove that the employer saved the draft, that the same requisition is loaded, that user edits survived, or that Trackly still authorizes mutation. Recovery therefore requires three separate proofs: tab restoration, form-state restoration or safe reconstruction, and current mutation authority (`skills/trackly-apply/references/browser-lifecycle.md`, “Missing-tab recovery”).
 
 ### Reusing cached resume paths
 
-Regardless of the unclassified Zoox failure's cause, an earlier local path cannot be reused as attachment evidence. A prepared artifact may expire, move, or be deleted while the browser still displays an old reference. The supported sequence verifies the prepared resume immediately before attachment, checks the employer-facing committed filename, and rechecks parser-sensitive fields (`skills/trackly-apply/references/browser-upload.md:15-24`).
+Regardless of the unclassified Zoox failure's cause, an earlier local path cannot be reused as attachment evidence. A prepared artifact may expire, move, or be deleted while the browser still displays an old reference. The supported sequence verifies the prepared resume immediately before attachment, checks the employer-facing committed filename, and rechecks parser-sensitive fields (`skills/trackly-apply/references/browser-upload.md`, “Capability gate”).
 
 ### Using generic advancement or replacement after context loss
 
-Generic “continue with the next job” behavior is wrong for exact recovery because it can substitute newly saved or similar jobs for the user's original applications. Fixed membership may not be replaced, rescored, or expanded (`skills/trackly-apply/references/batch-orchestration.md:158-174`). Recovery must use one retained source snapshot and exactly the candidates the user confirmed.
+Generic “continue with the next job” behavior is wrong for exact recovery because it can substitute newly saved or similar jobs for the user's original applications. Fixed membership may not be replaced, rescored, or expanded (`skills/trackly-apply/references/batch-orchestration.md`, “Freeze before browser work”). Recovery must use one retained source snapshot and exactly the candidates the user confirmed.
 
 ### Refilling from profile data without provenance
 
-Blind autofill can overwrite a correction the user made after the agent's last observation. After ledger loss, every unexplained non-empty field becomes `unknown_external_change` and must be preserved; only safely empty or still agent-owned fields may be filled (`skills/trackly-apply/references/browser-lifecycle.md:16-22`).
+Blind autofill can overwrite a correction the user made after the agent's last observation. After ledger loss, every unexplained non-empty field becomes `unknown_external_change` and must be preserved; only safely empty or still agent-owned fields may be filled (`skills/trackly-apply/references/browser-lifecycle.md`, “Local tab ledger”).
 
 ## Solution
 
@@ -61,35 +61,35 @@ The durable recovery work shipped through [trackly-cli PR #100](https://github.c
 
 ### 1. Discover a bounded, value-free recovery menu
 
-When there is no active execution but the server may retain unfinished lineage, call `trackly_list_recoverable_apply_executions`. The response exposes stable source execution IDs, snapshot hashes, candidate IDs, job IDs, queue positions, and eligibility codes; duplicate source and candidate identities are rejected (`mcp/apply-tools.js:61-80`). Resolve each job through Trackly and present the exact company, role, requisition identity when available, and source execution. Never reconstruct identity from chat, tab order, page copy, or search results (`skills/trackly-apply/references/batch-orchestration.md:65-75`).
+When there is no active execution but the server may retain unfinished lineage, call `trackly_list_recoverable_apply_executions`. The response exposes stable source execution IDs, snapshot hashes, candidate IDs, job IDs, queue positions, and eligibility codes; duplicate source and candidate identities are rejected (`mcp/apply-tools.js`, `recoverableCandidateSchema` and `recoverableExecutionsResponseSchema`). Resolve each job through Trackly and present the exact company, role, requisition identity when available, and source execution. Never reconstruct identity from chat, tab order, page copy, or search results (`skills/trackly-apply/references/batch-orchestration.md`, “Exact recovery after local context loss”).
 
 ### 2. Require explicit confirmation of one exact set
 
-Call `trackly_recover_exact_apply_members` only with one discovered source execution, that source's snapshot hash, unique confirmed candidate IDs, `explicitExactSetConfirmation: true`, and a fresh idempotency key. Before the write, the CLI rejects an undiscovered source, changed snapshot hash, or candidate outside the latest discovery menu (`mcp/apply-tools.js:438-466`).
+Call `trackly_recover_exact_apply_members` only with one discovered source execution, that source's snapshot hash, unique confirmed candidate IDs, `explicitExactSetConfirmation: true`, and a fresh idempotency key. Before the write, the CLI rejects an undiscovered source, changed snapshot hash, or candidate outside the latest discovery menu (`mcp/apply-tools.js`, `trackly_recover_exact_apply_members` registration).
 
-Recovery is all-or-nothing at the client boundary. The response validator requires `assertedCandidateIds`, `eligibleCandidateIds`, and every eligibility row to equal the requested set exactly, without duplicates or non-recoverable results (`mcp/apply-tools.js:89-117`). This prevents partial recovery, substitution, and replenishment. Frozen order and membership remain server-owned.
+Recovery is all-or-nothing at the client boundary. The response validator requires `assertedCandidateIds`, `eligibleCandidateIds`, and every eligibility row to equal the requested set exactly, without duplicates or non-recoverable results (`mcp/apply-tools.js`, `validateExactRecoveryResponse`). This prevents partial recovery, substitution, and replenishment. Frozen order and membership remain server-owned.
 
 ### 3. Restore browser state and authority independently
 
-For every recovered member, reuse the existing run and bind the exact backend-stored requisition URL with `recovery_binding`. The returned member version and inspection epoch are authoritative; prior-epoch evidence is invalid (`skills/trackly-apply/references/browser-lifecycle.md:102-106`). Revalidate HTTPS origin, ATS tenant, employer, role, requisition, job identity, and semantic controls before entering private data. Reinventory the entire form because a draft must never be assumed to have survived a crash or handoff (`skills/trackly-apply/references/browser-lifecycle.md:242-268`).
+For every recovered member, reuse the existing run and bind the exact backend-stored requisition URL with `recovery_binding`. The returned member version and inspection epoch are authoritative; prior-epoch evidence is invalid (`skills/trackly-apply/references/browser-lifecycle.md`, “Reconciliation”). Revalidate HTTPS origin, ATS tenant, employer, role, requisition, job identity, and semantic controls before entering private data. Reinventory the entire form because a draft must never be assumed to have survived a crash or handoff (`skills/trackly-apply/references/browser-lifecycle.md`, “Missing-tab recovery”).
 
 The operator receipt must separately report whether the exact tab was restored, whether employer form state was restored or safely reconstructed, and whether current mutation authority was reacquired. A missing original tab may be reopened from the exact backend URL; mutation requires the resulting form to be restored or safely reconstructed and current authority to be reacquired, while the tab-restoration fact remains independently reported.
 
 ### 4. Preserve user-owned and unknown values
 
-Take a fresh semantic inventory before the first write. Maintain provenance by execution, run, inspection epoch, and semantic field fingerprint. Preserve `user_edited` values byte-for-byte. If the ledger was lost, classify every unknown non-empty value as `unknown_external_change` instead of refilling (`skills/trackly-apply/references/browser-lifecycle.md:16-22`). Resume parsing, rerendering, recovery, and final validation cannot overwrite those values (`skills/trackly-apply/SKILL.md:115`).
+Take a fresh semantic inventory before the first write. Maintain provenance by execution, run, inspection epoch, and semantic field fingerprint. Preserve `user_edited` values byte-for-byte. If the ledger was lost, classify every unknown non-empty value as `unknown_external_change` instead of refilling (`skills/trackly-apply/references/browser-lifecycle.md`, “Local tab ledger”). Resume parsing, rerendering, recovery, and final validation cannot overwrite those values (`skills/trackly-apply/SKILL.md`, “Fill the form”).
 
 ### 5. Reverify the exact resume at attachment time
 
-Discover a real semantic Resume/CV control first. Arm and prove the chooser, run `trackly_verify_prepared_resume`, and immediately attach only that verified artifact. Then verify the visible employer-facing filename and recheck every field the parser may have changed (`skills/trackly-apply/references/browser-upload.md:9-29`). An earlier approval proves which content the user authorized; it does not prove which bytes the current employer form received.
+Discover a real semantic Resume/CV control first. Arm and prove the chooser, run `trackly_verify_prepared_resume`, and immediately attach only that verified artifact. Then verify the visible employer-facing filename and recheck every field the parser may have changed (`skills/trackly-apply/references/browser-upload.md`, “Capability gate”). An earlier approval proves which content the user authorized; it does not prove which bytes the current employer form received.
 
 ### 6. Park access barriers without counting them
 
-Classify live probes with the typed value-free set: `accessible`, `authentication_required`, `account_creation_required`, `otp_required`, `captcha_before_form`, `captcha_at_submit`, `manual_only`, or `unknown_unobservable` (`skills/trackly-apply/references/batch-orchestration.md:142-150`). Authentication, account creation, OTP, and pre-form CAPTCHA consume no target slot. A submit-time CAPTCHA can remain review-ready because the user owns the final action; the agent never solves, stores, or bypasses it (`skills/trackly-apply/references/batch-orchestration.md:340-350`).
+Classify live probes with the typed value-free set: `accessible`, `authentication_required`, `account_creation_required`, `otp_required`, `captcha_before_form`, `captcha_at_submit`, `manual_only`, or `unknown_unobservable` (`skills/trackly-apply/references/batch-orchestration.md`, “Parent execution and child waves”). Authentication, account creation, OTP, and pre-form CAPTCHA consume no target slot. A submit-time CAPTCHA can remain review-ready because the user owns the final action; the agent never solves, stores, or bypasses it (`skills/trackly-apply/references/batch-orchestration.md`, “Challenge placement”).
 
 ### 7. Stop at manual review
 
-Submit remains a hard human boundary. The skill forbids the agent from clicking Submit even when the user previously approved submission (`skills/trackly-apply/SKILL.md:10-18`). The agent verifies the current form and leaves the review tab visible. Submission is recorded only from a real success page or explicit user confirmation after the human acts (`skills/trackly-apply/SKILL.md:149-157`).
+Submit remains a hard human boundary. The skill forbids the agent from clicking Submit even when the user previously approved submission (`skills/trackly-apply/SKILL.md`, “Non-negotiable rules”). The agent verifies the current form and leaves the review tab visible. Submission is recorded only from a real success page or explicit user confirmation after the human acts (`skills/trackly-apply/SKILL.md`, “Review handoff”).
 
 ## Why This Works
 
