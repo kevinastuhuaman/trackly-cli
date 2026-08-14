@@ -23,6 +23,8 @@ lib/client.js        # HTTP client: config loading, token refresh, apiRequest()
 lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies(), etc.
 mcp/server.js        # MCP server: search/network + Trackly Apply tools, launched via `trackly mcp`
 docs/trackly-tools.md  # MCP tool reference (for embedding in AI agent contexts)
+docs/solutions/       # documented solutions organized by category with searchable YAML frontmatter (module, tags, problem_type)
+CONCEPTS.md           # shared domain vocabulary for entities, named processes, and status concepts
 server.json          # MCP Registry manifest (io.github.trackly-app/trackly)
 ```
 
