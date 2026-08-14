@@ -57,7 +57,7 @@ Blind autofill can overwrite a correction the user made after the agent's last o
 
 ## Solution
 
-The durable recovery work shipped through [trackly-cli PR #100](https://github.com/trackly-app/trackly-cli/pull/100) and the corresponding backend implementation in [close-ai PR #1391](https://github.com/trackly-app/close-ai/pull/1391).
+The coordinated durable recovery work shipped through [trackly-cli PR #100](https://github.com/trackly-app/trackly-cli/pull/100), which enforces exact-set discovery and response validation in the CLI/MCP/skill layer, and [close-ai PR #1391](https://github.com/trackly-app/close-ai/pull/1391), whose backend implementation owns atomic all-or-nothing recovery creation.
 
 ### 1. Discover a bounded, value-free recovery menu
 
