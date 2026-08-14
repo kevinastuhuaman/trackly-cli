@@ -7,7 +7,7 @@ problem_type: integration_issue
 component: assistant
 symptoms:
   - Restored browser tabs had lost unsaved application-form values after a browser or laptop restart
-  - A previously prepared resume could fail with ERR_FILE_NOT_FOUND after its ephemeral local artifact disappeared
+  - A Zoox submission attempt reached ERR_FILE_NOT_FOUND without evidence identifying the failed upload stage or cause
   - Earlier browser observations could appear valid even though they belonged to an obsolete inspection epoch
   - Authentication and pre-form challenge pages risked being mistaken for completed accessible applications
 root_cause: missing_workflow_step
@@ -28,7 +28,7 @@ The shipped recovery contract separates those layers. Exact recovery restores on
 ## Symptoms
 
 - Session evidence from the August 4–5 Apply run: after Chrome relaunched, previously filled Ontic and Lila forms appeared empty even though their tabs had been restored. The tab list survived, but the unsaved application DOM did not.
-- Session evidence from the same run: a Zoox submission attempt navigated to Chrome's `ERR_FILE_NOT_FOUND`. The prepared resume reference pointed to an ephemeral local artifact that was no longer accessible.
+- Session evidence from the same run: a Zoox submission attempt navigated to Chrome's `ERR_FILE_NOT_FOUND`. The failed upload stage and underlying cause were not captured, so the cause remains unknown.
 - A tab could remain visible to the user while disappearing from the automation controller, or the controller could retain a stale handle after navigation or a renderer restart. Application identity must not be inferred from window position, a transient tab number, or title text alone (`skills/trackly-apply/references/browser-lifecycle.md:3-6`).
 - Earlier field checks, upload evidence, and review receipts could look plausible after recovery while belonging to an obsolete inspection epoch (`skills/trackly-apply/references/batch-orchestration.md:83-92`).
 - Authentication, account creation, OTP, and pre-form CAPTCHA pages could be mistakenly counted toward the review-ready target even though no safely accessible form existed. These classifications consume no completed slot (`skills/trackly-apply/references/batch-orchestration.md:133-140`).
@@ -45,7 +45,7 @@ A restored URL proves only that a page can be reopened. It does not prove that t
 
 ### Reusing cached resume paths
 
-The Zoox failure showed why an earlier local path cannot be reused as attachment evidence. A prepared artifact may expire, move, or be deleted while the browser still displays an old reference. The supported sequence verifies the prepared resume immediately before attachment, checks the employer-facing committed filename, and rechecks parser-sensitive fields (`skills/trackly-apply/references/browser-upload.md:15-24`).
+Regardless of the unclassified Zoox failure's cause, an earlier local path cannot be reused as attachment evidence. A prepared artifact may expire, move, or be deleted while the browser still displays an old reference. The supported sequence verifies the prepared resume immediately before attachment, checks the employer-facing committed filename, and rechecks parser-sensitive fields (`skills/trackly-apply/references/browser-upload.md:15-24`).
 
 ### Using generic advancement or replacement after context loss
 
@@ -73,7 +73,7 @@ Recovery is all-or-nothing at the client boundary. The response validator requir
 
 For every recovered member, reuse the existing run and bind the exact backend-stored requisition URL with `recovery_binding`. The returned member version and inspection epoch are authoritative; prior-epoch evidence is invalid (`skills/trackly-apply/references/browser-lifecycle.md:102-106`). Revalidate HTTPS origin, ATS tenant, employer, role, requisition, job identity, and semantic controls before entering private data. Reinventory the entire form because a draft must never be assumed to have survived a crash or handoff (`skills/trackly-apply/references/browser-lifecycle.md:242-268`).
 
-The operator receipt must separately report whether the exact tab was restored, whether employer form state was restored or safely reconstructed, and whether current mutation authority was reacquired. Failure of any dimension prevents mutation.
+The operator receipt must separately report whether the exact tab was restored, whether employer form state was restored or safely reconstructed, and whether current mutation authority was reacquired. A missing original tab may be reopened from the exact backend URL; mutation requires the resulting form to be restored or safely reconstructed and current authority to be reacquired, while the tab-restoration fact remains independently reported.
 
 ### 4. Preserve user-owned and unknown values
 
@@ -102,7 +102,7 @@ Inspection epochs close stale-evidence reuse. Field provenance protects user cor
 ## Prevention
 
 - Model browser tabs, DOM snapshots, control handles, chooser handles, and local artifact paths as leases or observations, never durable state.
-- On every reconnect, handoff, navigation, rerender, or restart, rebind the exact run, accept the current inspection epoch, and reinspect the semantic DOM before mutation.
+- Bind the exact run only for its initial surface or after a missing-tab recovery/handoff, accepting the new inspection epoch each time. After ordinary navigation or rerender, retain that binding and revalidate identity, form state, and the semantic DOM before mutation.
 - Keep tab restored, form restored/reconstructed, and mutation authority reacquired as separate assertions in code, tests, and operator output.
 - Preserve exact recovery as a dedicated operation; never route it through normal advancement, refill, replacement, or “next candidate” logic.
 - Assert set equality and uniqueness on both sides of the mutation. Cover duplicate discovery identities, undiscovered candidates, changed snapshot hashes, partial eligible sets, substitutions, and non-recoverable rows.
