@@ -21,7 +21,8 @@ Universal context for AI coding agents (Codex, Cursor, Copilot, Claude Code, Dev
 bin/trackly          # CLI entrypoint (shebang script). All commands + arg parser + main()
 lib/client.js        # HTTP client: config loading, token refresh, apiRequest()
 lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies(), etc.
-mcp/server.js        # MCP server: search/network + Trackly Apply tools, launched via `trackly mcp`
+mcp/server.js        # MCP server entrypoint and search/network tools, launched via `trackly mcp`
+mcp/apply-tools.js   # Trackly Apply MCP schemas, validators, and tool registration
 docs/trackly-tools.md  # MCP tool reference (for embedding in AI agent contexts)
 docs/solutions/       # documented solutions organized by category with searchable YAML frontmatter (module, tags, problem_type)
 CONCEPTS.md           # shared domain vocabulary for entities, named processes, and status concepts
