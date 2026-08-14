@@ -32,7 +32,7 @@ contracts/           # Versioned hosted/local Trackly Apply MCP schema contract
 skills/trackly-apply/  # Sanitized public browser-mechanics skill bundled with the CLI
 scripts/             # Maintainer checks; the packaged audit verifier is the named exception
 docs/trackly-tools.md  # MCP tool reference (for embedding in AI contexts)
-docs/solutions/       # documented solutions organized by category with searchable YAML frontmatter
+docs/solutions/       # documented solutions organized by category with searchable YAML frontmatter (module, tags, problem_type)
 CONCEPTS.md           # shared domain vocabulary for entities, named processes, and status concepts
 server.json          # MCP Registry manifest (io.github.trackly-app/trackly)
 ```
