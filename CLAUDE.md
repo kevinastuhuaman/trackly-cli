@@ -113,6 +113,8 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/jobscout/apply/executions/:executionId/dispositions` -- Record bound value-free probe classifications (`trackly_record_apply_execution_dispositions`)
 - `POST /api/jobscout/apply/executions/:executionId/stop` -- Stop an active execution idempotently (`trackly_stop_apply_execution`)
 - `POST /api/jobscout/apply/batches/:batchId/cancel` -- Retire a legacy fixed batch after explicit user confirmation (`trackly_cancel_apply_batch`)
+- `GET /api/jobscout/apply/batches/:batchId` -- Page one exact frozen batch (`trackly_get_apply_batch`)
+- `POST /api/jobscout/apply/batches/:batchId/claim` -- Acquire or renew its browser-mutation lease (`trackly_claim_apply_batch`)
 - `POST /api/jobscout/apply/runs` -- Start an agent-assisted application run (`trackly_start_apply_run`)
 - `POST /api/jobscout/apply/batches/:batchId/members/:memberId/surface-binding` -- Bind an initial or recovered browser surface to the existing frozen member/run (`trackly_bind_apply_surface`)
 - `GET /api/jobscout/apply/protocol` -- Get the versioned browser workflow (`trackly_get_apply_protocol`)
@@ -125,6 +127,8 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/auth/refresh` -- Token refresh
 - `GET /api/network/people` -- List/search contacts
 - `POST /api/network/jobs/:id/referral-campaign` -- Start referral campaign
+
+The complete 55-tool inventory is in `docs/trackly-tools.md`. Local-only helpers such as `trackly_verify_prepared_resume` and `trackly_validate_apply_resume_upload` intentionally have no HTTP endpoint and therefore do not appear in the endpoint list above.
 - `GET /api/network/jobs/:id/referral-campaign` -- Get referral campaign status
 - `GET /api/jobscout/jobs/:id/network-brief` -- Get network brief for a job
 - `GET /api/network/companies/:id/brief` -- Get company brief
