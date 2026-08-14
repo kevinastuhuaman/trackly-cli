@@ -51,7 +51,7 @@ None of these receipts implies another.
 - R3. Execution status, raw cumulative achievement count, target-capped `completed`, current ready/submitted counts, reservations, `targetReached`, and `nextAction` must come from one transactionally consistent state.
 - R4. Trackly must recover the exact confirmed set from one prior terminal or expired execution only when every confirmed member is eligible, without changing queue recency or selecting newer jobs; otherwise it must create no recovery execution.
 - R5. Exact recovery must assert the requested source membership, report each member's eligibility, create no substitutes, reuse valid run identity, and require a fresh browser binding and inspection epoch.
-- R6. Exact recovery must reject foreign-user, revoked, changed-requisition, duplicate, and concurrently owned members. Already-applied members are reconciliation-only and inactive or access-blocked members remain typed non-counting dispositions.
+- R6. Exact recovery must reject foreign-user, revoked, changed-requisition, duplicate, and concurrently owned members. Already-applied members are reconciliation-only, not recovery-eligible; including one in the confirmed set must fail the request atomically. Inactive or access-blocked members likewise remain typed non-counting dispositions and make a confirmed exact set ineligible.
 - R7. Tab restoration, form restoration, and mutation authority must be exposed as separate value-free recovery facts.
 
 **Review and submission reconciliation**
