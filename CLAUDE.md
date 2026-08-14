@@ -127,14 +127,14 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/auth/refresh` -- Token refresh
 - `GET /api/network/people` -- List/search contacts
 - `POST /api/network/jobs/:id/referral-campaign` -- Start referral campaign
-
-The complete 55-tool inventory is in `docs/trackly-tools.md`. Local-only helpers such as `trackly_verify_prepared_resume` and `trackly_validate_apply_resume_upload` intentionally have no HTTP endpoint and therefore do not appear in the endpoint list above.
 - `GET /api/network/jobs/:id/referral-campaign` -- Get referral campaign status
 - `GET /api/jobscout/jobs/:id/network-brief` -- Get network brief for a job
 - `GET /api/network/companies/:id/brief` -- Get company brief
 - `POST /api/network/companies/:id/brief/refresh` -- Refresh/generate company brief
 - `GET /api/network/companies/:id/workspace` -- Get company workspace (jobs, contacts, campaigns)
 - `GET /auth/google/cli` -- OAuth login redirect
+
+The complete 55-tool inventory is in `docs/trackly-tools.md`. Local-only helpers such as `trackly_verify_prepared_resume` and `trackly_validate_apply_resume_upload` intentionally have no HTTP endpoint and therefore do not appear in the endpoint list above.
 
 ## Gotchas
 
