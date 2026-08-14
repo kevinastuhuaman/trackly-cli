@@ -114,6 +114,7 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/jobscout/apply/executions/:executionId/stop` -- Stop an active execution idempotently (`trackly_stop_apply_execution`)
 - `POST /api/jobscout/apply/batches/:batchId/cancel` -- Retire a legacy fixed batch after explicit user confirmation (`trackly_cancel_apply_batch`)
 - `POST /api/jobscout/apply/runs` -- Start an agent-assisted application run (`trackly_start_apply_run`)
+- `POST /api/jobscout/apply/batches/:batchId/members/:memberId/surface-binding` -- Bind an initial or recovered browser surface to the existing frozen member/run (`trackly_bind_apply_surface`)
 - `GET /api/jobscout/apply/protocol` -- Get the versioned browser workflow (`trackly_get_apply_protocol`)
 - `POST /api/jobscout/apply/observations` -- Report a redacted ATS observation (`trackly_report_apply_observation`)
 - `POST /api/jobscout/apply/runs/:runId/outcome` -- Record review or submission outcome (`trackly_record_application_outcome`)
