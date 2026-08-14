@@ -26,11 +26,14 @@ bin/trackly          # CLI entrypoint (shebang script). All CLI commands + arg p
 lib/agent.js         # Agent setup, doctor, private resume cache, and public skill installation
 lib/client.js        # HTTP client: config loading, token refresh, apiRequest()
 lib/formatters.js    # Terminal output: color(), outputJobs(), outputCompanies(), outputStats(), outputContacts(), outputReferralCampaign(), outputNetworkBrief()
-mcp/server.js        # MCP server: 55 tools, launched via `trackly mcp`
+mcp/server.js        # MCP server entrypoint and search/network tools, launched via `trackly mcp`
+mcp/apply-tools.js   # Trackly Apply MCP schemas, validators, and tool registration
 contracts/           # Versioned hosted/local Trackly Apply MCP schema contract
 skills/trackly-apply/  # Sanitized public browser-mechanics skill bundled with the CLI
 scripts/             # Maintainer checks; the packaged audit verifier is the named exception
 docs/trackly-tools.md  # MCP tool reference (for embedding in AI contexts)
+docs/solutions/       # documented solutions organized by category with searchable YAML frontmatter (module, tags, problem_type)
+CONCEPTS.md           # shared domain vocabulary for entities, named processes, and status concepts
 server.json          # MCP Registry manifest (io.github.trackly-app/trackly)
 ```
 
@@ -112,6 +115,9 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/jobscout/apply/executions/:executionId/dispositions` -- Record bound value-free probe classifications (`trackly_record_apply_execution_dispositions`)
 - `POST /api/jobscout/apply/executions/:executionId/stop` -- Stop an active execution idempotently (`trackly_stop_apply_execution`)
 - `POST /api/jobscout/apply/batches/:batchId/cancel` -- Retire a legacy fixed batch after explicit user confirmation (`trackly_cancel_apply_batch`)
+- `GET /api/jobscout/apply/batches/:batchId` -- Page one exact frozen batch (`trackly_get_apply_batch`)
+- `POST /api/jobscout/apply/batches/:batchId/claim` -- Acquire or renew its browser-mutation lease (`trackly_claim_apply_batch`)
+- `POST /api/jobscout/apply/batches/:batchId/members/:memberId/surface-binding` -- Bind an initial or recovered browser surface to the existing frozen member/run (`trackly_bind_apply_surface`)
 - `POST /api/jobscout/apply/runs` -- Start an agent-assisted application run (`trackly_start_apply_run`)
 - `GET /api/jobscout/apply/protocol` -- Get the versioned browser workflow (`trackly_get_apply_protocol`)
 - `POST /api/jobscout/apply/observations` -- Report a redacted ATS observation (`trackly_report_apply_observation`)
@@ -129,6 +135,8 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/network/companies/:id/brief/refresh` -- Refresh/generate company brief
 - `GET /api/network/companies/:id/workspace` -- Get company workspace (jobs, contacts, campaigns)
 - `GET /auth/google/cli` -- OAuth login redirect
+
+The complete 55-tool inventory is in `docs/trackly-tools.md`. Local-only helpers such as `trackly_verify_prepared_resume` and `trackly_validate_apply_resume_upload` intentionally have no HTTP endpoint and therefore do not appear in the endpoint list above.
 
 ## Gotchas
 
