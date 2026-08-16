@@ -633,6 +633,7 @@ function addOptionalContextToTools(server) {
 
 function runtimeEventProperties(env = process.env) {
   return {
+    $mcp_source: 'local',
     channel: 'mcp',
     contract_version: 3,
     environment: env.TRACKLY_MCP_ANALYTICS_ENVIRONMENT || 'production',
@@ -797,6 +798,7 @@ function configureMcpAnalytics(server, options = {}) {
     const anonymousDistinctId = `mcp-anon-${randomUUID()}`;
     relay = (options.createRelay || createBackendRelay)({ fetch: options.fetch });
     const eventProperties = runtimeEventProperties(env);
+    const { $mcp_source: _mcpSource, ...sdkEventProperties } = eventProperties;
     addOptionalContextToTools(server);
     const sdkFailureWarnings = [];
     const analytics = sdk.instrument(server, relay, {
@@ -818,7 +820,7 @@ function configureMcpAnalytics(server, options = {}) {
           ...eventProperties,
         },
       }),
-      eventProperties: () => eventProperties,
+      eventProperties: () => sdkEventProperties,
       logger: (message) => {
         if (SDK_FAILURE_WARNING.test(String(message))) {
           sdkFailureWarnings.push('sdk_setup_warning');

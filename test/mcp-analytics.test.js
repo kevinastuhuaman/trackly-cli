@@ -18,6 +18,7 @@ const {
   createBackendRelay,
   configureMcpAnalytics,
   isMcpAnalyticsEnabled,
+  runtimeEventProperties,
   sanitizeMcpAnalyticsEvent,
   shutdownMcpAnalytics,
 } = require('../mcp/analytics');
@@ -38,6 +39,14 @@ test('analytics is default-on with explicit local disable controls', () => {
     ...ENABLED_ENV,
     TRACKLY_MCP_ANALYTICS_DISABLED: 'true',
   }), false);
+});
+
+test('local MCP runtime metadata identifies the stdio analytics source', () => {
+  const properties = runtimeEventProperties({});
+
+  assert.equal(properties.$mcp_source, 'local');
+  assert.equal(properties.channel, 'mcp');
+  assert.equal(properties.trackly_package_version, require('../package.json').version);
 });
 
 test('backend relay is anonymous before auth and backend-identified after auth', async () => {
@@ -952,6 +961,7 @@ test('enabled instrumentation advertises optional context and strips it before h
   assert.equal(toolCall.properties.$mcp_intent_source, 'context_parameter');
   assert.doesNotMatch(JSON.stringify(toolCall), /current job-search session|"fintech"/);
   assert.equal(toolCall.properties.$mcp_parameters.request.params.arguments.context, undefined);
+  assert.equal(toolCall.properties.$mcp_source, 'local');
   assert.equal(toolCall.properties.channel, 'mcp');
   assert.equal(toolCall.properties.contract_version, 3);
   assert.equal(toolCall.properties.app_version, require('../package.json').version);
