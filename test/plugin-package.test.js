@@ -3673,6 +3673,8 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /visible success state or the user's explicit confirmation/);
   assert.match(skill, /requiresLocalAgentOrManualUpload/);
   assert.match(skill, /profile\.missingRequired/);
+  assert.match(skill, /onboarding packet is schema\/readiness-driven because no employer form exists yet/);
+  assert.match(skill, /before generating an employer-form question packet or filling controls/);
   assert.match(skill, /profile\.availableFields/);
   assert.match(skill, /matching `availability` flag is true/);
   assert.match(skill, /`queue\.pageCount` is only the returned page count/);

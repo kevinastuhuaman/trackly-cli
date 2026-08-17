@@ -22,7 +22,7 @@ Use Trackly as the source of truth for profile answers, documents, queue decisio
 
 Before selecting or resuming work, read
 [references/batch-orchestration.md](references/batch-orchestration.md) and
-[references/browser-lifecycle.md](references/browser-lifecycle.md). Before generating any user question packet, also read and run
+[references/browser-lifecycle.md](references/browser-lifecycle.md). Before generating an employer-form question packet, also read and run
 [references/answer-resolution.md](references/answer-resolution.md). These
 references define the server-frozen batch, grouped-question, tab-reconciliation,
 and missing-surface recovery contract; they are mandatory even for a one-job batch.

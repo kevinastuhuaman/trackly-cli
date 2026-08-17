@@ -1,8 +1,10 @@
 # Deterministic answer resolution
 
 Run this resolver after reading the current application-profile revision and
-inventorying the visible form, but before generating any user question packet
-or writing an answer. It reduces questions without weakening truthfulness.
+inventorying a visible employer form, but before generating that form's
+question packet or writing an answer. Profile onboarding that happens before
+an employer form exists uses the profile schema's field metadata instead.
+This resolver reduces questions without weakening truthfulness.
 
 ## Resolution pipeline
 

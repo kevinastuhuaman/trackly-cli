@@ -1,7 +1,10 @@
 # Deterministic answer resolution
 
-Before asking the user or writing a control, map each visible question to an
-exact requested profile key and expected type. Classify it as `exact_profile`,
+After inventorying a visible employer form and before asking the user or
+writing a control, map each visible question to an exact requested profile key
+and expected type. Profile onboarding before an employer form exists uses the
+canonical keys and public labels returned by readiness instead. Classify each
+visible form question as `exact_profile`,
 `safe_derivation`, `supported_draft`, `missing_fact`, `live_consent`, or
 `forbidden_inference`. Fill only the first three; group only currently visible
 unresolved needs for the user.
