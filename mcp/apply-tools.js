@@ -40,6 +40,7 @@ const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
 const iso3166Alpha2Schema = z.string().regex(/^[A-Za-z]{2}$/).refine(isIso3166Alpha2, {
   message: 'Expected an ISO 3166-1 alpha-2 country code',
 });
+const officeScopeSchema = z.string().regex(/^[1-9]\d*:[A-Za-z0-9][A-Za-z0-9._-]{0,150}$/);
 const opaqueTabIdSchema = z.union([
   z.number().int().safe(),
   z.string().min(1).max(512).refine((value) => value.trim().length > 0, {
@@ -262,7 +263,7 @@ const startApplyRunSchema = z.object({
   }
 });
 
-const APPLY_RELIABILITY_PROMPT = 'Protocol 3.6 / skill 4.5.0 reliability gate: recover active work first. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
+const APPLY_RELIABILITY_PROMPT = 'Protocol 3.6 / skill 4.6.0 reliability gate: recover active work first. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
 
 function registerApplyTools(
   server,
@@ -311,13 +312,19 @@ function registerApplyTools(
       provider: z.string().max(100).optional(),
       companyId: z.string().max(100).optional(),
       jurisdiction: iso3166Alpha2Schema.optional(),
+      office: officeScopeSchema.optional(),
     },
-    wrapTool(async ({ includeSensitive, provider, companyId, jurisdiction }) => {
+    wrapTool(async ({ includeSensitive, provider, companyId, jurisdiction, office }) => {
+      const normalizedCompanyId = companyId?.trim();
+      if (office && (!normalizedCompanyId || !office.startsWith(`${normalizedCompanyId}:`))) {
+        throw new Error('Office scope must match the requested companyId');
+      }
       const qs = new URLSearchParams();
       if (includeSensitive) qs.set('includeSensitive', 'true');
       if (provider) qs.set('provider', provider);
-      if (companyId) qs.set('companyId', companyId);
+      if (normalizedCompanyId) qs.set('companyId', normalizedCompanyId);
       if (jurisdiction) qs.set('jurisdiction', jurisdiction);
+      if (office) qs.set('office', office);
       return applyApiRequest('GET', `/api/jobscout/application-profile?${qs.toString()}`, null, false, false, MCP_USER_AGENT);
     }, 'Failed to fetch application profile')
   );
@@ -359,6 +366,11 @@ function registerApplyTools(
         z.object({
           key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
           value: z.any().optional(), scope: z.literal('jurisdiction'), scopeValue: iso3166Alpha2Schema,
+          questionLabel: z.string().max(1000).optional(),
+        }),
+        z.object({
+          key: z.string().min(1).max(200), state: z.enum(['unknown', 'answered', 'intentionally_blank', 'declined']),
+          value: z.any().optional(), scope: z.literal('office'), scopeValue: officeScopeSchema,
           questionLabel: z.string().max(1000).optional(),
         }),
       ])).max(100).optional(),
@@ -535,13 +547,36 @@ function registerApplyTools(
     'Fetch a compact, bounded projection for one Apply execution. Request only the current members and profile keys needed for the visible form. The response owns mutability, allowed operations, milestones, lease timing, and progress.',
     {
       executionId: z.number().int().min(1),
-      memberIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET),
-      profileKeys: z.array(z.string().min(1).max(200)).max(100).optional(),
+      memberIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET)
+        .refine((values) => new Set(values).size === values.length, {
+          message: 'memberIds must be unique',
+        }),
+      profileKeys: z.array(z.string().min(1).max(200)).max(100)
+        .refine((values) => new Set(values).size === values.length, {
+          message: 'profileKeys must be unique',
+        }).optional(),
+      officeProjections: z.array(z.object({
+        memberId: z.number().int().min(1),
+        office: officeScopeSchema,
+        profileKeys: z.array(z.string().min(1).max(200)).min(1).max(100)
+          .refine((values) => new Set(values).size === values.length, {
+            message: 'office profileKeys must be unique',
+          }),
+      }).strict()).max(APPLY_EXECUTION_MAX_TARGET)
+        .refine((values) => new Set(values.map(({ memberId }) => memberId)).size === values.length, {
+          message: 'officeProjections must contain unique memberId values',
+        }).optional(),
       browserSurface: z.enum(APPLY_BROWSER_SURFACES),
     },
-    wrapTool(async ({ executionId, ...body }) => applyControlRequest(
-      'POST', `/api/jobscout/apply/executions/${executionId}/snapshot`, body,
-    ), 'Failed to fetch compact apply execution snapshot')
+    wrapTool(async ({ executionId, ...body }) => {
+      const memberIds = new Set(body.memberIds);
+      if (body.officeProjections?.some(({ memberId }) => !memberIds.has(memberId))) {
+        throw new Error('Every office projection memberId must exist in memberIds.');
+      }
+      return applyControlRequest(
+        'POST', `/api/jobscout/apply/executions/${executionId}/snapshot`, body,
+      );
+    }, 'Failed to fetch compact apply execution snapshot')
   );
 
   server.tool(
@@ -1164,12 +1199,15 @@ function registerApplyTools(
       content: { type: 'text', text: APPLY_RELIABILITY_PROMPT },
     }, {
       role: 'user',
+      content: { type: 'text', text: 'Before generating questions or filling controls, run the skill 4.6 deterministic answer resolver. Classify every visible answer as exact_profile, safe_derivation, supported_draft, missing_fact, live_consent, or forbidden_inference; validate the control type; fill only the first three; and ask only currently visible unresolved needs. Treat the current profile revision as reusable authority, never transcript, screenshot, parser, autocomplete, or cached values. Accessible-first is a hard scheduler invariant: park known authentication, account-creation, OTP, and pre-form-CAPTCHA work without starting a draft while an accessible candidate remains.' },
+    }, {
+      role: 'user',
       content: { type: 'text', text: 'Only active=true identifies resumable execution work. Active=false and preserved=true is terminal read-only reconciliation evidence.' },
     }, {
       role: 'user',
       content: {
         type: 'text',
-        text: 'Protocol 3.6.0 reliability gate for new work: require MCP contract 3.7.1 and skill 4.5.0. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
+        text: 'Protocol 3.6.0 reliability gate for new work: require MCP contract 3.7.3 and skill 4.6.0. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
       },
     }, {
       role: 'user',

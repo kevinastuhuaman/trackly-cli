@@ -1,5 +1,12 @@
 # Browser safety
 
+Contact and address values come only from the current requested canonical
+profile projection. Conversation, screenshots, parser output, autocomplete,
+and cached values are not authority. Verify rendered live, framework/native, or
+accessibility state after events settle; a static `value` attribute is not
+proof. Normalize masked phone digits and country code before comparing them to
+the canonical value, and require an exact autocomplete option to be committed.
+
 ## Readiness gate
 
 Before entering private data, require all of the following:

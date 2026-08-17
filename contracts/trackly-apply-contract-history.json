@@ -17,5 +17,11 @@
   },
   "3.7.1": {
     "contractSha256": "0eb582fcac72804347c5da53d214a67908f657f600536db7b42167350bb3f3ab"
+  },
+  "3.7.2": {
+    "contractSha256": "058dc698ff1b0722f48b9f244773c0f09286046540609c31f001fe8604b06093"
+  },
+  "3.7.3": {
+    "contractSha256": "d37e7ec0a17d3dba399f12dd7281c51536ca92bbb21125ca09288d1678f34c14"
   }
 }

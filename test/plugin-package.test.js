@@ -627,13 +627,13 @@ test('the exported plugin router must be mounted on the exact production applica
   const source = `
     import express from 'express';
     import rateLimit from 'express-rate-limit';
+    import { authLimiter } from './middleware/auth-rate-limit.js';
     import tracklyPluginMcpRoutes from './mcp/plugin-router';
     import { azureRehearsalRateLimitOptions } from './utils/azure-rehearsal-ip';
     const PORT = 3000;
     export function createApp() {
       const app = express();
       const generalLimiter = rateLimit({ ...azureRehearsalRateLimitOptions() });
-      const authLimiter = rateLimit({ ...azureRehearsalRateLimitOptions() });
       app.use('/api/plugin/trackly/mcp', tracklyPluginMcpRoutes);
       app.use('/api/', generalLimiter);
       app.use('/auth/', authLimiter);
@@ -665,6 +665,16 @@ test('the exported plugin router must be mounted on the exact production applica
       'redirected rate-limit import fixture',
     ),
     /must import default as rateLimit exactly once from express-rate-limit/,
+  );
+  assert.throws(
+    () => assertLivePluginRouterMount(
+      source.replace("from './middleware/auth-rate-limit.js'", "from './middleware/decoy-auth-rate-limit.js'"),
+      'tracklyPluginMcpRoutes',
+      './mcp/plugin-router',
+      '/api/plugin/trackly/mcp',
+      'redirected auth limiter import fixture',
+    ),
+    /must import authLimiter as authLimiter exactly once from \.\/middleware\/auth-rate-limit\.js/,
   );
   assert.throws(
     () => assertLivePluginRouterMount(
@@ -3602,7 +3612,7 @@ test('public skills reference only the locked 18-tool facade', () => {
     profileEducation: 'bounded_explicitly_confirmed_user_approved_replace_all',
     advanceReceipt: 'returns_prepared_batch_and_member_ids',
     applyWorkOutput: 'discriminated_allowlisted_structured_content',
-    applyWorkProfileProjection: 'requested_fields_and_resume_availability_boolean_only',
+    applyWorkProfileProjection: 'requested_global_fields_plus_member_bound_exact_office_fields_and_resume_availability_boolean_only',
     applyWorkNavigation: 'bounded_frozen_requisition_identity_with_server_verified_origin_and_tenant_policy',
     conditionalSensitiveScopes: 'required_only_for_requested_sensitive_fields',
     appliedStatusScope: 'tracking_write_plus_apply_write_for_run_reconciliation',
@@ -3631,6 +3641,7 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.match(lock.publicExecutableContract.pluginScopesSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.jobBriefServiceSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.backendUiRedirectSha256, /^[a-f0-9]{64}$/);
+  assert.match(lock.publicExecutableContract.authRateLimitSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.maintenanceModeSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.databaseBindingSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.reviewIdentitySha256, /^[a-f0-9]{64}$/);
@@ -3662,6 +3673,8 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /visible success state or the user's explicit confirmation/);
   assert.match(skill, /requiresLocalAgentOrManualUpload/);
   assert.match(skill, /profile\.missingRequired/);
+  assert.match(skill, /onboarding packet is schema\/readiness-driven because no employer form exists yet/);
+  assert.match(skill, /before generating an employer-form question packet or filling controls/);
   assert.match(skill, /profile\.availableFields/);
   assert.match(skill, /matching `availability` flag is true/);
   assert.match(skill, /`queue\.pageCount` is only the returned page count/);

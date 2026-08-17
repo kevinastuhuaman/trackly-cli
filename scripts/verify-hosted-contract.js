@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '0c8cb3d1fb3cb3ff636def78011acbb57367457c8eccd32d6ee2a3af4d5af875';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '5a5350f04e0f4afb5449bde7a35bae20518e8595310fa1dc321b9beb9188ec5f';
 
 const parsedSourceCache = new Map();
 
@@ -558,6 +558,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/utils/azure-rehearsal-ip.ts',
   'src/utils/jwt.ts',
   'src/utils/trackly-web-origin.ts',
+  'src/middleware/auth-rate-limit.ts',
   'src/middleware/channel-attribution.ts',
   'src/middleware/maintenance-mode.ts',
   'src/services/job-brief.ts',
@@ -638,6 +639,7 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     pluginScopes: 'src/mcp/plugin-scopes.ts',
     jobBriefService: 'src/services/job-brief.ts',
     backendUiRedirect: 'src/utils/trackly-web-origin.ts',
+    authRateLimit: 'src/middleware/auth-rate-limit.ts',
     maintenanceMode: 'src/middleware/maintenance-mode.ts',
     databaseBinding: 'src/config/database.ts',
     reviewIdentity: 'src/services/review-identity.ts',
@@ -1797,7 +1799,7 @@ const REVIEWED_GLOBAL_MIDDLEWARE_CALL_DIGESTS = Object.freeze([
   '12def47c0dc1628a891b9045ed9c275af25dd73660929d528943f95a98c34855',
   'bc0d7d12f97ab6e9e79b00fa3701899806387b16353d9575628545a06644b2e9',
   'd63cf7bbc1fae45f475807325f4178283bfea854bf4aeecaf7754f66e509e0a5',
-  'd79c16521f24347d7114358baafc46d77bbe47fe2034506bf941521e9e66737f',
+  'e8f6d712ad1044aa865b0cec6ddd51e860ed59ecda3f13f9427f8a84ffa78438',
   '971bb5b2a58a45df2caf26342572fcc3221e86544e0335be81a86cb22a30e284',
 ]);
 const EXPRESS_ROUTE_CALL_METHODS = new Set([
@@ -2028,7 +2030,7 @@ function assertLivePluginRouterMount(
     source,
     'azureRehearsalRateLimitOptions',
     './utils/azure-rehearsal-ip',
-    ['generalLimiter', 'authLimiter'],
+    ['generalLimiter'],
     sourcePath,
   );
   const ast = parseFullSource(source, sourcePath);
@@ -2235,6 +2237,13 @@ function assertRateLimitBindingSemantics(source, sourcePath) {
   const ast = parseFullSource(source, sourcePath);
   const factory = activeNamedDefinitionAst(source, 'createApp', sourcePath);
   const rateLimitImport = assertImportBinding(source, 'default', 'rateLimit', 'express-rate-limit', sourcePath);
+  const authLimiterImport = assertImportBinding(
+    source,
+    'authLimiter',
+    'authLimiter',
+    './middleware/auth-rate-limit.js',
+    sourcePath,
+  );
   const rateLimitCalls = [];
   function visitRateLimitCalls(node) {
     if (node === null || typeof node !== 'object') return;
@@ -2257,9 +2266,9 @@ function assertRateLimitBindingSemantics(source, sourcePath) {
     [rateLimitImport.local, ...rateLimitCalls],
     `rateLimit in ${sourcePath} must come only from express-rate-limit and remain confined to its reviewed limiter initializers`,
   );
-  for (const [name, expectedMountPaths] of [
-    ['generalLimiter', ['/api/']],
-    ['authLimiter', ['/auth/', '/api/admin/login']],
+  for (const [name, expectedMountPaths, importedBindings] of [
+    ['generalLimiter', ['/api/'], null],
+    ['authLimiter', ['/auth/', '/api/admin/login'], [authLimiterImport.imported, authLimiterImport.local]],
   ]) {
     const definitions = [];
     function visitDefinitions(node) {
@@ -2281,9 +2290,17 @@ function assertRateLimitBindingSemantics(source, sourcePath) {
       }
     }
     visitDefinitions(ast);
-    assert.equal(definitions.length, 1, `${name} in ${sourcePath} must have exactly one active declaration`);
-    const { declarator, declaration } = definitions[0];
-    assert.equal(declaration.kind, 'const', `${name} in ${sourcePath} must remain immutable`);
+    assert.equal(
+      definitions.length,
+      importedBindings ? 0 : 1,
+      importedBindings
+        ? `${name} in ${sourcePath} must come only from the reviewed middleware import`
+        : `${name} in ${sourcePath} must have exactly one active declaration`,
+    );
+    const localDefinition = definitions[0];
+    if (localDefinition) {
+      assert.equal(localDefinition.declaration.kind, 'const', `${name} in ${sourcePath} must remain immutable`);
+    }
     const appUseMounts = factory.body.body.flatMap((statement) => {
       const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
       if (call?.type !== 'CallExpression' || babelCalleeName(call.callee) !== 'app.use') return [];
@@ -2305,7 +2322,10 @@ function assertRateLimitBindingSemantics(source, sourcePath) {
     );
     assert.deepEqual(
       collectBindingReferences(ast, name, () => false),
-      [declarator.id, ...appUseMounts.map((mount) => mount.reference)],
+      [
+        ...(importedBindings ?? [localDefinition.declarator.id]),
+        ...appUseMounts.map((mount) => mount.reference),
+      ],
       `${name} in ${sourcePath} must not be reassigned, mutated, aliased, escaped, or referenced outside its reviewed app.use mounts`,
     );
   }
@@ -4544,6 +4564,7 @@ function verifyCheckedInHostedContractFixture(
     databaseBinding: lock.publicExecutableContract.databaseBindingSha256,
     reviewIdentity: lock.publicExecutableContract.reviewIdentitySha256,
     azureRateLimitOptions: lock.publicExecutableContract.azureRateLimitOptionsSha256,
+    authRateLimit: lock.publicExecutableContract.authRateLimitSha256,
     applicationProfileService: lock.publicExecutableContract.applicationProfileServiceSha256,
   }, `${fixturePath} hosted source snapshot drifted from the packaged executable lock`);
   for (const digest of [
@@ -4555,6 +4576,7 @@ function verifyCheckedInHostedContractFixture(
     lock.publicExecutableContract.databaseBindingSha256,
     lock.publicExecutableContract.reviewIdentitySha256,
     lock.publicExecutableContract.azureRateLimitOptionsSha256,
+    lock.publicExecutableContract.authRateLimitSha256,
     lock.publicExecutableContract.applicationProfileServiceSha256,
     ...Object.values(lock.publicExecutableContract.descriptorSha256),
     ...Object.values(lock.publicExecutableContract.handlerSha256),
@@ -4604,6 +4626,7 @@ const hostedAuthContextPath = path.join(backendRoot, 'src', 'mcp', 'hosted-auth-
 const hostedPluginUiPath = path.join(backendRoot, 'src', 'mcp', 'plugin-ui.ts');
 const hostedAuthEpochPath = path.join(backendRoot, 'src', 'utils', 'auth-epoch.ts');
 const hostedAzureRehearsalIpPath = path.join(backendRoot, 'src', 'utils', 'azure-rehearsal-ip.ts');
+const hostedAuthRateLimitPath = path.join(backendRoot, 'src', 'middleware', 'auth-rate-limit.ts');
 const hostedJwtPath = path.join(backendRoot, 'src', 'utils', 'jwt.ts');
 const hostedJobBriefServicePath = path.join(backendRoot, 'src', 'services', 'job-brief.ts');
 const hostedReviewIdentityPath = path.join(backendRoot, 'src', 'services', 'review-identity.ts');
@@ -4653,6 +4676,7 @@ const hostedAuthContextSource = fs.readFileSync(hostedAuthContextPath, 'utf8');
 const hostedPluginUiSource = fs.readFileSync(hostedPluginUiPath, 'utf8');
 const hostedAuthEpochSource = fs.readFileSync(hostedAuthEpochPath, 'utf8');
 const hostedAzureRehearsalIpSource = fs.readFileSync(hostedAzureRehearsalIpPath, 'utf8');
+const hostedAuthRateLimitSource = fs.readFileSync(hostedAuthRateLimitPath, 'utf8');
 const hostedJwtSource = fs.readFileSync(hostedJwtPath, 'utf8');
 const hostedJobBriefServiceSource = fs.readFileSync(hostedJobBriefServicePath, 'utf8');
 const hostedReviewIdentitySource = fs.readFileSync(hostedReviewIdentityPath, 'utf8');
@@ -4670,6 +4694,18 @@ assertLivePluginRouterMount(
   './mcp/plugin-router',
   '/api/plugin/trackly/mcp',
   hostedApplicationPath,
+);
+assertImportedFunctionCallInventory(
+  hostedAuthRateLimitSource,
+  'azureRehearsalRateLimitOptions',
+  '../utils/azure-rehearsal-ip.js',
+  ['authLimiter'],
+  hostedAuthRateLimitPath,
+);
+assertExactHostedSourceSha256(
+  hostedAuthRateLimitSource,
+  pluginLock.publicExecutableContract.authRateLimitSha256,
+  hostedAuthRateLimitPath,
 );
 assertServerListenSemantics(hostedApplicationSource, hostedApplicationPath);
 assertInstallProcessGuardsSemantics(hostedApplicationSource, hostedApplicationPath);
@@ -5634,7 +5670,7 @@ const applicationFieldSensitivityMap = staticApplicationFieldSensitivityMap(
 );
 assert.equal(
   sha256ExactBytes(JSON.stringify(applicationFieldSensitivityMap)),
-  'd6970a25e4b10d3c32b7eb6bb2548915a6bf4d6ec6fc1f619677120383a36854',
+  '0a4988ea45beb4ceb9156cfb2e8094656409e9af90ea084022d79a65df2a5529',
   'Application profile field keys and sensitivity classifications drifted from the reviewed conditional-scope catalog',
 );
 assert.deepEqual(
@@ -5682,15 +5718,32 @@ assertActiveFunctionDefinitionAst(
           && APPLICATION_FIELD_BY_KEY.get(key)?.sensitivity !== 'standard';
       });
       if (requestsSensitiveWrite) required.push('sensitive:write');
+      const readsPersistedSensitiveValues = input.confirmProfile === true
+        || input.changes.some((candidate) => {
+          if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return false;
+          const key = (candidate as Record<string, unknown>).key;
+          return typeof key === 'string' && APPLICATION_PROFILE_CONSISTENCY_FIELDS.has(key);
+        });
+      if (readsPersistedSensitiveValues) required.push('sensitive:read');
+    } else if (toolName === 'trackly_save_application_answers' && input.confirmProfile === true) {
+      required.push('sensitive:read');
     }
     if (toolName === 'trackly_get_apply_work') {
       const snapshot = input.snapshot;
       if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
         const profileKeys = (snapshot as Record<string, unknown>).profileKeys;
-        const requestsSensitiveRead = Array.isArray(profileKeys) && profileKeys.some((key) => (
+        const officeProjections = (snapshot as Record<string, unknown>).officeProjections;
+        const officeProfileKeys = Array.isArray(officeProjections) ? officeProjections.flatMap((candidate) => (
+          candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+            && Array.isArray((candidate as Record<string, unknown>).profileKeys)
+            ? (candidate as Record<string, unknown>).profileKeys as unknown[]
+            : []
+        )) : [];
+        const requestsSensitiveRead = [...(Array.isArray(profileKeys) ? profileKeys : []), ...officeProfileKeys]
+          .some((key) => (
           typeof key === 'string'
           && APPLICATION_FIELD_BY_KEY.get(key)?.sensitivity !== 'standard'
-        ));
+          ));
         if (requestsSensitiveRead) required.push('sensitive:read');
       }
     }
@@ -6802,7 +6855,7 @@ assertWrappedHandlerStatementSequenceAst(
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
 for (const [name, digest] of Object.entries({
-  projectApplyWorkSnapshot: '1f1f0f80381c14e44157b4d491f100cf9f4ad182abbf87cab89032dcf327eca1',
+  projectApplyWorkSnapshot: 'af81b1dbea04eac9272230e759f7764d2993a863fea5adaf4f73102629599103',
   projectApplyWorkResponse: '9c0b03f3eeec7d5d7aef2d3fde45fe452471ae299806b338cad9a9592a9f5308',
   projectApplyWorkExecution: 'b4bf7d4fe1720870cb579a4c3dc7fbc88df0b1e0b2abcaece9a3b4ef86cb77ea',
   projectApplyWorkProgress: '5ec96731c10aa70a10ebde09d1ba118c55e32e366a30b394cce1b9e0a57bd568',
@@ -6873,10 +6926,35 @@ assertBabelPropertyExpression(
   `z.object({
     executionId: z.number().int().min(1).optional(),
     snapshot: z.object({
-      memberIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET),
-      profileKeys: z.array(z.string().min(1).max(200)).max(100).optional(),
+      memberIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET)
+        .refine((values) => new Set(values).size === values.length, {
+          message: 'memberIds must be unique',
+        }),
+      profileKeys: z.array(z.string().min(1).max(200)).max(100)
+        .refine((values) => new Set(values).size === values.length, {
+          message: 'profileKeys must be unique',
+        }).optional(),
+      officeProjections: z.array(z.object({
+        memberId: z.number().int().min(1),
+        office: officeScopeSchema,
+        profileKeys: z.array(z.string().min(1).max(200)).min(1).max(100)
+          .refine((values) => new Set(values).size === values.length, {
+            message: 'office profileKeys must be unique',
+          }),
+      }).strict()).max(APPLY_EXECUTION_MAX_TARGET)
+        .refine((values) => new Set(values.map(({ memberId }) => memberId)).size === values.length, {
+          message: 'officeProjections must contain unique memberId values',
+        }).optional(),
       browserSurface: z.enum(APPLY_BROWSER_SURFACES),
-    }).strict().optional(),
+    }).strict().superRefine((snapshot, context) => {
+      const requestedMembers = new Set(snapshot.memberIds);
+      if (snapshot.officeProjections?.some(({ memberId }) => !requestedMembers.has(memberId))) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'officeProjections members must be present in memberIds',
+        });
+      }
+    }).optional(),
   }).strict().superRefine((value, context) => {
     if (value.snapshot && !value.executionId) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'executionId is required for a snapshot' });
@@ -6923,7 +7001,11 @@ assertWrappedHandlerAssignedRequestEndpoint(
 assertWrappedHandlerDirectStatementAst(
   getWorkRegistration,
   `return {
-    ...projectApplyWorkSnapshot(workSnapshot, snapshot.profileKeys ?? []),
+    ...projectApplyWorkSnapshot(
+      workSnapshot,
+      snapshot.profileKeys ?? [],
+      snapshot.officeProjections ?? [],
+    ),
     kind: 'snapshot' as const,
   };`,
   hostedPluginSourcePath,

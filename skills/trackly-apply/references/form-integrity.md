@@ -60,8 +60,11 @@ agent-written fingerprint.
 
 ## Contact-field integrity
 
-- Compare email and phone to the exact Trackly values after resume parsing and autofill.
-- Read both DOM input state and macOS accessibility state.
+- Resolve email, phone, name, and address from exact canonical keys in the current profile revision. Transcript or conversation text, screenshots, parser output, autocomplete, and cached values are never reusable authority.
+- Compare email and phone to the exact Trackly values after resume parsing and autofill. Reconcile parser-altered ordinary name casing to canonical first/last-name casing; never use that rule for a government-ID name.
+- Read both DOM input state and macOS accessibility state. A static HTML `value` attribute is not truth or proof of the live committed control state; require rendered live state, framework/native state, or accessibility state after events settle.
+- For a masked phone control, compare its normalized live digits and country code to the canonical phone rather than requiring identical formatting. Prove an implicit country code from live control metadata, a committed country selector, or framework/native state; ten visible digits alone do not prove it.
+- For address autocomplete, choose the exact offered option and prove that option committed through the control's semantic state; displayed typed text alone is insufficient.
 - Reject duplicate or concatenated values, autofill overlays, placeholder-only text, and values present only in a custom wrapper.
 - Recheck when navigation, resume parsing, or a correction banner rerenders the form.
 - Before review, inventory every email, phone, country-code, and required contact control. Pass `critical_contact_integrity` only when all present canonical values are exact and no required contact field was omitted. A form with no contact control passes only after the whole-form inventory confirms none exists or is required.

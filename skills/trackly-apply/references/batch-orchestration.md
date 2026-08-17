@@ -116,6 +116,16 @@ With protocol 3.5 or newer and the compact-snapshot capability enabled, prefer `
 
 Every compact snapshot request must contain a non-empty list of current member IDs. Never use an empty member projection as shorthand for all members.
 
+For an office-scoped question visible on one member, add an `officeProjections`
+entry containing only that member ID, its canonical `companyId:office-identity`,
+and the exact office-only keys needed by the form. Read the answer only from the
+matching `memberOfficeProfiles` entry. Never copy it into the shared profile
+projection or reuse it for a sibling member, another office, or another
+employer. Recovery does not weaken this binding: Trackly must prove the
+candidate's frozen company identity through its source lineage. A legacy
+candidate without that immutable identity stays unknown and must be confirmed
+from the visible form/user rather than inferred from current job metadata.
+
 The execution freezes one original recent-first queue snapshot and ordering
 version. Newly saved jobs wait for the next execution. Every continuation is a
 new immutable child batch linked in wave order; never append, replace, reorder,
@@ -299,6 +309,22 @@ inspection epoch; earlier-epoch review, attachment, certification, or close
 evidence cannot satisfy the current gate.
 
 ## First pass
+
+Accessible-first is a hard scheduler invariant. While any accessible candidate remains, a known authentication-gated, account-creation, OTP, or pre-form
+CAPTCHA candidate must not be opened. When access is unknown, perform only a
+minimal non-mutating probe. If a gate appears, never start a draft or enter
+private data: record the typed disposition, park it, and continue accessible
+work. The backend disposition must release its reservation or capacity and
+increment the authoritative `authParked` funnel count before replacement
+scheduling. If that durable transition conflicts, preserve the surface and
+surface the conflict; never invent released capacity locally.
+
+An authoritative already-parked member is not first-pass browser work and
+needs no duplicate disposition. A server access hint is not authoritative: if
+accessible candidates remain, defer that hinted member; after accessible work
+is exhausted, perform the minimal live probe required by the public
+disposition contract. “Process every frozen member” below means every currently
+actionable, non-parked member subject to this deferral rule.
 
 Process every frozen member even when another needs user input:
 

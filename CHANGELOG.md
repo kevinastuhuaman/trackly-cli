@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-17
+
+### Added
+
+- Updated Trackly Apply skill 4.6.0 with a mandatory deterministic answer
+  resolver that classifies exact profile answers, safe derivations, supported
+  drafts, missing facts, live consent, and forbidden inference before asking
+  the user or mutating a form.
+- Added status-aware employment, ordinary-name versus government-ID,
+  experience-range, strict input-type, consent, and supported-writing rules.
+- Added MCP contract 3.7.3 office-scoped profile context and member-bound
+  snapshot projections so commute answers remain isolated between different
+  offices, employers, members, and recovery lineages.
+
+### Changed
+
+- Accessible-first scheduling is now a hard invariant: known authentication,
+  account-creation, OTP, and pre-form-CAPTCHA work is parked without starting a
+  draft while accessible candidates remain.
+- Contact and autocomplete verification now requires live committed control
+  state and handles masked phone formatting without trusting static attributes.
+
 ## [0.14.2] - 2026-08-16
 
 ### Fixed

@@ -67,7 +67,7 @@ function registerRuntimeTools(apiResponse = { ok: true }) {
 }
 
 test('protocol 3.6 publishes all accessible execution and recovery tools', () => {
-  assert.equal(contract.contractVersion, '3.7.1');
+  assert.equal(contract.contractVersion, '3.7.3');
   for (const name of executionTools) {
     assert.ok(contract.tools[name], `${name} missing from contract fixture`);
     assert.match(tools, new RegExp(`['"]${name}['"]`));
@@ -522,7 +522,7 @@ test('local tab keep-set tool canonicalizes IDs without making a Trackly API cal
   assert.deepEqual(calls, []);
 });
 
-test('profile jurisdiction tools validate ISO codes and forward the accepted spelling', async () => {
+test('profile jurisdiction and office tools validate and forward exact context', async () => {
   const { registrations, calls } = registerRuntimeTools();
   const getProfile = registrations.get('trackly_get_application_profile');
   const updateProfile = registrations.get('trackly_update_application_profile');
@@ -575,6 +575,45 @@ test('profile jurisdiction tools validate ISO codes and forward the accepted spe
     }),
     /ISO 3166-1 alpha-2 country code/i,
   );
+
+  const officeInput = getProfile.schema.parse({
+    includeSensitive: true,
+    companyId: ' 42 ',
+    office: '42:waltham-ma',
+  });
+  await getProfile.handler(officeInput);
+  assert.deepEqual(calls.at(-1), [
+    'GET',
+    '/api/jobscout/application-profile?includeSensitive=true&companyId=42&office=42%3Awaltham-ma',
+    null,
+    false,
+    false,
+    'trackly-mcp/test',
+  ]);
+  const officeCallCount = calls.length;
+  await assert.rejects(
+    getProfile.handler(getProfile.schema.parse({ office: '42:waltham-ma' })),
+    /Office scope must match the requested companyId/,
+  );
+  await assert.rejects(
+    getProfile.handler(getProfile.schema.parse({ companyId: '43', office: '42:waltham-ma' })),
+    /Office scope must match the requested companyId/,
+  );
+  assert.equal(calls.length, officeCallCount);
+  assert.doesNotThrow(() => updateProfile.schema.parse({
+    expectedRevision: 10,
+    changes: [{
+      key: 'location.commute_willing',
+      state: 'answered',
+      value: true,
+      scope: 'office',
+      scopeValue: '42:waltham-ma',
+    }],
+  }));
+  assert.throws(
+    () => getProfile.schema.parse({ office: 'waltham-ma' }),
+    /invalid_string|Invalid string/i,
+  );
 });
 
 test('execution tools validate and send the exact HTTP contract', async () => {
@@ -598,10 +637,20 @@ test('execution tools validate and send the exact HTTP contract', async () => {
       executionId: 41,
       memberIds: [2, 3],
       profileKeys: ['writing.em_dash_policy'],
+      officeProjections: [{
+        memberId: 2,
+        office: '42:waltham-ma',
+        profileKeys: ['location.commute_willing', 'location.commute_days_per_week'],
+      }],
       browserSurface: 'codex_in_app',
     }, ['POST', '/api/jobscout/apply/executions/41/snapshot', {
       memberIds: [2, 3],
       profileKeys: ['writing.em_dash_policy'],
+      officeProjections: [{
+        memberId: 2,
+        office: '42:waltham-ma',
+        profileKeys: ['location.commute_willing', 'location.commute_days_per_week'],
+      }],
       browserSurface: 'codex_in_app',
     }, false, false, 'trackly-mcp/test', undefined]],
     ['trackly_resume_parked_apply_member', {
@@ -781,6 +830,47 @@ test('execution tools validate and send the exact HTTP contract', async () => {
     expiresAt: '2026-08-02T23:00:00.000Z',
     idempotencyKey,
   }));
+});
+
+test('execution snapshot rejects backend-invalid projection identities and duplicate keys locally', async () => {
+  const { registrations, calls } = registerRuntimeTools();
+  const tool = registrations.get('trackly_get_apply_execution_snapshot');
+  const base = {
+    executionId: 41,
+    memberIds: [2, 3],
+    browserSurface: 'codex_in_app',
+  };
+
+  assert.throws(() => tool.schema.parse({ ...base, memberIds: [2, 2] }), /memberIds must be unique/i);
+  assert.throws(() => tool.schema.parse({ ...base, profileKeys: ['writing.em_dash_policy', 'writing.em_dash_policy'] }), /profileKeys must be unique/i);
+  assert.throws(() => tool.schema.parse({
+    ...base,
+    officeProjections: [{
+      memberId: 2,
+      office: '42:waltham-ma',
+      profileKeys: ['location.commute_willing', 'location.commute_willing'],
+    }],
+  }), /office profileKeys must be unique/i);
+  assert.throws(() => tool.schema.parse({
+    ...base,
+    officeProjections: [
+      { memberId: 2, office: '42:waltham-ma', profileKeys: ['location.commute_willing'] },
+      { memberId: 2, office: '42:new-york-ny', profileKeys: ['location.commute_willing'] },
+    ],
+  }), /officeProjections must contain unique memberId values/i);
+
+  await assert.rejects(
+    tool.handler(tool.schema.parse({
+      ...base,
+      officeProjections: [{
+        memberId: 4,
+        office: '42:waltham-ma',
+        profileKeys: ['location.commute_willing'],
+      }],
+    })),
+    /must exist in memberIds/i,
+  );
+  assert.deepEqual(calls, []);
 });
 
 test('explicit start-fresh confirmation cancels a legacy fixed batch without waiting for expiry', async () => {
@@ -972,10 +1062,10 @@ test('advance replay returns the backend current revision and progress unchanged
   assert.deepEqual(result, response);
 });
 
-test('skill 4.5.0 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
-  assert.match(agent, /const SKILL_VERSION = '4\.5\.0'/);
+test('skill 4.6.0 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
+  assert.match(agent, /const SKILL_VERSION = '4\.6\.0'/);
   assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.6\.0'/);
-  assert.match(skill, /Skill 4\.5\.0 requires protocol 3\.6\.0 or newer/);
+  assert.match(skill, /Skill 4\.6\.0 requires protocol 3\.6\.0 or newer/);
   assert.match(skill, /trackly_get_active_apply_execution[\s\S]*before[\s\S]*trackly_get_active_apply_batch/i);
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);
