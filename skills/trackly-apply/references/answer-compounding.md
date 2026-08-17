@@ -8,14 +8,20 @@ questions and piecemeal profile writes.
 
 1. Collect all newly supplied answers from the current question packet.
 2. Fetch the current profile schema and the smallest relevant profile
-   projection once. Include `provider`, `company`, and `jurisdiction` when that
-   context is known and required. Corporate-family reuse is unavailable until
+   projection once. Include `provider`, `company`, `jurisdiction`, and `office`
+   when that context is known and required. An office scope value is the exact
+   backend company ID plus a stable office identity, for example
+   `42:waltham-ma`; never derive it from a display name alone. Corporate-family reuse is unavailable until
    Trackly has an authoritative company-family registry; never derive a family
    identity from names, logos, page text, parent-company knowledge, or search.
 3. Map each answer to an exposed canonical key and permitted scope. Never call
    a field missing merely because it was absent from the compact execution
    snapshot; contextual fields require a targeted profile fetch.
-4. Classify every answer as exactly one of:
+4. Validate the expected input type before mapping or writing. “Whole number”
+   requires a number, and “Yes or No” requires a boolean. A mismatch remains
+   unresolved and returns to the grouped packet; never coerce a boolean into
+   years, a proficiency label into a language level, or vice versa.
+5. Classify every answer as exactly one of:
    - `saved`: a canonical field exists and this run changed it;
    - `already_matched`: the canonical field already contains the same state and
      value at the resolved scope;
@@ -23,8 +29,12 @@ questions and piecemeal profile writes.
      live schema audit;
    - `run_only_contextual`: the answer is intentionally per-run, such as the
      final truthfulness certification, and must not enter the reusable profile.
-5. Ask scope only when the user's wording and the schema do not determine it.
+6. Ask scope only when the user's wording and the schema do not determine it.
    “Always” means global only for fields whose schema permits global scope.
+
+Compound a reusable gap only when a visible form requires it. Defer optional
+profile gaps that no current visible application needs; do not turn the full
+schema into an onboarding questionnaire.
 
 ## One write and one verification
 
@@ -65,6 +75,10 @@ claim that Trackly learned it.
 
 - Country-specific work authorization:
   `authorization.legally_authorized_by_country` at `jurisdiction` scope.
+- Employer-office commute willingness and cadence:
+  `location.commute_willing`, `location.commute_days_per_week`, and
+  `location.commute_commitment` at exact `office` scope. Never reuse an answer
+  for another office of the same company.
 - Prior interview with the employer:
   `employment.previously_interviewed_at_employer` at `company` scope.
 - Employment, contracting, consulting, temporary work, or similar engagement
@@ -83,6 +97,18 @@ claim that Trackly learned it.
   the backend can prove a match. A write receipt or refetch verifies only the
   company scope and `questionFingerprint`; a redacted, unknown, or absent
   reusable value is expected and must not block truth certification or review.
+- Named applicant privacy-notice routing:
+  `consent.named_applicant_privacy_notice_acknowledgement_policy` is a global
+  routing policy, not consent to unseen text. `acknowledge_named_notice_only`
+  permits only a visible, unbundled named applicant notice; `ask` remains a
+  live question. Marketing, retention, arbitration, background-check,
+  recording, AI, and data-sharing choices stay separate.
+- Interview recording or transcription consent and workplace-policy
+  acknowledgement: use `consent.interview_recording` and
+  `consent.workplace_policy_acknowledgement` only at exact company scope with
+  the current policy question or version as `questionLabel`. Both are
+  `run_only_contextual`: retain the fingerprint for audit, ask again, and never
+  require a reusable returned value during the verification refetch.
 - Consumer hardware, IoT, or retail experience level and supporting summary:
   the two global `employment.consumer_hardware_iot_retail_experience_*` fields.
 - Residential city and EEO sexual orientation remain their existing canonical

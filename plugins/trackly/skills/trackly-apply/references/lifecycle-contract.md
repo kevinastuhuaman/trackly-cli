@@ -10,9 +10,19 @@ Each readiness section is independently usable only when its matching `availabil
 
 Ask the user only for the returned missing facts. Save a fact with `trackly_save_application_answers` only after the user confirms its value and scope, then refetch readiness. A standard-only save requires profile write permission; a request containing any sensitive key additionally requires sensitive write permission. Never turn a label, model guess, employer-page value, or one-time truthfulness attestation into a reusable profile answer.
 
-After bound work reveals which canonical facts its forms need, intersect those keys with `profile.availableFields`. Request only that minimal intersection through the snapshot `profileKeys` field on `trackly_get_apply_work`. The facade strictly projects the result to those requested keys, reduces resume data to availability booleans, and returns each member's bounded frozen requisition identity plus server-verified origin and ATS-tenant policy in `navigation`. A request containing any sensitive key additionally requires sensitive read permission. Never request all available fields, and never infer a saved answer from its key or label.
+After bound work reveals which canonical facts its forms need, intersect those keys with `profile.availableFields`. Request only that minimal intersection through the snapshot `profileKeys` field on `trackly_get_apply_work`. Put office-only keys in `officeProjections` for the exact member and canonical `companyId:office-identity`, and accept them only from the matching `memberOfficeProfiles` result. Never place an office value in the shared profile projection or reuse it for another member, employer, or office. Recovery must prove the frozen company identity; legacy members without that proof remain unknown. The facade strictly projects the result to those requested keys, reduces resume data to availability booleans, and returns each member's bounded frozen requisition identity plus server-verified origin and ATS-tenant policy in `navigation`. A request containing any sensitive key additionally requires sensitive read permission. Never request all available fields, and never infer a saved answer from its key or label.
 
 ## Establish bound work
+
+Accessible-first is a hard scheduling invariant inside a bound wave. Do not
+open known authentication, account-creation, OTP, or pre-form-CAPTCHA work
+while an accessible member remains. Unknown access permits only a minimal
+non-mutating probe. Park a detected gate through the authoritative progress
+operation without starting a draft or entering private data, then refetch the
+server funnel; never invent released capacity or a replacement locally.
+An authoritative already-parked member needs no duplicate probe. Defer a
+non-authoritative access hint until accessible work is exhausted, then perform
+only the live minimal probe required by the progress contract.
 
 Call `trackly_start_or_resume_apply` with `target`, a fresh `idempotencyKey`, and the active `browserSurface`. On a successful response with `targetMismatch=false`, the backend has started or resumed the execution and prepared and claimed its current wave. Use only the returned `executionId`, `revision`, `batchId`, `memberIds`, and `nextAction`.
 

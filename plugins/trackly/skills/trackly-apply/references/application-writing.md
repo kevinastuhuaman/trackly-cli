@@ -2,6 +2,11 @@
 
 Draft application text only from facts supported by the user's confirmed profile, resume artifact, or the current job record.
 
+When policy permits a strategically useful optional prompt and all facts are
+supported, do not leave it blank. Draft it, expose unsupported gaps instead of
+inventing facts, check the user's voice and length rules, commit it, and reread
+the live control before truth review.
+
 Before entering a draft:
 
 1. Identify every factual claim in the draft.

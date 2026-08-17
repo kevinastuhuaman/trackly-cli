@@ -40,4 +40,11 @@ Before entering the response:
 
 When `writing.optional_question_policy` permits it, answer a strategically useful optional motivation, experience, product, or role-overlap question when every fact is supported. Optional does not mean skip. Leave demographic, consent, legal, compensation, and employer-relationship questions unanswered when their canonical value is unknown. Group those unknowns into the consolidated question packet.
 
+A supported strategically useful optional prompt must not be left blank. Draft
+it from canonical evidence claims, expose any explicit gaps instead of
+inventing bridge facts, match the user's voice, pass deterministic lint, enter
+the committed text, and reread it from the live control. Ask only when a new
+fact or subjective choice is actually required; the final truth review remains
+the user's approval boundary.
+
 Before entering any answer, supply value-free claim fingerprints and evidence-reference codes to the local linter. It returns only a draft hash, length, policy, and violation codes. It never echoes or sends the draft to Trackly.
