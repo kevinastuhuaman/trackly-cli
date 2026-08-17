@@ -578,7 +578,7 @@ test('profile jurisdiction and office tools validate and forward exact context',
 
   const officeInput = getProfile.schema.parse({
     includeSensitive: true,
-    companyId: '42',
+    companyId: ' 42 ',
     office: '42:waltham-ma',
   });
   await getProfile.handler(officeInput);
@@ -590,6 +590,16 @@ test('profile jurisdiction and office tools validate and forward exact context',
     false,
     'trackly-mcp/test',
   ]);
+  const officeCallCount = calls.length;
+  await assert.rejects(
+    getProfile.handler(getProfile.schema.parse({ office: '42:waltham-ma' })),
+    /Office scope must match the requested companyId/,
+  );
+  await assert.rejects(
+    getProfile.handler(getProfile.schema.parse({ companyId: '43', office: '42:waltham-ma' })),
+    /Office scope must match the requested companyId/,
+  );
+  assert.equal(calls.length, officeCallCount);
   assert.doesNotThrow(() => updateProfile.schema.parse({
     expectedRevision: 10,
     changes: [{

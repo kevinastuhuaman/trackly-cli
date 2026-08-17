@@ -315,10 +315,14 @@ function registerApplyTools(
       office: officeScopeSchema.optional(),
     },
     wrapTool(async ({ includeSensitive, provider, companyId, jurisdiction, office }) => {
+      const normalizedCompanyId = companyId?.trim();
+      if (office && (!normalizedCompanyId || !office.startsWith(`${normalizedCompanyId}:`))) {
+        throw new Error('Office scope must match the requested companyId');
+      }
       const qs = new URLSearchParams();
       if (includeSensitive) qs.set('includeSensitive', 'true');
       if (provider) qs.set('provider', provider);
-      if (companyId) qs.set('companyId', companyId);
+      if (normalizedCompanyId) qs.set('companyId', normalizedCompanyId);
       if (jurisdiction) qs.set('jurisdiction', jurisdiction);
       if (office) qs.set('office', office);
       return applyApiRequest('GET', `/api/jobscout/application-profile?${qs.toString()}`, null, false, false, MCP_USER_AGENT);

@@ -55,7 +55,7 @@ No, an exact “Not currently employed” option, or an intentionally blank opti
 text control according to the visible control semantics. Ask only when a
 required control offers no truthful non-employed representation. Answer
 prior-employer questions from
-`most_recent_company` and `most_recent_title`, and leave current-employer
+`employment.most_recent_company` and `employment.most_recent_title`, and leave current-employer
 questions unresolved unless the schema supplies an applicable authoritative
 answer. `student`, `other`, or unknown status fails closed when applicability
 is ambiguous.

@@ -44,8 +44,8 @@ test('answer resolver enforces source precedence and legal-name isolation', () =
   assert.match(resolver, /government[- ]ID.*only.*explicit/is);
   assert.match(resolver, /parser.*never.*authority/is);
   assert.match(resolver, /not_employed.*current.*non-authoritative/is);
-  assert.match(resolver, /most_recent_company/);
-  assert.match(resolver, /most_recent_title/);
+  assert.match(resolver, /`employment\.most_recent_company`/);
+  assert.match(resolver, /`employment\.most_recent_title`/);
 });
 
 test('answer resolver preserves consent boundaries and supported writing', () => {
