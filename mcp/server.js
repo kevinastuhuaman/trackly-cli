@@ -67,6 +67,12 @@ const MCP_MISSING_DESTINATION_VALUES = [
   'trackly', 'external_site', 'file', 'email', 'calendar', 'crm', 'browser', 'other',
 ];
 
+// `sponsorship` enum matches the backend's discovery-only filter (close-ai
+// PR #1578). Absent or 'all' applies no filter; only ~2% of active US jobs
+// carry an explicit "sponsors" statement and ~13% an explicit "does not
+// sponsor" one, so the remaining ~85% never state a policy either way.
+const SPONSORSHIP_VALUES = ['all', 'exclude_no', 'only_yes'];
+
 // `sort` enum matches backend handler at `jobscout.ts:3053` — NOT the pre-fix
 // `newest|oldest|company` (backend rejects oldest/company with HTTP 400).
 const SORT_VALUES = ['newest', 'match'];
@@ -254,6 +260,9 @@ function createServer() {
         'Filter by YOUR application pipeline state. Not a generic job-posting status. Values: ' + STATUS_VALUES.join(', ')
       ),
       sort: z.enum(SORT_VALUES).optional().describe('Sort order: newest (default) or match (highest match score first; requires resume). Backend rejects legacy oldest/company with HTTP 400.'),
+      sponsorship: z.enum(SPONSORSHIP_VALUES).optional().describe(
+        "Visa sponsorship filter. 'exclude_no' hides jobs with a reliable explicit \"does not sponsor\" statement (~13% of active US jobs); 'only_yes' keeps only jobs with a reliable explicit \"sponsors\" statement (~2% — most postings never state a policy either way). Default 'all' shows every job."
+      ),
       limit: z.number().max(50).optional().describe('Max results (default 20, max 50)'),
       offset: z.number().min(0).optional().describe('Pagination offset'),
       keywords: z.string().max(500).optional().describe('Keyword search in title, company, or description'),
@@ -281,6 +290,7 @@ function createServer() {
       if (params.remote === true) qs.set('usStates', 'REMOTE');
       if (params.status !== undefined) qs.set('status', params.status);
       if (params.sort !== undefined) qs.set('sort', params.sort);
+      if (params.sponsorship !== undefined) qs.set('sponsorship', String(params.sponsorship));
       if (params.limit !== undefined) qs.set('limit', String(params.limit));
       if (params.offset !== undefined) qs.set('offset', String(params.offset));
       if (params.keywords !== undefined) qs.set('search', params.keywords);

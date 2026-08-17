@@ -39,6 +39,7 @@ const VALUE_FLAGS = new Set([
   'region',
   'search',
   'sort',
+  'sponsorship',
   'status',
   'url',
   'window-days',
@@ -62,7 +63,7 @@ const COMMAND_FLAGS = {
   login: [],
   logout: [],
   whoami: [],
-  jobs: ['function', 'company', 'region', 'job-type', 'work-arrangement', 'remote', 'status', 'sort', 'limit', 'offset', 'keywords', 'location', 'modality'],
+  jobs: ['function', 'company', 'region', 'job-type', 'work-arrangement', 'remote', 'status', 'sort', 'sponsorship', 'limit', 'offset', 'keywords', 'location', 'modality'],
   job: [],
   companies: ['limit', 'offset'],
   search: [],
@@ -94,6 +95,15 @@ const STATUS_LABELS = {
   dismissed: 'dismissed',
 };
 const WORK_ARRANGEMENT_VALUES = ['remote', 'hybrid', 'in_person', 'unspecified'];
+// Discovery-only visa sponsorship filter (close-ai PR #1578). Mirrors the
+// hosted MCP enum exactly. Absent or 'all' applies no filter.
+const SPONSORSHIP_VALUES = ['all', 'exclude_no', 'only_yes'];
+// Job-detail `sponsorshipStatus` values → user-facing copy. Anything else
+// (including null/'unknown') reads "Not mentioned" — never "unknown".
+const SPONSORSHIP_STATUS_LABELS = {
+  yes: 'Sponsors visa',
+  no: 'No sponsorship',
+};
 const JOB_FUNCTIONS = [
   'product', 'engineering', 'design', 'data', 'marketing', 'sales', 'partnerships',
   'finance', 'strategy', 'operations', 'people', 'legal', 'support', 'other',
@@ -324,7 +334,7 @@ function hasJobListFilters(args) {
   // (which then raises the migration error) instead of cmdJob(42) silently ignoring
   // the filter. See PR #13 Cursor Bugbot finding.
   const deprecated = Object.keys(DEPRECATED_JOB_FLAGS);
-  const active = ['function', 'company', 'keywords', 'limit', 'region', 'job-type', 'work-arrangement', 'remote', 'offset', 'sort', 'status'];
+  const active = ['function', 'company', 'keywords', 'limit', 'region', 'job-type', 'work-arrangement', 'remote', 'offset', 'sort', 'sponsorship', 'status'];
   return [...active, ...deprecated].some((key) => args[key] !== undefined);
 }
 
@@ -598,6 +608,17 @@ async function cmdJobs(args) {
     }
   }
 
+  let sponsorship;
+  if (args.sponsorship !== undefined) {
+    if (typeof args.sponsorship !== 'string' || !args.sponsorship.trim()) {
+      failNow(`--sponsorship requires a value. Use: ${SPONSORSHIP_VALUES.join(', ')}.`);
+    }
+    sponsorship = args.sponsorship.trim();
+    if (!SPONSORSHIP_VALUES.includes(sponsorship)) {
+      failNow(`Invalid --sponsorship value "${sponsorship}". Use: ${SPONSORSHIP_VALUES.join(', ')}.`);
+    }
+  }
+
   const params = new URLSearchParams();
   if (args.function) params.set('jobFunction', args.function);
   if (args.company) params.set('companyId', args.company);
@@ -607,6 +628,7 @@ async function cmdJobs(args) {
   if (args.remote) params.set('usStates', 'REMOTE');
   if (args.status) params.set('status', args.status);
   if (args.sort) params.set('sort', args.sort);
+  if (sponsorship) params.set('sponsorship', sponsorship);
   if (args.limit) params.set('limit', args.limit);
   if (args.offset) params.set('offset', args.offset);
   if (args.keywords) params.set('search', args.keywords);
@@ -638,6 +660,9 @@ async function cmdJob(args) {
     if (job.location) console.log(`Location: ${job.location}`);
     if (job.jobUrl) console.log(`URL: ${color('dim', job.jobUrl)}`);
     if (job.postedAt) console.log(`Posted: ${job.postedAt}`);
+    if (job.sponsorshipStatus) {
+      console.log(`Sponsorship: ${SPONSORSHIP_STATUS_LABELS[job.sponsorshipStatus] || 'Not mentioned'}`);
+    }
     if (typeof job.description === 'string' && job.description.length > 0) {
       console.log();
       console.log(color('bold', 'Description:'));
@@ -1277,7 +1302,7 @@ ${color('bold', 'Commands:')}
   ${color('cyan', 'login')}                Authenticate via Google OAuth
   ${color('cyan', 'logout')}               Clear credentials
   ${color('cyan', 'whoami')}               Show current user
-  ${color('cyan', 'jobs')}                 List jobs (--function, --company <id>, --region <tag>, --job-type <type>, --work-arrangement <values>, --remote, --status, --sort, --limit, --offset, --keywords)
+  ${color('cyan', 'jobs')}                 List jobs (--function, --company <id>, --region <tag>, --job-type <type>, --work-arrangement <values>, --remote, --status, --sort, --sponsorship, --limit, --offset, --keywords)
   ${color('cyan', 'job <id>')}             Get full job detail
   ${color('cyan', 'jobs <id>')}            Alias for job <id>
   ${color('cyan', 'companies')}            List companies
@@ -1333,6 +1358,10 @@ ${color('bold', 'Filter values:')}
   --status         new, applied_confirmed, check_later, not_interested, all
                    (filters by YOUR application pipeline state)
   --sort           newest (default), match (highest match score first, requires resume)
+  --sponsorship    all (default), exclude_no, only_yes
+                   exclude_no hides jobs that explicitly state they do not sponsor
+                   (~13% of active US jobs); only_yes keeps only jobs that explicitly
+                   state they sponsor (~2%). Most postings never state a policy.
 
 ${color('bold', 'MCP Setup:')}
   Claude Code: claude mcp add --scope user trackly -- trackly mcp
