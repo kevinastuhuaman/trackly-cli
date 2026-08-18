@@ -83,6 +83,7 @@ API-key creation attempts.
   - `remote` (boolean): filter to remote jobs only. Maps to `usStates=REMOTE`.
   - `status`: your application pipeline state. Values: `new`, `applied_confirmed`, `check_later`, `not_interested`, `all`.
   - `sort`: `newest` (default) or `match` (highest match score first; requires a resume on file). Backend rejects the deprecated values `oldest` and `company` with HTTP 400.
+  - `sponsorship`: `all` (default), `exclude_no`, `only_yes`. `exclude_no` hides jobs with a reliable explicit "does not sponsor" statement (~13% of active US jobs); `only_yes` keeps only jobs with a reliable explicit "sponsors" statement (~2%). Most postings never state a policy either way, so `only_yes` is a very narrow slice.
   - `keywords`, `companyId`, `limit`, `offset`.
 - **trackly_get_job** — Get full job details by ID
 - **trackly_search_companies** — Semantic company search

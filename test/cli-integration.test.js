@@ -120,6 +120,43 @@ test('deprecated --location is rejected with a migration hint (regression guard)
   assert.equal(requests.length, 0);
 });
 
+// Job detail must distinguish "the backend answered null/unknown" (a real
+// "Not mentioned" verdict) from "this backend predates the field" (key absent).
+const jobDetail = (extra) => ({ status: 200, json: { job: { id: 7, title: 'PM', companyName: 'Acme', ...extra } } });
+
+test('job detail renders a returned null sponsorship status as Not mentioned', async (t) => {
+  const { result } = await runAgainstMock(t, ['job', '7'], () => jobDetail({ sponsorshipStatus: null }), { NODE_OPTIONS: `--require=${path.join(__dirname, 'force-tty.js')}` });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Sponsorship: Not mentioned/);
+});
+
+test('job detail renders an unknown sponsorship status as Not mentioned', async (t) => {
+  const { result } = await runAgainstMock(t, ['job', '7'], () => jobDetail({ sponsorshipStatus: 'unknown' }), { NODE_OPTIONS: `--require=${path.join(__dirname, 'force-tty.js')}` });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Sponsorship: Not mentioned/);
+  assert.doesNotMatch(result.stdout, /unknown/i);
+});
+
+test('job detail renders the classified sponsorship labels', async (t) => {
+  for (const [status, label] of [['yes', 'Sponsors visa'], ['no', 'No sponsorship']]) {
+    const { result } = await runAgainstMock(t, ['job', '7'], () => jobDetail({ sponsorshipStatus: status }), { NODE_OPTIONS: `--require=${path.join(__dirname, 'force-tty.js')}` });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`Sponsorship: ${label}`));
+  }
+});
+
+test('job detail omits the sponsorship line when the backend never returns the field', async (t) => {
+  const { result } = await runAgainstMock(t, ['job', '7'], () => jobDetail({}), { NODE_OPTIONS: `--require=${path.join(__dirname, 'force-tty.js')}` });
+  assert.equal(result.code, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /Sponsorship:/);
+});
+
+test('job --json passes a null sponsorship status through untouched', async (t) => {
+  const { result } = await runAgainstMock(t, ['job', '7', '--json'], () => jobDetail({ sponsorshipStatus: null }));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).job.sponsorshipStatus, null);
+});
+
 test('apply/save/dismiss POST the correct tracker stage', async (t) => {
   for (const [action, stage] of [['apply', 'applied'], ['save', 'backlog'], ['dismiss', 'discarded']]) {
     const { requests, result } = await runAgainstMock(t, [action, '1234'], () => ({ status: 200, json: { ok: true } }));

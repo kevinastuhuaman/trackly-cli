@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `trackly_search_jobs` now accepts `sponsorship` (`all`, `exclude_no`,
+  `only_yes`), mirroring the hosted MCP parameter exactly so hosted and npm
+  clients stay in contract parity.
+- `trackly jobs --sponsorship <value>` exposes the same discovery-only visa
+  sponsorship filter from the CLI, validating the three accepted values.
+- `trackly job <id>` prints a `Sponsorship:` line when the backend returns a
+  sponsorship status: "Sponsors visa", "No sponsorship", or "Not mentioned"
+  when no reliable explicit statement exists.
+
 ## [0.15.0] - 2026-08-17
 
 ### Added

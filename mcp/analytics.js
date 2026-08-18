@@ -111,11 +111,11 @@ const SAFE_ENUM_VALUES = new Set([
   'unspecified', 'us', 'non_us', 'europe', 'latam', 'middle_east', 'asia', 'africa',
   'canada', 'oceania', 'unknown', 'product', 'engineering', 'design', 'data',
   'marketing', 'sales', 'partnerships', 'finance', 'strategy', 'operations', 'people',
-  'legal', 'support', 'other', 'newest', 'match',
+  'legal', 'support', 'other', 'newest', 'match', 'exclude_no', 'only_yes',
 ]);
 const SAFE_ENUM_KEYS = new Set([
   'status', 'stage', 'function', 'jobfunction', 'jobmodality', 'workarrangement',
-  'region', 'regiontag', 'locationfilter', 'sort',
+  'region', 'regiontag', 'locationfilter', 'sort', 'sponsorship',
 ]);
 const SDK_FAILURE_WARNING = /Warning: (?:Failed to instrument server|Failed to setup tool call instrumentation|No PostHog client passed)/i;
 
@@ -474,7 +474,7 @@ function projectMcpParameters(toolName, parameters) {
   const allowed = {
     trackly_search_jobs: new Set([
       'function', 'companyId', 'locationFilter', 'jobModality', 'workArrangements',
-      'remote', 'status', 'sort', 'limit', 'offset', 'keywords',
+      'remote', 'status', 'sort', 'sponsorship', 'limit', 'offset', 'keywords',
     ]),
     trackly_get_job: new Set(['id']),
     trackly_search_companies: new Set(['query', 'limit']),
