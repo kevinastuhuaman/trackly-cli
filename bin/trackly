@@ -660,7 +660,10 @@ async function cmdJob(args) {
     if (job.location) console.log(`Location: ${job.location}`);
     if (job.jobUrl) console.log(`URL: ${color('dim', job.jobUrl)}`);
     if (job.postedAt) console.log(`Posted: ${job.postedAt}`);
-    if (job.sponsorshipStatus) {
+    // Field presence, not truthiness: a returned null/'unknown' status is a real
+    // "Not mentioned" answer from the backend. Only an older backend that omits
+    // the key entirely should render no Sponsorship line at all.
+    if (job && typeof job === 'object' && 'sponsorshipStatus' in job) {
       console.log(`Sponsorship: ${SPONSORSHIP_STATUS_LABELS[job.sponsorshipStatus] || 'Not mentioned'}`);
     }
     if (typeof job.description === 'string' && job.description.length > 0) {
