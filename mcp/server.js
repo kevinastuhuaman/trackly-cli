@@ -261,7 +261,7 @@ function createServer() {
       ),
       sort: z.enum(SORT_VALUES).optional().describe('Sort order: newest (default) or match (highest match score first; requires resume). Backend rejects legacy oldest/company with HTTP 400.'),
       sponsorship: z.enum(SPONSORSHIP_VALUES).optional().describe(
-        "Visa sponsorship filter. 'exclude_no' hides jobs with a reliable explicit \"does not sponsor\" statement (~13% of active US jobs); 'only_yes' keeps only jobs with a reliable explicit \"sponsors\" statement (~2% — most postings never state a policy either way). Default 'all' shows every job."
+        "Visa sponsorship filter. 'exclude_no' hides jobs with a reliable explicit \"does not sponsor\" statement (~13% of active US jobs); 'only_yes' keeps only jobs with a reliable explicit \"sponsors\" statement (~2% — most postings never state a policy either way). Default 'all' shows every job. Applies only to the discovery view: when you pass a filtering mode without `status`, status defaults to 'new' (the backend ignores the filter on tracked/pipeline views)."
       ),
       limit: z.number().max(50).optional().describe('Max results (default 20, max 50)'),
       offset: z.number().min(0).optional().describe('Pagination offset'),
@@ -290,7 +290,16 @@ function createServer() {
       if (params.remote === true) qs.set('usStates', 'REMOTE');
       if (params.status !== undefined) qs.set('status', params.status);
       if (params.sort !== undefined) qs.set('sort', params.sort);
-      if (params.sponsorship !== undefined) qs.set('sponsorship', String(params.sponsorship));
+      if (params.sponsorship !== undefined) {
+        qs.set('sponsorship', String(params.sponsorship));
+        // The backend applies the filter only on the literal status=new
+        // discovery view; without this default an agent passing a filtering
+        // mode alone would get silently unfiltered results. Mirrors
+        // close-ai src/mcp/server.ts.
+        if (params.sponsorship !== 'all' && params.status === undefined) {
+          qs.set('status', 'new');
+        }
+      }
       if (params.limit !== undefined) qs.set('limit', String(params.limit));
       if (params.offset !== undefined) qs.set('offset', String(params.offset));
       if (params.keywords !== undefined) qs.set('search', params.keywords);
