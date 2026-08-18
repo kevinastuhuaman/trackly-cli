@@ -3524,7 +3524,7 @@ test('plugin manifest is complete, lowercase, and uses the official trackly bran
   }
 });
 
-test('remote MCP uses the dedicated public facade and exact OAuth resource', () => {
+test('remote MCP uses the dedicated public facade without a redundant OAuth resource', () => {
   const config = json('plugins/trackly/.mcp.json');
   const metadata = json('plugins/trackly/listing/metadata.json');
   assert.deepEqual(Object.keys(config.mcpServers), ['trackly']);
@@ -3532,7 +3532,7 @@ test('remote MCP uses the dedicated public facade and exact OAuth resource', () 
   const expected = metadata.productionMcpURL;
   assert.equal(server.type, 'http');
   assert.equal(server.url, expected);
-  assert.equal(server.oauth_resource, expected);
+  assert.equal(Object.hasOwn(server, 'oauth_resource'), false);
   assert.notEqual(server.url, 'https://mcp.usetrackly.app/api/mcp');
   for (const yamlPath of [
     'plugins/trackly/skills/trackly/agents/openai.yaml',

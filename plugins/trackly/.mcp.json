@@ -2,8 +2,7 @@
   "mcpServers": {
     "trackly": {
       "type": "http",
-      "url": "https://mcp.usetrackly.app/api/plugin/trackly/mcp",
-      "oauth_resource": "https://mcp.usetrackly.app/api/plugin/trackly/mcp"
+      "url": "https://mcp.usetrackly.app/api/plugin/trackly/mcp"
     }
   }
 }

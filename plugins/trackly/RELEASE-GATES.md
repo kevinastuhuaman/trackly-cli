@@ -7,7 +7,7 @@ The package may be tested locally before these gates are complete. It must not b
 - Verify the submitting OpenAI Platform organization as an individual or business and confirm the submitting account has Apps Management Write access.
 - Create a new **With MCP** draft at `https://platform.openai.com/plugins`. Submit the production MCP from scratch through the portal even if it was previously connected in ChatGPT or Codex.
 - Configure the Universal MCP URL as `https://mcp.usetrackly.app/api/plugin/trackly/mcp` and complete any portal-issued domain verification challenge at the exact required `/.well-known/openai-apps-challenge` path.
-- Do not invent, pre-allocate, or package a ChatGPT developer-mode app ID. `.app.json` and an `apps` manifest binding remain absent; `.mcp.json` remains the Codex remote MCP connection.
+- Do not invent, pre-allocate, or package a ChatGPT developer-mode app ID. `.app.json` and an `apps` manifest binding remain absent; `.mcp.json` remains the Codex remote MCP connection and must not include `oauth_resource`. The client discovers the resource through MCP protected-resource metadata. Repeating the production URL as `oauth_resource` duplicates the RFC 8707 `resource` parameter in affected Codex versions. Do not withdraw, modify, or resubmit the active marketplace review for this omission; backend hardening covers the currently reviewed package. Ship it on the next approved revision.
 - Complete the portal listing, authentication and reviewer-access details, skill bundle, starter prompts, regional availability, release notes, policy attestations, and scanned tool metadata without selecting **Submit for Review**.
 - Re-run plugin validation and the repository test suite after any portal-driven package or MCP change.
 
