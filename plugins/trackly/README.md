@@ -28,6 +28,11 @@ The plugin may fill an approved application and prepare it for review. It never 
 
 `https://mcp.usetrackly.app/api/plugin/trackly/mcp`
 
+The MCP client discovers the OAuth resource through protected-resource
+metadata. Do not repeat that URL as `oauth_resource`. Affected Codex versions
+send the same RFC 8707 `resource` parameter twice, and Express then parses it
+as an array the authorization server rejects.
+
 The legacy trackly MCP endpoint is intentionally not used by this package.
 
 ## OpenAI submission
