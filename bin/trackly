@@ -628,7 +628,13 @@ async function cmdJobs(args) {
   if (args.remote) params.set('usStates', 'REMOTE');
   if (args.status) params.set('status', args.status);
   if (args.sort) params.set('sort', args.sort);
-  if (sponsorship) params.set('sponsorship', sponsorship);
+  if (sponsorship) {
+    params.set('sponsorship', sponsorship);
+    // The backend honors the filter only on the literal status=new discovery
+    // view — without this default, `--sponsorship exclude_no` alone would be
+    // a silent no-op. Mirrors the MCP server's behavior.
+    if (sponsorship !== 'all' && !args.status) params.set('status', 'new');
+  }
   if (args.limit) params.set('limit', args.limit);
   if (args.offset) params.set('offset', args.offset);
   if (args.keywords) params.set('search', args.keywords);
