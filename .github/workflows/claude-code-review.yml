@@ -470,6 +470,7 @@ jobs:
             echo "::notice title=Claude review used fallback::Primary failed (${{ steps.claude-review.outcome }}); posted via the berkeley fallback token."
           else
             echo "::warning title=Claude review did not post::Both workflow auth attempts failed (primary=${{ steps.claude-review.outcome }}, fallback=${{ steps.claude-review-fallback.outcome }}). Inspect action logs for OAuth token, usage/quota, model availability, or action config. The step now fails loudly on a turn-1 SDK error (v1.0.176), so this is a real failure, not a masked one."
+            exit 1
           fi
 
       # A run-log ::warning:: does NOT surface on the PR conversation, so a
