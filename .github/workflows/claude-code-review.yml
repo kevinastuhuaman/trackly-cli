@@ -139,10 +139,8 @@ jobs:
       # to bound the prompt.
       - name: Precompute PR diff
         id: precompute
-        # continue-on-error: a diff-compute hiccup must not hard-fail the job
-        # (review is non-blocking). Review steps gate on the has_diff output and
-        # the tail steps surface any miss, so a failure here degrades to a
-        # visible no-review notice, never a bare red check. (Reliability.)
+        # continue-on-error lets the status and notice steps explain a diff-compute
+        # failure before the final verdict fails closed. (Reliability.)
         continue-on-error: true
         if: steps.review-workflow.outputs.changed != 'true'
         shell: bash
@@ -464,6 +462,7 @@ jobs:
         run: |
           if [ "${{ steps.precompute.outputs.has_diff }}" != "true" ]; then
             echo "::warning title=Claude review skipped::No diff computed (precompute outcome=${{ steps.precompute.outcome }}); no review attempted."
+            exit 1
           elif [ "${{ steps.claude-review.outcome }}" = "success" ]; then
             echo "Claude review posted via the primary (jimmygregorio) token."
           elif [ "${{ steps.claude-review-fallback.outcome }}" = "success" ]; then
@@ -475,7 +474,7 @@ jobs:
 
       # A run-log ::warning:: does NOT surface on the PR conversation, so a
       # no-review run reads as a green "reviewed clean" check. When review could
-      # not run, post a VISIBLE non-blocking PR comment so the empty result is
+      # not run, post a VISIBLE PR comment so the empty result is
       # never mistaken for an approval. (Adversarial + Security.) Uses the job's
       # own github_token via the REST API (no gh dependency); python3 for safe
       # JSON encoding. Never fails the job.
