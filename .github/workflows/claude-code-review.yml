@@ -494,7 +494,7 @@ jobs:
           else
             REASON="both workflow auth attempts failed"
           fi
-          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review could not run - ${REASON}. This is a NON-BLOCKING notice; it is NOT an approval and NOT a clean result. If review auth failed, inspect action logs for OAuth token, usage/quota, model availability, or action config before relying on this gate."
+          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review could not run - ${REASON}. This check fails closed; it is NOT an approval and NOT a clean result. If review auth failed, inspect action logs for OAuth token, usage/quota, model availability, or action config before relying on this gate."
           python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_notice.json" || { echo "::warning::could not build notice body"; exit 0; }
           curl -sS --fail -X POST \
             -H "Authorization: Bearer ${GH_TOKEN_POST}" \
