@@ -27,6 +27,7 @@ const COMMON_LINEAGE_FIELDS = ['workMode', 'batchId', 'memberId', 'jobId', 'runI
 
 const PHASE_FIELDS = {
   selection: new Set([
+    'workMode',
     'latestExplicitTarget',
     'approvedJobIds',
     'approvalRecorded',
@@ -163,10 +164,14 @@ function validateCurrentLineage(errors, receipt, expectedContext, jobSetField = 
 
 function validateSelection(receipt) {
   const errors = [];
+  if (!WORK_MODES.has(receipt.workMode)) {
+    errors.push('workMode must be accessible_execution or fixed_inspection');
+  }
+  const maximumTarget = receipt.workMode === 'fixed_inspection' ? 100 : 20;
   if (!Number.isInteger(receipt.latestExplicitTarget)
       || receipt.latestExplicitTarget < 1
-      || receipt.latestExplicitTarget > 20) {
-    errors.push('latestExplicitTarget must be an integer from 1 to 20');
+      || receipt.latestExplicitTarget > maximumTarget) {
+    errors.push(`latestExplicitTarget must be an integer from 1 to ${maximumTarget} for ${receipt.workMode || 'the selected work mode'}`);
   }
   if (!Array.isArray(receipt.approvedJobIds)) {
     errors.push('approvedJobIds must be an array');

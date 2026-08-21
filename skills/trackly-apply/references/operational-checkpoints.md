@@ -76,7 +76,9 @@ phase is not complete. The script accepts `selection`, `access`, `fill`,
 
 Required fields:
 
-- `latestExplicitTarget`: integer 1-20;
+- `workMode`: `accessible_execution` or `fixed_inspection`;
+- `latestExplicitTarget`: integer 1-20 for an accessible execution, or 1-100
+  for a fixed inspection, matching the public batch-size contract;
 - `approvedJobIds`: unique positive safe-integer Trackly job IDs for the exact
   approved set. This may be
   empty only when the accessible queue is exhausted;

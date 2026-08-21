@@ -59,6 +59,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   const { validateCheckpoint } = require('../skills/trackly-apply/scripts/validate-phase-checkpoint');
 
   const selection = {
+    workMode: 'accessible_execution',
     latestExplicitTarget: 20,
     approvedJobIds: [101, 102],
     approvalRecorded: true,
@@ -66,6 +67,27 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     queueExhausted: true,
   };
   assert.deepEqual(validateCheckpoint('selection', selection), []);
+  assert.deepEqual(validateCheckpoint('selection', {
+    ...selection,
+    workMode: 'fixed_inspection',
+    latestExplicitTarget: 100,
+    approvedJobIds: Array.from({ length: 100 }, (_, index) => index + 1),
+  }), []);
+  assert.match(
+    validateCheckpoint('selection', {
+      ...selection,
+      latestExplicitTarget: 21,
+    }).join('\n'),
+    /1 to 20 for accessible_execution/
+  );
+  assert.match(
+    validateCheckpoint('selection', {
+      ...selection,
+      workMode: 'fixed_inspection',
+      latestExplicitTarget: 101,
+    }).join('\n'),
+    /1 to 100 for fixed_inspection/
+  );
   assert.deepEqual(validateCheckpoint('selection', { ...selection, approvedJobIds: [] }), []);
   assert.deepEqual(validateCheckpoint('selection', {
     ...selection,
@@ -385,6 +407,7 @@ test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async 
   const { readReceiptInput } = require('../skills/trackly-apply/scripts/validate-phase-checkpoint');
   const payload = Buffer.from(JSON.stringify({
     receipt: {
+      workMode: 'accessible_execution',
       latestExplicitTarget: 1,
       approvedJobIds: [101],
       approvalRecorded: true,
@@ -427,6 +450,7 @@ test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async 
 test('phase checkpoint CLI validates envelopes from a non-skill working directory', () => {
   const validator = path.join(root, 'skills/trackly-apply/scripts/validate-phase-checkpoint.js');
   const receipt = {
+    workMode: 'accessible_execution',
     latestExplicitTarget: 1,
     approvedJobIds: [101],
     approvalRecorded: true,

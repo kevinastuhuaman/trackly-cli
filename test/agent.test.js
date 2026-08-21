@@ -73,6 +73,7 @@ test('agent setup installs one canonical skill and links both clients', () => {
     const validation = spawnSync(process.execPath, [validator, 'selection'], {
       input: JSON.stringify({
         receipt: {
+          workMode: 'accessible_execution',
           latestExplicitTarget: 1,
           approvedJobIds: [101],
           approvalRecorded: true,
