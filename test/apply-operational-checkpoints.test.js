@@ -113,8 +113,24 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     /may be empty/
   );
 
-  const access = {
+  const expectedContext = {
+    workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
     memberId: 201,
+    jobId: 101,
+    runId: 401,
+    inspectionEpoch: 2,
+    approvedJobIds: [101, 102],
+  };
+  const access = {
+    workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
+    memberId: 201,
+    jobId: 101,
+    runId: 401,
+    inspectionEpoch: 2,
     classification: 'applicant_fields_reached',
     exactRequisitionVerified: true,
     originAndTenantVerified: true,
@@ -122,9 +138,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     privateDataEntered: false,
     applicantControlsObserved: true,
   };
-  assert.deepEqual(validateCheckpoint('access', access), []);
+  assert.deepEqual(validateCheckpoint('access', access, expectedContext), []);
   assert.match(
-    validateCheckpoint('access', { ...access, applicantControlsObserved: false }).join('\n'),
+    validateCheckpoint('access', { ...access, applicantControlsObserved: false }, expectedContext).join('\n'),
     /applicantControlsObserved/
   );
   assert.match(
@@ -132,16 +148,24 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...access,
       classification: 'authentication_required',
       applicantControlsObserved: true,
-    }).join('\n'),
+    }, expectedContext).join('\n'),
     /applicantControlsObserved/
   );
   assert.deepEqual(validateCheckpoint('access', {
     ...access,
     classification: 'captcha_at_submit',
-  }), []);
+  }, expectedContext), []);
   assert.match(
-    validateCheckpoint('access', { ...access, memberId: 'https://private.example/path' }).join('\n'),
+    validateCheckpoint('access', { ...access, memberId: 'https://private.example/path' }, expectedContext).join('\n'),
     /positive safe integer/
+  );
+  assert.match(
+    validateCheckpoint('access', { ...access, jobId: 102 }, expectedContext).join('\n'),
+    /jobId must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('access', access, { ...expectedContext, approvedJobIds: [102] }).join('\n'),
+    /jobId must belong to expectedContext\.approvedJobIds/
   );
 
   const fill = {
@@ -165,16 +189,6 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     humanizerRan: true,
     humanizerFallbackUsed: false,
     questionPacketTrueGapsOnly: true,
-  };
-  const expectedContext = {
-    workMode: 'accessible_execution',
-    executionId: 301,
-    batchId: 501,
-    memberId: 201,
-    jobId: 101,
-    runId: 401,
-    inspectionEpoch: 2,
-    approvedJobIds: [101, 102],
   };
   assert.deepEqual(validateCheckpoint('fill', fill, expectedContext), []);
   const { executionId: omittedFillExecutionId, ...fixedFill } = fill;
@@ -430,6 +444,22 @@ test('phase checkpoint CLI validates envelopes from a non-skill working director
   });
   assert.equal(noReceipt.status, 1);
   assert.match(noReceipt.stderr, /envelope with receipt/);
+
+  const extraEnvelopeField = spawnSync(process.execPath, [validator, 'selection'], {
+    cwd: path.dirname(root),
+    input: JSON.stringify({ receipt, rawAnswer: 'private text' }),
+    encoding: 'utf8',
+  });
+  assert.equal(extraEnvelopeField.status, 1);
+  assert.match(extraEnvelopeField.stderr, /unexpected envelope field: rawAnswer/);
+
+  const selectionContext = spawnSync(process.execPath, [validator, 'selection'], {
+    cwd: path.dirname(root),
+    input: JSON.stringify({ receipt, expectedContext: {} }),
+    encoding: 'utf8',
+  });
+  assert.equal(selectionContext.status, 1);
+  assert.match(selectionContext.stderr, /expectedContext must be omitted for selection/);
 });
 
 test('performance guidance permits value-free schema reuse but forbids answer caching', () => {

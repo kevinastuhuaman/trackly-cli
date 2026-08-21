@@ -35,7 +35,13 @@ const PHASE_FIELDS = {
     'queueExhausted',
   ]),
   access: new Set([
+    'workMode',
+    'executionId',
+    'batchId',
     'memberId',
+    'jobId',
+    'runId',
+    'inspectionEpoch',
     'classification',
     'exactRequisitionVerified',
     'originAndTenantVerified',
@@ -183,9 +189,9 @@ function validateSelection(receipt) {
   return errors;
 }
 
-function validateAccess(receipt) {
+function validateAccess(receipt, expectedContext) {
   const errors = [];
-  requireTracklyId(errors, receipt, 'memberId');
+  validateCurrentLineage(errors, receipt, expectedContext);
   if (!ACCESS_STATES.has(receipt.classification)) errors.push('classification must be a terminal access state');
   requireTrue(errors, receipt, 'exactRequisitionVerified');
   requireTrue(errors, receipt, 'originAndTenantVerified');
@@ -295,7 +301,11 @@ function validateCheckpoint(phase, receipt, expectedContext) {
   const unexpectedFields = Object.keys(receipt)
     .filter((field) => !PHASE_FIELDS[phase].has(field))
     .map((field) => `unexpected field: ${field}`);
-  return [...unexpectedFields, ...VALIDATORS[phase](receipt, expectedContext)];
+  const contextErrors = [];
+  if (phase === 'selection' && expectedContext !== undefined) {
+    contextErrors.push('expectedContext must be omitted for selection');
+  }
+  return [...unexpectedFields, ...contextErrors, ...VALIDATORS[phase](receipt, expectedContext)];
 }
 
 async function readReceiptInput(stream) {
@@ -342,6 +352,13 @@ async function main() {
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)
       || !Object.hasOwn(envelope, 'receipt')) {
     process.stderr.write('input must be an envelope with receipt and optional expectedContext\n');
+    process.exitCode = 1;
+    return;
+  }
+  const unexpectedEnvelopeFields = Object.keys(envelope)
+    .filter((field) => !['receipt', 'expectedContext'].includes(field));
+  if (unexpectedEnvelopeFields.length > 0) {
+    process.stderr.write(`${unexpectedEnvelopeFields.map((field) => `unexpected envelope field: ${field}`).join('\n')}\n`);
     process.exitCode = 1;
     return;
   }
