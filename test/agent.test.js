@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -61,9 +62,39 @@ async function withTempAgentHomeAsync(run) {
 test('agent setup installs one canonical skill and links both clients', () => {
   withTempAgentHome(() => {
     const result = agent.setupAgent('both');
-    assert.equal(result.skillVersion, '4.6.0');
+    assert.equal(result.skillVersion, '4.7.0');
     assert.ok(fs.existsSync(path.join(result.canonical, 'SKILL.md')));
     assert.ok(fs.existsSync(path.join(result.canonical, 'references', 'inbox-receipt-preflight.md')));
+    for (const reference of ['operational-checkpoints.md', 'access-probe.md', 'performance-telemetry.md']) {
+      assert.ok(fs.existsSync(path.join(result.canonical, 'references', reference)), reference);
+    }
+    const validator = path.join(result.canonical, 'scripts', 'validate-phase-checkpoint.js');
+    assert.ok(fs.existsSync(validator));
+    const validation = spawnSync(process.execPath, [validator, 'selection'], {
+      input: JSON.stringify({
+        receipt: {
+          workMode: 'accessible_execution',
+          executionId: 301,
+          batchId: 501,
+          latestExplicitTarget: 1,
+          approvedJobIds: [101],
+          approvalRecorded: true,
+          noFormMutationBeforeApproval: true,
+          queueExhausted: false,
+        },
+        expectedContext: {
+          workMode: 'accessible_execution',
+          executionId: 301,
+          batchId: 501,
+          latestExplicitTarget: 1,
+          selectableJobIds: [101],
+          queueExhausted: false,
+        },
+      }),
+      encoding: 'utf8',
+    });
+    assert.equal(validation.status, 0, validation.stderr);
+    assert.match(validation.stdout, /selection checkpoint valid/);
     assert.equal(result.clients.length, 2);
     for (const client of result.clients) {
       assert.ok(fs.existsSync(path.join(client.target, 'SKILL.md')));
@@ -110,7 +141,7 @@ test('agent doctor inspection fails closed on modified, missing, or extra manage
       }
 
       const inspection = agent.inspectClient('codex');
-      assert.equal(inspection.installedSkillVersion, '4.6.0', mutation);
+      assert.equal(inspection.installedSkillVersion, '4.7.0', mutation);
       assert.equal(inspection.installed, false, mutation);
       assert.equal(inspection.skillIntegrity, 'content_mismatch', mutation);
     });
@@ -146,7 +177,7 @@ test('clean temporary homes install Codex, Claude, and both client targets', () 
   }
 });
 
-test('Apply execution mode makes managed skill 4.0.0 stale and setup installs 4.6.0', () => {
+test('Apply execution mode makes managed skill 4.0.0 stale and setup installs 4.7.0', () => {
   withTempAgentHome(() => {
     const target = agent.clientSkillDir('codex');
     fs.mkdirSync(target, { recursive: true });
@@ -162,10 +193,10 @@ test('Apply execution mode makes managed skill 4.0.0 stale and setup installs 4.
     assert.equal(before.installedSkillVersion, '4.0.0');
 
     const setup = agent.setupAgent('codex');
-    assert.equal(setup.skillVersion, '4.6.0');
+    assert.equal(setup.skillVersion, '4.7.0');
     const after = agent.inspectClient('codex');
     assert.equal(after.installed, true);
-    assert.equal(after.installedSkillVersion, '4.6.0');
+    assert.equal(after.installedSkillVersion, '4.7.0');
     const installedSkill = fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8');
     assert.match(installedSkill, /Resume after maintenance/);
     assert.match(installedSkill, /sanctioned idempotent lookup/);
@@ -428,7 +459,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
   const installed = [{
     client: 'codex',
     installed: true,
-    installedSkillVersion: '4.6.0',
+    installedSkillVersion: '4.7.0',
   }];
   const current = agent.evaluateApplyCompatibility({
     version: '3.6.0',
@@ -448,7 +479,7 @@ test('agent doctor compatibility enforces the protocol minimum installed skill v
     mcpContractVersion: '3.7.3',
     compatibleCliMinimumVersion: '0.8.2',
     compatibleSkillMajor: 4,
-    compatibleSkillMinimumVersion: '4.7.0',
+    compatibleSkillMinimumVersion: '4.8.0',
   }, installed);
   assert.equal(future.compatible, false);
   assert.equal(future.skillMinimumSatisfied, false);
@@ -468,7 +499,7 @@ test('agent doctor compatibility rejects stale CLI and MCP contract versions', (
   const clients = [{
     client: 'codex',
     installed: true,
-    installedSkillVersion: '4.6.0',
+    installedSkillVersion: '4.7.0',
   }];
   const base = {
     version: '3.6.0',
@@ -509,7 +540,7 @@ test('agent doctor accepts the local MCP contract during an explicit overlap win
   const clients = [{
     client: 'codex',
     installed: true,
-    installedSkillVersion: '4.6.0',
+    installedSkillVersion: '4.7.0',
   }];
   const result = agent.evaluateApplyCompatibility({
     version: '3.6.1',
@@ -540,7 +571,7 @@ test('agent doctor treats an explicit MCP compatibility window as authoritative'
   }, [{
     client: 'codex',
     installed: true,
-    installedSkillVersion: '4.6.0',
+    installedSkillVersion: '4.7.0',
   }]);
 
   assert.equal(result.mcpContractCompatible, false);
@@ -551,7 +582,7 @@ test('agent doctor accepts the legacy MCP contract only while accessible executi
   const clients = [{
     client: 'codex',
     installed: true,
-    installedSkillVersion: '4.6.0',
+    installedSkillVersion: '4.7.0',
   }];
   const base = {
     version: '3.4.0',

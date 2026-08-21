@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-21
+
+### Added
+
+- Updated Trackly Apply skill 4.7.0 with a concise operational run card, a
+  real-form access state machine, and a local value-free phase-checkpoint
+  validator for selection, access, deterministic fill, review, and submission
+  reconciliation.
+- Added privacy-safe schema-cache, identical-template grouping, request-budget,
+  and telemetry guidance derived from the Execution 17 browser recovery.
+
+### Changed
+
+- The latest explicit target is now a hard target, exact accessible jobs must be
+  approved before form mutation, all deterministic fields must be filled before
+  one true-gap question packet, and Humanizer runs automatically when available.
+
 ## [0.16.0] - 2026-08-18
 
 ### Added
