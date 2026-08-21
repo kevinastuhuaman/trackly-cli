@@ -63,8 +63,9 @@ node "<skill-dir>/scripts/validate-phase-checkpoint.js" <phase>
 ```
 
 Pass `{"receipt": {...}, "expectedContext": {...}}` on standard input. The
-`expectedContext` object is required for fill and must come from the current
-authoritative work receipt; other phases may omit it. A nonzero exit means the
+`expectedContext` object is required for fill and review. Build it only from the
+current authoritative work receipt plus the exact `approvedJobIds` from the
+validated selection receipt; other phases omit it. A nonzero exit means the
 phase is not complete. The script accepts `selection`, `access`, `fill`,
 `review`, and `reconciliation`.
 
@@ -97,9 +98,9 @@ Required fields:
 
 Required fields:
 
-- positive safe-integer `executionId`, `memberId`, `runId`, and
-  `inspectionEpoch`, plus a lowercase SHA-256 `formSchemaFingerprint`; every
-  value must equal the same field in `expectedContext`;
+- positive safe-integer `executionId`, `memberId`, `jobId`, `runId`, and
+  `inspectionEpoch`; every value must equal the same field in `expectedContext`,
+  and `jobId` must belong to `expectedContext.approvedJobIds`;
 - `visibleControlCount`, `committedControlCount`, and `typedExceptionCount`,
   where committed plus exceptions equals visible;
 - `knownOmissionCount: 0`;
@@ -122,7 +123,9 @@ receipt or a typed exception.
 
 Required fields:
 
-- positive safe-integer Trackly `memberId`;
+- positive safe-integer `executionId`, `memberId`, `jobId`, `runId`, and
+  `inspectionEpoch`; every value must equal the same field in the current
+  `expectedContext`, and `jobId` must remain in its approved set;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
   `reviewTabPreserved`, and `userVisibleHandoffProven` all true; and
 - `submitActivated: false`.
@@ -140,6 +143,9 @@ Required fields:
 - `browserTabStatus`: `open`, `closure_unverified`, or `closed_verified`; and
 - for `closed_verified`, `completeTabInventoryRecorded`,
   `closeReceiptRecorded`, and `postCloseUnionAbsenceProven` true.
+
+`cleanupPreference: never` forbids `closed_verified`, even when closure evidence
+exists, because evidence cannot override the user's saved no-close policy.
 
 Every final report must state the application lifecycle, Trackly job status,
 browser tab status, and whether absence is actually `closed_verified`. These

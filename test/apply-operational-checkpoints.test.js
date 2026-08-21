@@ -125,9 +125,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   const fill = {
     executionId: 301,
     memberId: 201,
+    jobId: 101,
     runId: 401,
     inspectionEpoch: 2,
-    formSchemaFingerprint: 'a'.repeat(64),
     visibleControlCount: 12,
     committedControlCount: 11,
     typedExceptionCount: 1,
@@ -145,9 +145,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   const expectedContext = {
     executionId: 301,
     memberId: 201,
+    jobId: 101,
     runId: 401,
     inspectionEpoch: 2,
-    formSchemaFingerprint: 'a'.repeat(64),
+    approvedJobIds: [101, 102],
   };
   assert.deepEqual(validateCheckpoint('fill', fill, expectedContext), []);
   assert.match(
@@ -157,6 +158,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('fill', { ...fill, inspectionEpoch: 3 }, expectedContext).join('\n'),
     /inspectionEpoch must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('fill', { ...fill, jobId: 103 }, { ...expectedContext, jobId: 103 }).join('\n'),
+    /jobId must belong to expectedContext\.approvedJobIds/
   );
   assert.match(
     validateCheckpoint('fill', { ...fill, humanizerRan: false }, expectedContext).join('\n'),
@@ -179,17 +184,25 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   );
 
   const review = {
+    executionId: 301,
     memberId: 201,
+    jobId: 101,
+    runId: 401,
+    inspectionEpoch: 2,
     finalIntegrityPassed: true,
     truthConfirmationRecorded: true,
     submitActivated: false,
     reviewTabPreserved: true,
     userVisibleHandoffProven: true,
   };
-  assert.deepEqual(validateCheckpoint('review', review), []);
+  assert.deepEqual(validateCheckpoint('review', review, expectedContext), []);
   assert.match(
-    validateCheckpoint('review', { ...review, submitActivated: true }).join('\n'),
+    validateCheckpoint('review', { ...review, submitActivated: true }, expectedContext).join('\n'),
     /submitActivated/
+  );
+  assert.match(
+    validateCheckpoint('review', { ...review, inspectionEpoch: 3 }, expectedContext).join('\n'),
+    /inspectionEpoch must match expectedContext/
   );
 
   const reconciliation = {
@@ -211,6 +224,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('reconciliation', { ...reconciliation, completeTabInventoryRecorded: false }).join('\n'),
     /completeTabInventoryRecorded/
+  );
+  assert.match(
+    validateCheckpoint('reconciliation', { ...reconciliation, cleanupPreference: 'never' }).join('\n'),
+    /cannot be closed_verified/
   );
   for (const browserTabStatus of ['open', 'closure_unverified']) {
     const pending = { ...reconciliation, browserTabStatus };

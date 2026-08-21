@@ -21,7 +21,7 @@ const CLEANUP_PREFERENCES = new Set([
 
 const TAB_STATES = new Set(['open', 'closure_unverified', 'closed_verified']);
 const MAX_RECEIPT_BYTES = 64 * 1024;
-const SHA256 = /^[a-f0-9]{64}$/;
+const LINEAGE_FIELDS = ['executionId', 'memberId', 'jobId', 'runId', 'inspectionEpoch'];
 
 const PHASE_FIELDS = {
   selection: new Set([
@@ -43,9 +43,9 @@ const PHASE_FIELDS = {
   fill: new Set([
     'executionId',
     'memberId',
+    'jobId',
     'runId',
     'inspectionEpoch',
-    'formSchemaFingerprint',
     'visibleControlCount',
     'committedControlCount',
     'typedExceptionCount',
@@ -61,7 +61,11 @@ const PHASE_FIELDS = {
     'questionPacketTrueGapsOnly',
   ]),
   review: new Set([
+    'executionId',
     'memberId',
+    'jobId',
+    'runId',
+    'inspectionEpoch',
     'finalIntegrityPassed',
     'truthConfirmationRecorded',
     'submitActivated',
@@ -98,6 +102,23 @@ function requireTracklyId(errors, receipt, field) {
 function requireCount(errors, receipt, field) {
   if (!Number.isInteger(receipt[field]) || receipt[field] < 0) {
     errors.push(`${field} must be a non-negative integer`);
+  }
+}
+
+function validateCurrentLineage(errors, receipt, expectedContext) {
+  for (const field of LINEAGE_FIELDS) requireTracklyId(errors, receipt, field);
+  if (!expectedContext || typeof expectedContext !== 'object' || Array.isArray(expectedContext)) {
+    errors.push('expectedContext is required');
+    return;
+  }
+  for (const field of LINEAGE_FIELDS) {
+    if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
+  }
+  if (!Array.isArray(expectedContext.approvedJobIds)
+      || expectedContext.approvedJobIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+    errors.push('expectedContext.approvedJobIds must contain positive safe integers');
+  } else if (!expectedContext.approvedJobIds.includes(receipt.jobId)) {
+    errors.push('jobId must belong to expectedContext.approvedJobIds');
   }
 }
 
@@ -146,19 +167,7 @@ function validateAccess(receipt) {
 
 function validateFill(receipt, expectedContext) {
   const errors = [];
-  for (const field of ['executionId', 'memberId', 'runId', 'inspectionEpoch']) {
-    requireTracklyId(errors, receipt, field);
-  }
-  if (typeof receipt.formSchemaFingerprint !== 'string' || !SHA256.test(receipt.formSchemaFingerprint)) {
-    errors.push('formSchemaFingerprint must be a lowercase SHA-256 digest');
-  }
-  if (!expectedContext || typeof expectedContext !== 'object' || Array.isArray(expectedContext)) {
-    errors.push('expectedContext is required for fill');
-  } else {
-    for (const field of ['executionId', 'memberId', 'runId', 'inspectionEpoch', 'formSchemaFingerprint']) {
-      if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
-    }
-  }
+  validateCurrentLineage(errors, receipt, expectedContext);
   for (const field of ['visibleControlCount', 'committedControlCount', 'typedExceptionCount', 'knownOmissionCount']) {
     requireCount(errors, receipt, field);
   }
@@ -202,9 +211,9 @@ function validateFill(receipt, expectedContext) {
   return errors;
 }
 
-function validateReview(receipt) {
+function validateReview(receipt, expectedContext) {
   const errors = [];
-  requireTracklyId(errors, receipt, 'memberId');
+  validateCurrentLineage(errors, receipt, expectedContext);
   requireTrue(errors, receipt, 'finalIntegrityPassed');
   requireTrue(errors, receipt, 'truthConfirmationRecorded');
   requireFalse(errors, receipt, 'submitActivated');
@@ -221,6 +230,9 @@ function validateReconciliation(receipt) {
   if (receipt.tracklyJobStatus !== 'applied_confirmed') errors.push('tracklyJobStatus must be applied_confirmed');
   if (!CLEANUP_PREFERENCES.has(receipt.cleanupPreference)) errors.push('cleanupPreference is invalid');
   if (!TAB_STATES.has(receipt.browserTabStatus)) errors.push('browserTabStatus is invalid');
+  if (receipt.cleanupPreference === 'never' && receipt.browserTabStatus === 'closed_verified') {
+    errors.push('browserTabStatus cannot be closed_verified when cleanupPreference is never');
+  }
   if (receipt.browserTabStatus === 'closed_verified') {
     requireTrue(errors, receipt, 'completeTabInventoryRecorded');
     requireTrue(errors, receipt, 'closeReceiptRecorded');
