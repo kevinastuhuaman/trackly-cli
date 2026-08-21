@@ -25,10 +25,10 @@ receipts.
 
 ## Phase gates
 
-1. **Selection:** latest target retained; exact accessible set shown; approval
-   recorded; no form mutation occurred first.
-2. **Access:** exact requisition/origin/tenant verified; non-mutating probe;
+1. **Access:** exact requisition/origin/tenant verified; non-mutating probe;
    typed access state recorded; no private data transmitted.
+2. **Selection:** after access proof, latest target retained; exact accessible
+   set shown; approval recorded; no form mutation occurred first.
 3. **Fill:** every visible control has a committed receipt or typed exception;
    known omissions are zero; deterministic fields preceded questions; writing
    passed Humanizer when available and the local gate.

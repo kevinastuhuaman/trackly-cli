@@ -539,6 +539,8 @@ test('writing pipeline makes humanization automatic with a self-contained fallba
   assert.match(writing, /self-contained[\s\S]*fallback/i);
   assert.match(writing, /no em dash/i);
   assert.match(writing, /unsupported\s+claim/i);
+  assert.match(writing, /After Humanizer[\s\S]*new draft[\s\S]*rebuild[\s\S]*exact final revision/i);
+  assert.match(skill, /run Humanizer[\s\S]*new revision[\s\S]*rebuild[\s\S]*then call `trackly_lint_application_text`/i);
 });
 
 test('public plugin adaptation preserves the operational reliability gates', () => {
@@ -553,6 +555,10 @@ test('public plugin adaptation preserves the operational reliability gates', () 
   assert.match(pluginOperations, /fill[\s\S]*known[\s\S]*before[\s\S]*question packet/i);
   assert.match(pluginOperations, /Humanizer/i);
   assert.match(pluginOperations, /submitted[\s\S]*applied_confirmed[\s\S]*closed_verified/i);
+  assert.ok(
+    pluginOperations.indexOf('**Access:**') < pluginOperations.indexOf('**Selection:**'),
+    'access proof must precede accessible-set approval',
+  );
   assert.match(pluginProbe, /applicant_fields_reached/);
   assert.match(pluginProbe, /intermediate_apply_shell/);
   assert.match(pluginProbe, /authentication_required/);

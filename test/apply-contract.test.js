@@ -1851,8 +1851,9 @@ test('Apply skill runs Humanizer when available and retains a self-contained fal
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
 
-  assert.match(skill, /Run Humanizer automatically when available/);
-  assert.match(skill, /Do not block the application when Humanizer is unavailable/);
+  assert.match(skill, /run Humanizer automatically when available/i);
+  assert.match(skill, /do not block the application merely because Humanizer is unavailable/i);
+  assert.match(skill, /Treat its output as a new revision:[\s\S]*rebuild[\s\S]*exact final text[\s\S]*then call `trackly_lint_application_text`/i);
   assert.match(writing, /current session exposes the `humanizer` skill/i);
   assert.match(writing, /matching file elsewhere on disk[\s\S]*not runtime[\s\S]*availability/i);
   assert.match(writing, /`writing\.voice_sample` and `writing\.style_instructions`/);

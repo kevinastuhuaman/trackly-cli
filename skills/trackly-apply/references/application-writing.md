@@ -16,6 +16,10 @@ Use this reference for free-text questions such as "Why this company?", motivati
   `available` only when the current session exposes the `humanizer` skill and
   its `SKILL.md` can be read. A matching file elsewhere on disk is not runtime
   availability. If either check fails, record `unavailable` and use the fallback.
+- After Humanizer returns, treat the result as a new draft. Discard any earlier
+  claim-reference packet, rebuild it against the exact final revision, and run
+  deterministic lint only on that same revision. Never reuse a pre-Humanizer
+  lint result or claim proof.
 
 ## Draft from evidence
 
