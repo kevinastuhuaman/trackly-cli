@@ -96,13 +96,14 @@ Required fields:
   `waveJobIds` set. This set includes terminal blockers so their required probe
   receipts can validate before replacement scheduling;
 - a terminal classification supported by the active durable disposition
-  contract. Under contract 3.7.3, a locally observed `inactive` posting uses
-  conservative `unknown_unobservable`; never put unsupported `inactive` in the
-  receipt or claim Trackly stored it;
+  contract. Under contract 3.7.3, locally observed `applicant_fields_reached`
+  uses durable `accessible`, while a locally observed `inactive` posting uses
+  conservative `unknown_unobservable`; never put either unsupported local state
+  name in the receipt or claim Trackly stored it;
 - `exactRequisitionVerified`, `originAndTenantVerified`, and
   `nonMutatingProbe` all true;
 - `privateDataEntered: false`; and
-- `applicantControlsObserved: true` only for `applicant_fields_reached` and
+- `applicantControlsObserved: true` only for durable `accessible` and
   `captcha_at_submit`.
 
 ### Fill

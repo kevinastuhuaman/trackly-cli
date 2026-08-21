@@ -35,8 +35,10 @@ durably terminal. A provider hint is scheduling input, never sufficient proof.
 5. Never enter private data, credentials, create an account, solve OTP or
    CAPTCHA, or change an applicant control during the probe.
 6. Count a job as accessible only after `applicant_fields_reached` is durably
-   recorded. `captcha_at_submit` may continue through review because the user
-   owns Submit; every other access wall is parked without consuming capacity.
+   proven and the active contract's `accessible` disposition is durably
+   recorded. Use `accessible`, not the local state name, in the access checkpoint.
+   `captcha_at_submit` may continue through review because the user owns Submit;
+   every other access wall is parked without consuming capacity.
 7. Revalidate origin, tenant, and exact requisition after every redirect.
 8. Keep `inactive` as the exact local page observation, but do not claim that
    Trackly stored a disposition its active contract does not expose. Under MCP

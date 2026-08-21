@@ -4,7 +4,7 @@
 const { StringDecoder } = require('node:string_decoder');
 
 const ACCESS_STATES = new Set([
-  'applicant_fields_reached',
+  'accessible',
   'authentication_required',
   'account_creation_required',
   'otp_required',
@@ -196,7 +196,7 @@ function validateAccess(receipt, expectedContext) {
   requireTrue(errors, receipt, 'originAndTenantVerified');
   requireTrue(errors, receipt, 'nonMutatingProbe');
   requireFalse(errors, receipt, 'privateDataEntered');
-  if (['applicant_fields_reached', 'captcha_at_submit'].includes(receipt.classification)) {
+  if (['accessible', 'captcha_at_submit'].includes(receipt.classification)) {
     requireTrue(errors, receipt, 'applicantControlsObserved');
   } else {
     requireFalse(errors, receipt, 'applicantControlsObserved');

@@ -137,7 +137,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     jobId: 101,
     runId: 401,
     inspectionEpoch: 2,
-    classification: 'applicant_fields_reached',
+    classification: 'accessible',
     exactRequisitionVerified: true,
     originAndTenantVerified: true,
     nonMutatingProbe: true,
@@ -172,6 +172,13 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('access', access, { ...accessContext, waveJobIds: [103] }).join('\n'),
     /jobId must belong to expectedContext\.waveJobIds/
+  );
+  assert.match(
+    validateCheckpoint('access', {
+      ...access,
+      classification: 'applicant_fields_reached',
+    }, accessContext).join('\n'),
+    /classification must be a terminal access state/
   );
   assert.match(
     validateCheckpoint('access', {
