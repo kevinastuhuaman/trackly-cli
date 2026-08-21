@@ -263,6 +263,7 @@ async function main() {
   const phase = process.argv[2];
   let input = '';
   let inputBytes = 0;
+  process.stdin.setEncoding('utf8');
   for await (const chunk of process.stdin) {
     inputBytes += Buffer.byteLength(chunk);
     if (inputBytes > MAX_RECEIPT_BYTES) {
@@ -295,6 +296,11 @@ async function main() {
   process.stdout.write(`${phase} checkpoint valid\n`);
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+  main().catch(() => {
+    process.stderr.write('unable to read receipt\n');
+    process.exitCode = 1;
+  });
+}
 
 module.exports = { validateCheckpoint };

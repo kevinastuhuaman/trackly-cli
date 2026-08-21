@@ -257,6 +257,13 @@ test('phase checkpoint CLI rejects oversized receipts before parsing', () => {
   assert.match(result.stderr, /at most 65536 bytes/);
 });
 
+test('phase checkpoint CLI decodes streamed UTF-8 safely and handles read failures', () => {
+  const validatorSource = read('skills/trackly-apply/scripts/validate-phase-checkpoint.js');
+  assert.match(validatorSource, /process\.stdin\.setEncoding\('utf8'\)/);
+  assert.match(validatorSource, /main\(\)\.catch\(\(\) => \{/);
+  assert.match(validatorSource, /unable to read receipt/);
+});
+
 test('phase checkpoint CLI validates envelopes from a non-skill working directory', () => {
   const validator = path.join(root, 'skills/trackly-apply/scripts/validate-phase-checkpoint.js');
   const receipt = {
