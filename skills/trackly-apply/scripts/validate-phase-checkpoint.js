@@ -159,7 +159,7 @@ function validateSelection(receipt) {
     const normalized = receipt.approvedJobIds.filter((id) => Number.isSafeInteger(id) && id > 0);
     if (normalized.length !== receipt.approvedJobIds.length) errors.push('approvedJobIds must contain positive safe integers');
     if (new Set(normalized).size !== normalized.length) errors.push('approvedJobIds must be unique');
-    if (normalized.length === 0 && receipt.queueExhausted !== true) {
+    if (receipt.approvedJobIds.length === 0 && receipt.queueExhausted !== true) {
       errors.push('approvedJobIds may be empty only when queueExhausted is true');
     }
   }

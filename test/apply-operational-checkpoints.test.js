@@ -104,6 +104,14 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validateCheckpoint('selection', { ...selection, approvedJobIds: ['private@example.com'] }).join('\n'),
     /positive safe integers/
   );
+  assert.doesNotMatch(
+    validateCheckpoint('selection', {
+      ...selection,
+      approvedJobIds: ['private@example.com'],
+      queueExhausted: false,
+    }).join('\n'),
+    /may be empty/
+  );
 
   const access = {
     memberId: 201,
