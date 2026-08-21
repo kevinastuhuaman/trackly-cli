@@ -5,13 +5,14 @@ identity, consent, committed-control, preservation, or Submit-boundary gates.
 
 ## Value-free schema cache
 
-Cache only normalized control fingerprints, semantic labels, control types,
-requiredness, conditional dependencies, provider/tenant/template identity,
-interaction strategy, commit-verification strategy, parser/rerender risk flags,
-and cache version/expiry.
+Cache only normalized control fingerprints, allowlisted opaque semantic-label
+codes, control types, requiredness, conditional dependencies,
+provider/tenant/template identity, interaction strategy, commit-verification
+strategy, parser/rerender risk flags, and cache version/expiry.
 
-Never cache raw answers, contact values, demographic values, resume text or
-paths, credentials, URLs, or employer-form free text.
+Never cache raw semantic-label text, raw answers, contact values, demographic
+values, resume text or paths, credentials, URLs, employer-form free text, or
+any label code outside the allowlist.
 
 Invalidate on a profile revision, form schema fingerprint, inspection epoch,
 meaningful wording change, provider/tenant mismatch, or cache expiry. A cache hit

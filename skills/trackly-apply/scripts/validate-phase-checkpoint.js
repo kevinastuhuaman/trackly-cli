@@ -203,9 +203,9 @@ function validateFill(receipt, expectedContext) {
   for (const field of ['visibleControlCount', 'committedControlCount', 'typedExceptionCount', 'knownOmissionCount']) {
     requireCount(errors, receipt, field);
   }
-  if (Number.isInteger(receipt.visibleControlCount)
-      && Number.isInteger(receipt.committedControlCount)
-      && Number.isInteger(receipt.typedExceptionCount)
+  if (Number.isSafeInteger(receipt.visibleControlCount)
+      && Number.isSafeInteger(receipt.committedControlCount)
+      && Number.isSafeInteger(receipt.typedExceptionCount)
       && receipt.committedControlCount + receipt.typedExceptionCount !== receipt.visibleControlCount) {
     errors.push('committedControlCount plus typedExceptionCount must equal visibleControlCount');
   }
@@ -269,6 +269,12 @@ function validateReconciliation(receipt, expectedContext) {
     requireTrue(errors, receipt, 'completeTabInventoryRecorded');
     requireTrue(errors, receipt, 'closeReceiptRecorded');
     requireTrue(errors, receipt, 'postCloseUnionAbsenceProven');
+  } else {
+    for (const field of ['completeTabInventoryRecorded', 'closeReceiptRecorded', 'postCloseUnionAbsenceProven']) {
+      if (Object.hasOwn(receipt, field) && receipt[field] !== false) {
+        errors.push(`${field} must be false or omitted unless browserTabStatus is closed_verified`);
+      }
+    }
   }
   return errors;
 }
@@ -299,15 +305,22 @@ async function main() {
   }
   let input = '';
   let inputBytes = 0;
+  let oversized = false;
   process.stdin.setEncoding('utf8');
   for await (const chunk of process.stdin) {
+    if (oversized) continue;
     inputBytes += Buffer.byteLength(chunk);
     if (inputBytes > MAX_RECEIPT_BYTES) {
-      process.stderr.write(`receipt must be at most ${MAX_RECEIPT_BYTES} bytes\n`);
-      process.exitCode = 1;
-      return;
+      oversized = true;
+      input = '';
+      continue;
     }
     input += chunk;
+  }
+  if (oversized) {
+    process.stderr.write(`receipt must be at most ${MAX_RECEIPT_BYTES} bytes\n`);
+    process.exitCode = 1;
+    return;
   }
   let envelope;
   try {

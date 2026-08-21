@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -309,6 +309,14 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     delete pending.postCloseUnionAbsenceProven;
     assert.deepEqual(validateCheckpoint('reconciliation', pending, expectedContext), []);
   }
+  assert.match(
+    validateCheckpoint('reconciliation', {
+      ...reconciliation,
+      browserTabStatus: 'open',
+      closeReceiptRecorded: 'private text',
+    }, expectedContext).join('\n'),
+    /closeReceiptRecorded must be false or omitted/
+  );
 });
 
 test('phase checkpoint CLI rejects oversized receipts before parsing', () => {
@@ -322,13 +330,39 @@ test('phase checkpoint CLI rejects oversized receipts before parsing', () => {
   assert.match(result.stderr, /at most 65536 bytes/);
 });
 
-test('phase checkpoint CLI decodes streamed UTF-8 safely and handles read failures', () => {
-  const validatorSource = read('skills/trackly-apply/scripts/validate-phase-checkpoint.js');
-  assert.match(validatorSource, /process\.stdin\.setEncoding\('utf8'\)/);
-  assert.match(validatorSource, /main\(\)\.catch\(\(\) => \{/);
-  assert.match(validatorSource, /unable to read receipt/);
-  assert.match(validatorSource, /process\.stdin\.isTTY/);
-  assert.match(validatorSource, /receipt envelope must be provided on standard input/);
+test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async () => {
+  const validator = path.join(root, 'skills/trackly-apply/scripts/validate-phase-checkpoint.js');
+  const payload = Buffer.from(JSON.stringify({
+    receipt: {
+      latestExplicitTarget: 1,
+      approvedJobIds: [101],
+      approvalRecorded: true,
+      noFormMutationBeforeApproval: true,
+      queueExhausted: false,
+      é: true,
+    },
+  }), 'utf8');
+  const marker = Buffer.from('é', 'utf8');
+  const markerIndex = payload.indexOf(marker);
+  assert.notEqual(markerIndex, -1);
+
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [validator, 'selection'], { cwd: path.dirname(root) });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+    child.stdin.write(payload.subarray(0, markerIndex + 1));
+    child.stdin.end(payload.subarray(markerIndex + 1));
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unexpected field: é/);
+  assert.doesNotMatch(result.stderr, /valid JSON/);
 });
 
 test('phase checkpoint CLI validates envelopes from a non-skill working directory', () => {
@@ -363,6 +397,30 @@ test('phase checkpoint CLI validates envelopes from a non-skill working director
   });
   assert.equal(malformed.status, 1);
   assert.match(malformed.stderr, /valid JSON/);
+
+  const unknownPhase = spawnSync(process.execPath, [validator, 'audit'], {
+    cwd: path.dirname(root),
+    input: JSON.stringify({ receipt }),
+    encoding: 'utf8',
+  });
+  assert.equal(unknownPhase.status, 1);
+  assert.match(unknownPhase.stderr, /unknown phase: audit/);
+
+  const arrayReceipt = spawnSync(process.execPath, [validator, 'selection'], {
+    cwd: path.dirname(root),
+    input: JSON.stringify({ receipt: [] }),
+    encoding: 'utf8',
+  });
+  assert.equal(arrayReceipt.status, 1);
+  assert.match(arrayReceipt.stderr, /receipt must be a JSON object/);
+
+  const noReceipt = spawnSync(process.execPath, [validator, 'selection'], {
+    cwd: path.dirname(root),
+    input: JSON.stringify({ expectedContext: {} }),
+    encoding: 'utf8',
+  });
+  assert.equal(noReceipt.status, 1);
+  assert.match(noReceipt.stderr, /envelope with receipt/);
 });
 
 test('performance guidance permits value-free schema reuse but forbids answer caching', () => {

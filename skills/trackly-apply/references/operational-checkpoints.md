@@ -106,8 +106,8 @@ Required fields:
   `expectedContext.approvedJobIds`;
 - positive safe-integer `executionId` for `accessible_execution`, matching
   `expectedContext`; omit it from both objects for `fixed_inspection`;
-- `visibleControlCount`, `committedControlCount`, and `typedExceptionCount`,
-  where committed plus exceptions equals visible;
+- `visibleControlCount`, `committedControlCount`, and `typedExceptionCount` as
+  non-negative safe integers, where committed plus exceptions equals visible;
 - `knownOmissionCount: 0`;
 - `knownFieldsFilledBeforeQuestions: true`;
 - `parserSensitiveFieldsRechecked: true`;
