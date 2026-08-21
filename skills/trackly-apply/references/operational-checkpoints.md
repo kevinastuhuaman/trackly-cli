@@ -63,9 +63,10 @@ node "<skill-dir>/scripts/validate-phase-checkpoint.js" <phase>
 ```
 
 Pass `{"receipt": {...}, "expectedContext": {...}}` on standard input. The
-`expectedContext` object is required for fill and review. Build it only from the
-current authoritative work receipt plus the exact `approvedJobIds` from the
-validated selection receipt; other phases omit it. A nonzero exit means the
+`expectedContext` object is required for fill, review, and reconciliation. Build
+it only from the current authoritative work receipt plus the exact
+`approvedJobIds` from the validated selection or authoritative recovered
+approval receipt; other phases omit it. A nonzero exit means the
 phase is not complete. The script accepts `selection`, `access`, `fill`,
 `review`, and `reconciliation`.
 
@@ -116,8 +117,9 @@ Required fields:
   `not_applicable`;
 - `humanizerAvailability`: `available`, `unavailable`, or `not_applicable`;
 - `humanizerRan: true` when Humanizer is available;
-- `fallbackWritingGateRan: true` only when writing is present and Humanizer is
-  unavailable; and
+- `humanizerFallbackUsed: true` only when writing is present and Humanizer is
+  unavailable. This names the fallback path; `localWritingGate` is the
+  always-run final authority; and
 - `questionPacketTrueGapsOnly: true`.
 
 The fill receipt fails when any known visible control lacks either a committed
@@ -139,7 +141,9 @@ Required fields:
 
 Required fields:
 
-- positive safe-integer Trackly `memberId`;
+- the same mode-specific current work lineage and approved-job binding required
+  by Review. Reconciliation stays bound to the submitted run even though it is
+  a post-submission phase;
 - `positiveSubmissionEvidenceRecorded: true`;
 - `memberLifecycle: submitted`;
 - `tracklyJobStatus: applied_confirmed`;

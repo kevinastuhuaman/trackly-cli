@@ -60,7 +60,7 @@ const PHASE_FIELDS = {
     'localWritingGate',
     'humanizerAvailability',
     'humanizerRan',
-    'fallbackWritingGateRan',
+    'humanizerFallbackUsed',
     'questionPacketTrueGapsOnly',
   ]),
   review: new Set([
@@ -78,7 +78,13 @@ const PHASE_FIELDS = {
     'userVisibleHandoffProven',
   ]),
   reconciliation: new Set([
+    'workMode',
+    'executionId',
+    'batchId',
     'memberId',
+    'jobId',
+    'runId',
+    'inspectionEpoch',
     'positiveSubmissionEvidenceRecorded',
     'memberLifecycle',
     'tracklyJobStatus',
@@ -153,7 +159,8 @@ function validateSelection(receipt) {
   if (!Array.isArray(receipt.approvedJobIds)) {
     errors.push('approvedJobIds must be an array');
   } else {
-    if (receipt.approvedJobIds.length > receipt.latestExplicitTarget) {
+    if (Number.isInteger(receipt.latestExplicitTarget)
+        && receipt.approvedJobIds.length > receipt.latestExplicitTarget) {
       errors.push('approvedJobIds must not exceed latestExplicitTarget');
     }
     const normalized = receipt.approvedJobIds.filter((id) => Number.isSafeInteger(id) && id > 0);
@@ -209,15 +216,15 @@ function validateFill(receipt, expectedContext) {
     errors.push('humanizerAvailability is invalid');
   }
   if (typeof receipt.humanizerRan !== 'boolean') errors.push('humanizerRan must be a boolean');
-  if (typeof receipt.fallbackWritingGateRan !== 'boolean') errors.push('fallbackWritingGateRan must be a boolean');
+  if (typeof receipt.humanizerFallbackUsed !== 'boolean') errors.push('humanizerFallbackUsed must be a boolean');
   if (receipt.writingPresent === true) {
     if (receipt.localWritingGate !== 'passed') errors.push('localWritingGate must pass when writing is present');
     if (receipt.humanizerAvailability === 'available') {
       requireTrue(errors, receipt, 'humanizerRan');
-      requireFalse(errors, receipt, 'fallbackWritingGateRan');
+      requireFalse(errors, receipt, 'humanizerFallbackUsed');
     } else if (receipt.humanizerAvailability === 'unavailable') {
       requireFalse(errors, receipt, 'humanizerRan');
-      requireTrue(errors, receipt, 'fallbackWritingGateRan');
+      requireTrue(errors, receipt, 'humanizerFallbackUsed');
     } else {
       errors.push('humanizerAvailability must be available or unavailable when writing is present');
     }
@@ -225,7 +232,7 @@ function validateFill(receipt, expectedContext) {
     if (receipt.localWritingGate !== 'not_applicable') errors.push('localWritingGate must be not_applicable when writing is absent');
     if (receipt.humanizerAvailability !== 'not_applicable') errors.push('humanizerAvailability must be not_applicable when writing is absent');
     requireFalse(errors, receipt, 'humanizerRan');
-    requireFalse(errors, receipt, 'fallbackWritingGateRan');
+    requireFalse(errors, receipt, 'humanizerFallbackUsed');
   }
   requireTrue(errors, receipt, 'questionPacketTrueGapsOnly');
   return errors;
@@ -242,9 +249,9 @@ function validateReview(receipt, expectedContext) {
   return errors;
 }
 
-function validateReconciliation(receipt) {
+function validateReconciliation(receipt, expectedContext) {
   const errors = [];
-  requireTracklyId(errors, receipt, 'memberId');
+  validateCurrentLineage(errors, receipt, expectedContext);
   requireTrue(errors, receipt, 'positiveSubmissionEvidenceRecorded');
   if (receipt.memberLifecycle !== 'submitted') errors.push('memberLifecycle must be submitted');
   if (receipt.tracklyJobStatus !== 'applied_confirmed') errors.push('tracklyJobStatus must be applied_confirmed');

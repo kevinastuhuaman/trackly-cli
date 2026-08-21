@@ -163,7 +163,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     localWritingGate: 'passed',
     humanizerAvailability: 'available',
     humanizerRan: true,
-    fallbackWritingGateRan: false,
+    humanizerFallbackUsed: false,
     questionPacketTrueGapsOnly: true,
   };
   const expectedContext = {
@@ -210,14 +210,14 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...fill,
     humanizerAvailability: 'unavailable',
     humanizerRan: false,
-    fallbackWritingGateRan: true,
+    humanizerFallbackUsed: true,
   }, expectedContext), []);
   assert.match(
     validateCheckpoint('fill', {
       ...fill,
       humanizerAvailability: 'not_applicable',
       humanizerRan: false,
-      fallbackWritingGateRan: false,
+      humanizerFallbackUsed: false,
     }, expectedContext).join('\n'),
     /must be available or unavailable when writing is present/
   );
@@ -258,7 +258,13 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   );
 
   const reconciliation = {
+    workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
     memberId: 201,
+    jobId: 101,
+    runId: 401,
+    inspectionEpoch: 2,
     positiveSubmissionEvidenceRecorded: true,
     memberLifecycle: 'submitted',
     tracklyJobStatus: 'applied_confirmed',
@@ -268,25 +274,29 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     closeReceiptRecorded: true,
     postCloseUnionAbsenceProven: true,
   };
-  assert.deepEqual(validateCheckpoint('reconciliation', reconciliation), []);
+  assert.deepEqual(validateCheckpoint('reconciliation', reconciliation, expectedContext), []);
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, tracklyJobStatus: 'applied' }).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, tracklyJobStatus: 'applied' }, expectedContext).join('\n'),
     /tracklyJobStatus/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, completeTabInventoryRecorded: false }).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, completeTabInventoryRecorded: false }, expectedContext).join('\n'),
     /completeTabInventoryRecorded/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, cleanupPreference: 'never' }).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, cleanupPreference: 'never' }, expectedContext).join('\n'),
     /cannot be closed_verified/
+  );
+  assert.match(
+    validateCheckpoint('reconciliation', { ...reconciliation, runId: 402 }, expectedContext).join('\n'),
+    /runId must match expectedContext/
   );
   for (const browserTabStatus of ['open', 'closure_unverified']) {
     const pending = { ...reconciliation, browserTabStatus };
     delete pending.completeTabInventoryRecorded;
     delete pending.closeReceiptRecorded;
     delete pending.postCloseUnionAbsenceProven;
-    assert.deepEqual(validateCheckpoint('reconciliation', pending), []);
+    assert.deepEqual(validateCheckpoint('reconciliation', pending, expectedContext), []);
   }
 });
 
