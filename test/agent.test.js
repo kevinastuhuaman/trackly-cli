@@ -74,10 +74,20 @@ test('agent setup installs one canonical skill and links both clients', () => {
       input: JSON.stringify({
         receipt: {
           workMode: 'accessible_execution',
+          executionId: 301,
+          batchId: 501,
           latestExplicitTarget: 1,
           approvedJobIds: [101],
           approvalRecorded: true,
           noFormMutationBeforeApproval: true,
+          queueExhausted: false,
+        },
+        expectedContext: {
+          workMode: 'accessible_execution',
+          executionId: 301,
+          batchId: 501,
+          latestExplicitTarget: 1,
+          selectableJobIds: [101],
           queueExhausted: false,
         },
       }),

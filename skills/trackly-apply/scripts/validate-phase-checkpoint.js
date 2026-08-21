@@ -28,6 +28,8 @@ const COMMON_LINEAGE_FIELDS = ['workMode', 'batchId', 'memberId', 'jobId', 'runI
 const PHASE_FIELDS = {
   selection: new Set([
     'workMode',
+    'executionId',
+    'batchId',
     'latestExplicitTarget',
     'approvedJobIds',
     'approvalRecorded',
@@ -44,7 +46,7 @@ const PHASE_FIELDS = {
     'inspectionEpoch',
     'classification',
     'exactRequisitionVerified',
-    'originAndTenantVerified',
+    'originPolicyVerified',
     'nonMutatingProbe',
     'privateDataEntered',
     'applicantControlsObserved',
@@ -162,10 +164,16 @@ function validateCurrentLineage(errors, receipt, expectedContext, jobSetField = 
   }
 }
 
-function validateSelection(receipt) {
+function validateSelection(receipt, expectedContext) {
   const errors = [];
   if (!WORK_MODES.has(receipt.workMode)) {
     errors.push('workMode must be accessible_execution or fixed_inspection');
+  }
+  requireTracklyId(errors, receipt, 'batchId');
+  if (receipt.workMode === 'accessible_execution') {
+    requireTracklyId(errors, receipt, 'executionId');
+  } else if (receipt.workMode === 'fixed_inspection' && Object.hasOwn(receipt, 'executionId')) {
+    errors.push('executionId must be omitted for fixed_inspection');
   }
   const maximumTarget = receipt.workMode === 'fixed_inspection' ? 100 : 20;
   if (!Number.isInteger(receipt.latestExplicitTarget)
@@ -190,6 +198,38 @@ function validateSelection(receipt) {
   requireTrue(errors, receipt, 'approvalRecorded');
   requireTrue(errors, receipt, 'noFormMutationBeforeApproval');
   if (typeof receipt.queueExhausted !== 'boolean') errors.push('queueExhausted must be a boolean');
+  if (!expectedContext || typeof expectedContext !== 'object' || Array.isArray(expectedContext)) {
+    errors.push('expectedContext is required');
+    return errors;
+  }
+  const expectedFields = new Set(['workMode', 'batchId', 'latestExplicitTarget', 'selectableJobIds', 'queueExhausted']);
+  if (receipt.workMode === 'accessible_execution') expectedFields.add('executionId');
+  for (const field of Object.keys(expectedContext)) {
+    if (!expectedFields.has(field)) errors.push(`unexpected expectedContext field: ${field}`);
+  }
+  if (receipt.workMode !== expectedContext.workMode) errors.push('workMode must match expectedContext');
+  if (receipt.batchId !== expectedContext.batchId) errors.push('batchId must match expectedContext');
+  if (receipt.workMode === 'accessible_execution'
+      && receipt.executionId !== expectedContext.executionId) {
+    errors.push('executionId must match expectedContext');
+  }
+  if (receipt.workMode === 'fixed_inspection' && Object.hasOwn(expectedContext, 'executionId')) {
+    errors.push('expectedContext.executionId must be omitted for fixed_inspection');
+  }
+  if (receipt.latestExplicitTarget !== expectedContext.latestExplicitTarget) {
+    errors.push('latestExplicitTarget must match expectedContext');
+  }
+  if (receipt.queueExhausted !== expectedContext.queueExhausted) {
+    errors.push('queueExhausted must match expectedContext');
+  }
+  if (!Array.isArray(expectedContext.selectableJobIds)
+      || expectedContext.selectableJobIds.some((id) => !Number.isSafeInteger(id) || id < 1)
+      || new Set(expectedContext.selectableJobIds).size !== expectedContext.selectableJobIds.length) {
+    errors.push('expectedContext.selectableJobIds must contain unique positive safe integers');
+  } else if (Array.isArray(receipt.approvedJobIds)
+      && receipt.approvedJobIds.some((id) => !expectedContext.selectableJobIds.includes(id))) {
+    errors.push('approvedJobIds must belong to expectedContext.selectableJobIds');
+  }
   return errors;
 }
 
@@ -198,7 +238,7 @@ function validateAccess(receipt, expectedContext) {
   validateCurrentLineage(errors, receipt, expectedContext, 'waveJobIds');
   if (!ACCESS_STATES.has(receipt.classification)) errors.push('classification must be a terminal access state');
   requireTrue(errors, receipt, 'exactRequisitionVerified');
-  requireTrue(errors, receipt, 'originAndTenantVerified');
+  requireTrue(errors, receipt, 'originPolicyVerified');
   requireTrue(errors, receipt, 'nonMutatingProbe');
   requireFalse(errors, receipt, 'privateDataEntered');
   if (['accessible', 'captcha_at_submit'].includes(receipt.classification)) {
@@ -305,11 +345,7 @@ function validateCheckpoint(phase, receipt, expectedContext) {
   const unexpectedFields = Object.keys(receipt)
     .filter((field) => !PHASE_FIELDS[phase].has(field))
     .map((field) => `unexpected field: ${field}`);
-  const contextErrors = [];
-  if (phase === 'selection' && expectedContext !== undefined) {
-    contextErrors.push('expectedContext must be omitted for selection');
-  }
-  return [...unexpectedFields, ...contextErrors, ...VALIDATORS[phase](receipt, expectedContext)];
+  return [...unexpectedFields, ...VALIDATORS[phase](receipt, expectedContext)];
 }
 
 async function readReceiptInput(stream) {

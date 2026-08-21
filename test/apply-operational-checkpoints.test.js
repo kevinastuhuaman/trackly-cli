@@ -53,6 +53,7 @@ test('access probe requires actual applicant controls and typed terminal states'
   assert.match(probe, /Adobe|Microsoft/i);
   assert.match(probe, /never[\s\S]*private data[\s\S]*probe/i);
   assert.match(probe, /inactive[\s\S]*contract 3\.7\.3[\s\S]*unknown_unobservable/i);
+  assert.match(probe, /trackly_employer_source_exact_origin[\s\S]*exact listed origin[\s\S]*do not invent or require an ATS tenant/i);
 });
 
 test('phase checkpoint validator accepts complete value-free receipts and rejects unsafe ones', () => {
@@ -60,24 +61,43 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
 
   const selection = {
     workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
     latestExplicitTarget: 20,
     approvedJobIds: [101, 102],
     approvalRecorded: true,
     noFormMutationBeforeApproval: true,
     queueExhausted: true,
   };
-  assert.deepEqual(validateCheckpoint('selection', selection), []);
-  assert.deepEqual(validateCheckpoint('selection', {
+  const selectionContext = {
+    workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
+    latestExplicitTarget: 20,
+    selectableJobIds: [101, 102],
+    queueExhausted: true,
+  };
+  assert.deepEqual(validateCheckpoint('selection', selection, selectionContext), []);
+  const fixedSelection = {
     ...selection,
     workMode: 'fixed_inspection',
     latestExplicitTarget: 100,
     approvedJobIds: Array.from({ length: 100 }, (_, index) => index + 1),
-  }), []);
+  };
+  delete fixedSelection.executionId;
+  const fixedSelectionContext = {
+    workMode: 'fixed_inspection',
+    batchId: 501,
+    latestExplicitTarget: 100,
+    selectableJobIds: fixedSelection.approvedJobIds,
+    queueExhausted: true,
+  };
+  assert.deepEqual(validateCheckpoint('selection', fixedSelection, fixedSelectionContext), []);
   assert.match(
     validateCheckpoint('selection', {
       ...selection,
       latestExplicitTarget: 21,
-    }).join('\n'),
+    }, { ...selectionContext, latestExplicitTarget: 21 }).join('\n'),
     /1 to 20 for accessible_execution/
   );
   assert.match(
@@ -85,22 +105,22 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...selection,
       workMode: 'fixed_inspection',
       latestExplicitTarget: 101,
-    }).join('\n'),
+    }, { ...fixedSelectionContext, latestExplicitTarget: 101 }).join('\n'),
     /1 to 100 for fixed_inspection/
   );
-  assert.deepEqual(validateCheckpoint('selection', { ...selection, approvedJobIds: [] }), []);
+  assert.deepEqual(validateCheckpoint('selection', { ...selection, approvedJobIds: [] }, selectionContext), []);
   assert.deepEqual(validateCheckpoint('selection', {
     ...selection,
     latestExplicitTarget: 5,
     approvedJobIds: [101, 102],
     queueExhausted: false,
-  }), []);
+  }, { ...selectionContext, latestExplicitTarget: 5, queueExhausted: false }), []);
   assert.match(
     validateCheckpoint('selection', {
       ...selection,
       latestExplicitTarget: 1,
       approvedJobIds: [101, 'private@example.com'],
-    }).join('\n'),
+    }, { ...selectionContext, latestExplicitTarget: 1 }).join('\n'),
     /must not exceed latestExplicitTarget/
   );
   assert.match(
@@ -108,23 +128,23 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...selection,
       latestExplicitTarget: 1,
       approvedJobIds: [101, 'private@example.com'],
-    }).join('\n'),
+    }, { ...selectionContext, latestExplicitTarget: 1 }).join('\n'),
     /positive safe integers/
   );
   assert.match(
-    validateCheckpoint('selection', { ...selection, approvedJobIds: [], queueExhausted: false }).join('\n'),
+    validateCheckpoint('selection', { ...selection, approvedJobIds: [], queueExhausted: false }, selectionContext).join('\n'),
     /queueExhausted/
   );
   assert.match(
-    validateCheckpoint('selection', { ...selection, noFormMutationBeforeApproval: false }).join('\n'),
+    validateCheckpoint('selection', { ...selection, noFormMutationBeforeApproval: false }, selectionContext).join('\n'),
     /noFormMutationBeforeApproval/
   );
   assert.match(
-    validateCheckpoint('selection', { ...selection, email: 'private@example.com' }).join('\n'),
+    validateCheckpoint('selection', { ...selection, email: 'private@example.com' }, selectionContext).join('\n'),
     /unexpected field: email/
   );
   assert.match(
-    validateCheckpoint('selection', { ...selection, approvedJobIds: ['private@example.com'] }).join('\n'),
+    validateCheckpoint('selection', { ...selection, approvedJobIds: ['private@example.com'] }, selectionContext).join('\n'),
     /positive safe integers/
   );
   assert.doesNotMatch(
@@ -132,8 +152,16 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...selection,
       approvedJobIds: ['private@example.com'],
       queueExhausted: false,
-    }).join('\n'),
+    }, selectionContext).join('\n'),
     /may be empty/
+  );
+  assert.match(
+    validateCheckpoint('selection', { ...selection, approvedJobIds: [999] }, selectionContext).join('\n'),
+    /must belong to expectedContext\.selectableJobIds/
+  );
+  assert.match(
+    validateCheckpoint('selection', { ...selection, latestExplicitTarget: 1 }, selectionContext).join('\n'),
+    /latestExplicitTarget must match expectedContext/
   );
 
   const expectedContext = {
@@ -161,7 +189,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     inspectionEpoch: 2,
     classification: 'accessible',
     exactRequisitionVerified: true,
-    originAndTenantVerified: true,
+    originPolicyVerified: true,
     nonMutatingProbe: true,
     privateDataEntered: false,
     applicantControlsObserved: true,
@@ -408,12 +436,22 @@ test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async 
   const payload = Buffer.from(JSON.stringify({
     receipt: {
       workMode: 'accessible_execution',
+      executionId: 301,
+      batchId: 501,
       latestExplicitTarget: 1,
       approvedJobIds: [101],
       approvalRecorded: true,
       noFormMutationBeforeApproval: true,
       queueExhausted: false,
       é: true,
+    },
+    expectedContext: {
+      workMode: 'accessible_execution',
+      executionId: 301,
+      batchId: 501,
+      latestExplicitTarget: 1,
+      selectableJobIds: [101],
+      queueExhausted: false,
     },
   }), 'utf8');
   const marker = Buffer.from('é', 'utf8');
@@ -451,15 +489,25 @@ test('phase checkpoint CLI validates envelopes from a non-skill working director
   const validator = path.join(root, 'skills/trackly-apply/scripts/validate-phase-checkpoint.js');
   const receipt = {
     workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
     latestExplicitTarget: 1,
     approvedJobIds: [101],
     approvalRecorded: true,
     noFormMutationBeforeApproval: true,
     queueExhausted: false,
   };
+  const expectedContext = {
+    workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
+    latestExplicitTarget: 1,
+    selectableJobIds: [101],
+    queueExhausted: false,
+  };
   const valid = spawnSync(process.execPath, [validator, 'selection'], {
     cwd: path.dirname(root),
-    input: JSON.stringify({ receipt }),
+    input: JSON.stringify({ receipt, expectedContext }),
     encoding: 'utf8',
   });
   assert.equal(valid.status, 0);
@@ -467,7 +515,7 @@ test('phase checkpoint CLI validates envelopes from a non-skill working director
 
   const invalid = spawnSync(process.execPath, [validator, 'selection'], {
     cwd: path.dirname(root),
-    input: JSON.stringify({ receipt: { ...receipt, approvalRecorded: false } }),
+    input: JSON.stringify({ receipt: { ...receipt, approvalRecorded: false }, expectedContext }),
     encoding: 'utf8',
   });
   assert.equal(invalid.status, 1);
@@ -507,19 +555,19 @@ test('phase checkpoint CLI validates envelopes from a non-skill working director
 
   const extraEnvelopeField = spawnSync(process.execPath, [validator, 'selection'], {
     cwd: path.dirname(root),
-    input: JSON.stringify({ receipt, rawAnswer: 'private text' }),
+    input: JSON.stringify({ receipt, expectedContext, rawAnswer: 'private text' }),
     encoding: 'utf8',
   });
   assert.equal(extraEnvelopeField.status, 1);
   assert.match(extraEnvelopeField.stderr, /unexpected envelope field: rawAnswer/);
 
-  const selectionContext = spawnSync(process.execPath, [validator, 'selection'], {
+  const missingSelectionContext = spawnSync(process.execPath, [validator, 'selection'], {
     cwd: path.dirname(root),
-    input: JSON.stringify({ receipt, expectedContext: {} }),
+    input: JSON.stringify({ receipt }),
     encoding: 'utf8',
   });
-  assert.equal(selectionContext.status, 1);
-  assert.match(selectionContext.stderr, /expectedContext must be omitted for selection/);
+  assert.equal(missingSelectionContext.status, 1);
+  assert.match(missingSelectionContext.stderr, /expectedContext is required/);
 });
 
 test('performance guidance permits value-free schema reuse but forbids answer caching', () => {

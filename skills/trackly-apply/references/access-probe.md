@@ -6,7 +6,8 @@ durably terminal. A provider hint is scheduling input, never sufficient proof.
 ## States
 
 - `requisition_loaded`: the exact stored HTTPS requisition loaded and its
-  employer, role, requisition, origin, and tenant identity passed.
+  employer, role, requisition, and complete origin policy passed, including a
+  tenant only when the policy requires one.
 - `apply_entry_found`: a genuine application-entry control exists.
 - `intermediate_apply_shell`: a modal, chooser, overview, marketing shell,
   guest landing page, resume-choice screen, or routing page. Accessibility is
@@ -27,7 +28,10 @@ durably terminal. A provider hint is scheduling input, never sufficient proof.
 ## Transition contract
 
 1. Begin from only the exact backend-stored requisition URL.
-2. Validate HTTPS, employer, role, requisition, origin, and ATS tenant.
+2. Validate HTTPS, employer, role, requisition, and the complete authoritative
+   origin policy. For a vendor-hosted ATS, this includes the supplied tenant
+   rule and exact verified tenant. For `trackly_employer_source_exact_origin`,
+   validate only the exact listed origin; do not invent or require an ATS tenant.
 3. Follow ordinary non-sensitive application-entry controls while remaining in
    `intermediate_apply_shell`.
 4. Stop only at genuine applicant controls or one typed blocker. An Apply button,
@@ -39,7 +43,8 @@ durably terminal. A provider hint is scheduling input, never sufficient proof.
    recorded. Use `accessible`, not the local state name, in the access checkpoint.
    `captcha_at_submit` may continue through review because the user owns Submit;
    every other access wall is parked without consuming capacity.
-7. Revalidate origin, tenant, and exact requisition after every redirect.
+7. Revalidate origin, any policy-required tenant, and exact requisition after
+   every redirect.
 8. Keep `inactive` as the exact local page observation, but do not claim that
    Trackly stored a disposition its active contract does not expose. Under MCP
    contract 3.7.3, persist and checkpoint the conservative non-counting

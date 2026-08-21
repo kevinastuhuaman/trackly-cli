@@ -1,9 +1,12 @@
 # Access probe
 
 Treat provider hints as scheduling input only. Start from the frozen requisition,
-verify HTTPS, company, role, requisition, origin, and tenant, then follow ordinary
-application-entry controls without changing applicant fields or transmitting
-private data.
+verify HTTPS, company, role, requisition, and the complete authoritative origin
+policy, then follow ordinary application-entry controls without changing
+applicant fields or transmitting private data. Validate the supplied tenant rule
+for vendor-hosted ATS policies. For the direct-employer exact-origin verification
+policy, validate only the exact listed origin and do not invent or require an ATS
+tenant.
 
 Use these states:
 

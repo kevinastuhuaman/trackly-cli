@@ -63,9 +63,13 @@ node "<skill-dir>/scripts/validate-phase-checkpoint.js" <phase>
 ```
 
 Pass `{"receipt": {...}, "expectedContext": {...}}` on standard input. The
-envelope permits only those two fields. `expectedContext` is required for
-access, fill, review, and reconciliation, and must be omitted for selection. Build
-it only from the current authoritative work receipt. For access, include the
+envelope permits only those two fields. `expectedContext` is required for every
+phase and must be built only from the current authoritative work receipt. For
+selection, include `workMode`, the authoritative `latestExplicitTarget`,
+`batchId`, `queueExhausted`, and `selectableJobIds`: the access-proven job IDs
+for an accessible execution or exact frozen member job IDs for a fixed
+inspection. Include `executionId` only for an accessible execution. For access,
+include the
 exact current `waveJobIds`, including typed blockers. For later phases, include
 the exact `approvedJobIds` from the validated selection or authoritative
 recovered approval receipt. A nonzero exit means the
@@ -77,6 +81,8 @@ phase is not complete. The script accepts `selection`, `access`, `fill`,
 Required fields:
 
 - `workMode`: `accessible_execution` or `fixed_inspection`;
+- positive safe-integer `batchId`, plus positive safe-integer `executionId` only
+  for an accessible execution;
 - `latestExplicitTarget`: integer 1-20 for an accessible execution, or 1-100
   for a fixed inspection, matching the public batch-size contract;
 - `approvedJobIds`: unique positive safe-integer Trackly job IDs for the exact
@@ -86,6 +92,10 @@ Required fields:
 - `noFormMutationBeforeApproval: true`; and
 - `queueExhausted`: boolean. A non-empty set smaller than the target is a valid
   interim wave; only an empty set requires this to be true.
+
+Every selection field must match `expectedContext`, and every approved job ID
+must belong to `expectedContext.selectableJobIds`. The user's approval may
+authorize a subset, but it can never introduce a job or shrink the hard target.
 
 ### Access
 
@@ -102,7 +112,7 @@ Required fields:
   uses durable `accessible`, while a locally observed `inactive` posting uses
   conservative `unknown_unobservable`; never put either unsupported local state
   name in the receipt or claim Trackly stored it;
-- `exactRequisitionVerified`, `originAndTenantVerified`, and
+- `exactRequisitionVerified`, `originPolicyVerified`, and
   `nonMutatingProbe` all true;
 - `privateDataEntered: false`; and
 - `applicantControlsObserved: true` only for durable `accessible` and

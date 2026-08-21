@@ -3668,7 +3668,7 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /Never activate the final Submit control/);
   assert.match(skill, /jobs the user approved/);
   assert.match(skill, /Never invent identity, legal, immigration/);
-  assert.match(skill, /exact frozen company, title, requisition URL, verified ATS provider and tenant/);
+  assert.match(skill, /exact frozen company, title, requisition URL, authorized origins/);
   assert.match(skill, /CAPTCHA, OTP, login credentials, account creation/);
   assert.match(skill, /visible success state or the user's explicit confirmation/);
   assert.match(skill, /requiresLocalAgentOrManualUpload/);
@@ -3686,8 +3686,9 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /receipt matches that member, run, version, and inspection epoch/);
   assert.match(skill, /prepared next-wave receipt/);
   assert.match(skill, /frozen `navigation\.requisitionUrl`/);
-  assert.match(skill, /verified ATS provider and tenant/);
-  assert.match(skill, /Revalidate both origin and tenant after every redirect/);
+  assert.match(skill, /verified ATS provider, host suffixes, tenant, and tenant rule when the policy supplies them/);
+  assert.match(skill, /direct-employer exact-origin verification policy[\s\S]*exact listed origin[\s\S]*do not require an ATS tenant/);
+  assert.match(skill, /Revalidate the origin and any policy-required tenant after every redirect/);
   assert.match(skill, /`operation: resume_parked`/);
   assert.match(skill, /`explicitUserResume: true`/);
   assert.match(skill, /Never infer or auto-resume parked work/);
@@ -3732,8 +3733,9 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(browserSafety, /Before ending every browser turn/);
   assert.match(browserSafety, /reconcile the complete current inventory/);
   assert.match(browserSafety, /verify each exact persistence receipt/);
-  assert.match(browserSafety, /server-verified authorized origins, host suffixes, verified provider\/tenant, and tenant rule/);
-  assert.match(browserSafety, /both origin and ATS tenant were revalidated/);
+  assert.match(browserSafety, /origin and any policy-required ATS tenant match its server-verified policy/);
+  assert.match(browserSafety, /exact-origin employer policy requires the exact listed origin, not a tenant/);
+  assert.match(browserSafety, /origin and any[\s\S]*policy-required ATS tenant were revalidated/);
   assert.match(skill, /`nextAction: use_active_target`/);
   assert.match(skill, /`nextAction: advance_or_refresh`/);
   assert.match(skill, /only that minimal intersection as `profileKeys`/);

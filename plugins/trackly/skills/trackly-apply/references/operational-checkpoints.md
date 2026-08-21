@@ -25,7 +25,8 @@ receipts.
 
 ## Phase gates
 
-1. **Access:** exact requisition/origin/tenant verified; non-mutating probe;
+1. **Access:** exact requisition and complete origin policy verified, including
+   any policy-required tenant; non-mutating probe;
    typed access state recorded; no private data transmitted.
 2. **Selection:** after access proof, latest target retained; exact accessible
    set shown; approval recorded; no form mutation occurred first.
