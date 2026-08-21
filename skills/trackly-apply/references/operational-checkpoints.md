@@ -79,8 +79,8 @@ Required fields:
   empty only when the accessible queue is exhausted;
 - `approvalRecorded: true`;
 - `noFormMutationBeforeApproval: true`; and
-- `queueExhausted`: boolean. A set smaller than the target is valid only when
-  this is true.
+- `queueExhausted`: boolean. A non-empty set smaller than the target is a valid
+  interim wave; only an empty set requires this to be true.
 
 ### Access
 
@@ -98,9 +98,13 @@ Required fields:
 
 Required fields:
 
-- positive safe-integer `executionId`, `memberId`, `jobId`, `runId`, and
-  `inspectionEpoch`; every value must equal the same field in `expectedContext`,
-  and `jobId` must belong to `expectedContext.approvedJobIds`;
+- `workMode`: `accessible_execution` or `fixed_inspection`;
+- positive safe-integer `batchId`, `memberId`, `jobId`, and `runId`, plus a
+  non-negative safe-integer `inspectionEpoch`; every value must equal the same
+  field in `expectedContext`, and `jobId` must belong to
+  `expectedContext.approvedJobIds`;
+- positive safe-integer `executionId` for `accessible_execution`, matching
+  `expectedContext`; omit it from both objects for `fixed_inspection`;
 - `visibleControlCount`, `committedControlCount`, and `typedExceptionCount`,
   where committed plus exceptions equals visible;
 - `knownOmissionCount: 0`;
@@ -123,8 +127,9 @@ receipt or a typed exception.
 
 Required fields:
 
-- positive safe-integer `executionId`, `memberId`, `jobId`, `runId`, and
-  `inspectionEpoch`; every value must equal the same field in the current
+- the same mode-specific lineage as Fill: `workMode`, `batchId`, `memberId`,
+  `jobId`, `runId`, and non-negative `inspectionEpoch`, plus `executionId` only
+  for `accessible_execution`; every value must match the current
   `expectedContext`, and `jobId` must remain in its approved set;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
   `reviewTabPreserved`, and `userVisibleHandoffProven` all true; and

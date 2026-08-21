@@ -66,6 +66,12 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   };
   assert.deepEqual(validateCheckpoint('selection', selection), []);
   assert.deepEqual(validateCheckpoint('selection', { ...selection, approvedJobIds: [] }), []);
+  assert.deepEqual(validateCheckpoint('selection', {
+    ...selection,
+    latestExplicitTarget: 5,
+    approvedJobIds: [101, 102],
+    queueExhausted: false,
+  }), []);
   assert.match(
     validateCheckpoint('selection', {
       ...selection,
@@ -131,7 +137,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   );
 
   const fill = {
+    workMode: 'accessible_execution',
     executionId: 301,
+    batchId: 501,
     memberId: 201,
     jobId: 101,
     runId: 401,
@@ -151,7 +159,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     questionPacketTrueGapsOnly: true,
   };
   const expectedContext = {
+    workMode: 'accessible_execution',
     executionId: 301,
+    batchId: 501,
     memberId: 201,
     jobId: 101,
     runId: 401,
@@ -159,6 +169,19 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     approvedJobIds: [101, 102],
   };
   assert.deepEqual(validateCheckpoint('fill', fill, expectedContext), []);
+  const { executionId: omittedFillExecutionId, ...fixedFill } = fill;
+  const { executionId: omittedContextExecutionId, ...fixedExpectedContext } = expectedContext;
+  assert.equal(omittedFillExecutionId, 301);
+  assert.equal(omittedContextExecutionId, 301);
+  assert.deepEqual(validateCheckpoint('fill', {
+    ...fixedFill,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+  }, {
+    ...fixedExpectedContext,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+  }), []);
   assert.match(
     validateCheckpoint('fill', { ...fill, knownOmissionCount: 1 }, expectedContext).join('\n'),
     /knownOmissionCount/
@@ -192,7 +215,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   );
 
   const review = {
+    workMode: 'accessible_execution',
     executionId: 301,
+    batchId: 501,
     memberId: 201,
     jobId: 101,
     runId: 401,
@@ -204,6 +229,17 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     userVisibleHandoffProven: true,
   };
   assert.deepEqual(validateCheckpoint('review', review, expectedContext), []);
+  const { executionId: omittedReviewExecutionId, ...fixedReview } = review;
+  assert.equal(omittedReviewExecutionId, 301);
+  assert.deepEqual(validateCheckpoint('review', {
+    ...fixedReview,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+  }, {
+    ...fixedExpectedContext,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+  }), []);
   assert.match(
     validateCheckpoint('review', { ...review, submitActivated: true }, expectedContext).join('\n'),
     /submitActivated/

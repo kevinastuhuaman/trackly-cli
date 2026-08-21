@@ -21,7 +21,8 @@ const CLEANUP_PREFERENCES = new Set([
 
 const TAB_STATES = new Set(['open', 'closure_unverified', 'closed_verified']);
 const MAX_RECEIPT_BYTES = 64 * 1024;
-const LINEAGE_FIELDS = ['executionId', 'memberId', 'jobId', 'runId', 'inspectionEpoch'];
+const WORK_MODES = new Set(['accessible_execution', 'fixed_inspection']);
+const COMMON_LINEAGE_FIELDS = ['workMode', 'batchId', 'memberId', 'jobId', 'runId', 'inspectionEpoch'];
 
 const PHASE_FIELDS = {
   selection: new Set([
@@ -41,7 +42,9 @@ const PHASE_FIELDS = {
     'applicantControlsObserved',
   ]),
   fill: new Set([
+    'workMode',
     'executionId',
+    'batchId',
     'memberId',
     'jobId',
     'runId',
@@ -61,7 +64,9 @@ const PHASE_FIELDS = {
     'questionPacketTrueGapsOnly',
   ]),
   review: new Set([
+    'workMode',
     'executionId',
+    'batchId',
     'memberId',
     'jobId',
     'runId',
@@ -106,13 +111,29 @@ function requireCount(errors, receipt, field) {
 }
 
 function validateCurrentLineage(errors, receipt, expectedContext) {
-  for (const field of LINEAGE_FIELDS) requireTracklyId(errors, receipt, field);
+  if (!WORK_MODES.has(receipt.workMode)) errors.push('workMode must be accessible_execution or fixed_inspection');
+  for (const field of ['batchId', 'memberId', 'jobId', 'runId']) requireTracklyId(errors, receipt, field);
+  if (!Number.isSafeInteger(receipt.inspectionEpoch) || receipt.inspectionEpoch < 0) {
+    errors.push('inspectionEpoch must be a non-negative safe integer');
+  }
+  if (receipt.workMode === 'accessible_execution') {
+    requireTracklyId(errors, receipt, 'executionId');
+  } else if (receipt.workMode === 'fixed_inspection' && Object.hasOwn(receipt, 'executionId')) {
+    errors.push('executionId must be omitted for fixed_inspection');
+  }
   if (!expectedContext || typeof expectedContext !== 'object' || Array.isArray(expectedContext)) {
     errors.push('expectedContext is required');
     return;
   }
-  for (const field of LINEAGE_FIELDS) {
+  for (const field of COMMON_LINEAGE_FIELDS) {
     if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
+  }
+  if (receipt.workMode === 'accessible_execution'
+      && receipt.executionId !== expectedContext.executionId) {
+    errors.push('executionId must match expectedContext');
+  }
+  if (receipt.workMode === 'fixed_inspection' && Object.hasOwn(expectedContext, 'executionId')) {
+    errors.push('expectedContext.executionId must be omitted for fixed_inspection');
   }
   if (!Array.isArray(expectedContext.approvedJobIds)
       || expectedContext.approvedJobIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
@@ -138,10 +159,8 @@ function validateSelection(receipt) {
     const normalized = receipt.approvedJobIds.filter((id) => Number.isSafeInteger(id) && id > 0);
     if (normalized.length !== receipt.approvedJobIds.length) errors.push('approvedJobIds must contain positive safe integers');
     if (new Set(normalized).size !== normalized.length) errors.push('approvedJobIds must be unique');
-    if (Number.isInteger(receipt.latestExplicitTarget)
-        && normalized.length < receipt.latestExplicitTarget
-        && receipt.queueExhausted !== true) {
-      errors.push('approvedJobIds may be below latestExplicitTarget only when queueExhausted is true');
+    if (normalized.length === 0 && receipt.queueExhausted !== true) {
+      errors.push('approvedJobIds may be empty only when queueExhausted is true');
     }
   }
   requireTrue(errors, receipt, 'approvalRecorded');
