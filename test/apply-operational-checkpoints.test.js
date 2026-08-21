@@ -332,6 +332,7 @@ test('phase checkpoint CLI rejects oversized receipts before parsing', () => {
 
 test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async () => {
   const validator = path.join(root, 'skills/trackly-apply/scripts/validate-phase-checkpoint.js');
+  const { readReceiptInput } = require('../skills/trackly-apply/scripts/validate-phase-checkpoint');
   const payload = Buffer.from(JSON.stringify({
     receipt: {
       latestExplicitTarget: 1,
@@ -345,6 +346,14 @@ test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async 
   const marker = Buffer.from('é', 'utf8');
   const markerIndex = payload.indexOf(marker);
   assert.notEqual(markerIndex, -1);
+
+  async function* splitInput() {
+    yield payload.subarray(0, markerIndex + 1);
+    yield payload.subarray(markerIndex + 1);
+  }
+  const decoded = await readReceiptInput(splitInput());
+  assert.equal(decoded.oversized, false);
+  assert.equal(decoded.input, payload.toString('utf8'));
 
   const result = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [validator, 'selection'], { cwd: path.dirname(root) });

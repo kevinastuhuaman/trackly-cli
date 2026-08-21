@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const { StringDecoder } = require('node:string_decoder');
+
 const ACCESS_STATES = new Set([
   'applicant_fields_reached',
   'authentication_required',
@@ -296,6 +298,26 @@ function validateCheckpoint(phase, receipt, expectedContext) {
   return [...unexpectedFields, ...VALIDATORS[phase](receipt, expectedContext)];
 }
 
+async function readReceiptInput(stream) {
+  const decoder = new StringDecoder('utf8');
+  let input = '';
+  let inputBytes = 0;
+  let oversized = false;
+  for await (const chunk of stream) {
+    if (oversized) continue;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    inputBytes += bytes.length;
+    if (inputBytes > MAX_RECEIPT_BYTES) {
+      oversized = true;
+      input = '';
+      continue;
+    }
+    input += decoder.write(bytes);
+  }
+  if (!oversized) input += decoder.end();
+  return { input, oversized };
+}
+
 async function main() {
   const phase = process.argv[2];
   if (process.stdin.isTTY) {
@@ -303,20 +325,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  let input = '';
-  let inputBytes = 0;
-  let oversized = false;
-  process.stdin.setEncoding('utf8');
-  for await (const chunk of process.stdin) {
-    if (oversized) continue;
-    inputBytes += Buffer.byteLength(chunk);
-    if (inputBytes > MAX_RECEIPT_BYTES) {
-      oversized = true;
-      input = '';
-      continue;
-    }
-    input += chunk;
-  }
+  const { input, oversized } = await readReceiptInput(process.stdin);
   if (oversized) {
     process.stderr.write(`receipt must be at most ${MAX_RECEIPT_BYTES} bytes\n`);
     process.exitCode = 1;
@@ -352,4 +361,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validateCheckpoint };
+module.exports = { readReceiptInput, validateCheckpoint };
