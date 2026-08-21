@@ -95,7 +95,10 @@ Required fields:
   the current `expectedContext`, and `jobId` must belong to its exact
   `waveJobIds` set. This set includes terminal blockers so their required probe
   receipts can validate before replacement scheduling;
-- a terminal `classification` from the access-probe state machine;
+- a terminal classification supported by the active durable disposition
+  contract. Under contract 3.7.3, a locally observed `inactive` posting uses
+  conservative `unknown_unobservable`; never put unsupported `inactive` in the
+  receipt or claim Trackly stored it;
 - `exactRequisitionVerified`, `originAndTenantVerified`, and
   `nonMutatingProbe` all true;
 - `privateDataEntered: false`; and

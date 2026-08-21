@@ -10,7 +10,6 @@ const ACCESS_STATES = new Set([
   'otp_required',
   'captcha_before_form',
   'captcha_at_submit',
-  'inactive',
   'manual_only',
   'unknown_unobservable',
 ]);

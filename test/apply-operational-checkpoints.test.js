@@ -52,6 +52,7 @@ test('access probe requires actual applicant controls and typed terminal states'
   assert.match(probe, /Amazon[\s\S]*sign[- ]in[\s\S]*authentication_required/i);
   assert.match(probe, /Adobe|Microsoft/i);
   assert.match(probe, /never[\s\S]*private data[\s\S]*probe/i);
+  assert.match(probe, /inactive[\s\S]*contract 3\.7\.3[\s\S]*unknown_unobservable/i);
 });
 
 test('phase checkpoint validator accepts complete value-free receipts and rejects unsafe ones', () => {
@@ -171,6 +172,14 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('access', access, { ...accessContext, waveJobIds: [103] }).join('\n'),
     /jobId must belong to expectedContext\.waveJobIds/
+  );
+  assert.match(
+    validateCheckpoint('access', {
+      ...access,
+      classification: 'inactive',
+      applicantControlsObserved: false,
+    }, accessContext).join('\n'),
+    /classification must be a terminal access state/
   );
   const blockerAccess = {
     ...access,

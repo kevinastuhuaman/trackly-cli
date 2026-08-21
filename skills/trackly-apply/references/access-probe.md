@@ -38,8 +38,14 @@ durably terminal. A provider hint is scheduling input, never sufficient proof.
    recorded. `captcha_at_submit` may continue through review because the user
    owns Submit; every other access wall is parked without consuming capacity.
 7. Revalidate origin, tenant, and exact requisition after every redirect.
-8. Record `inactive` without consuming target capacity. Preserve a typed
-   control-plane conflict rather than inventing a replacement run.
+8. Keep `inactive` as the exact local page observation, but do not claim that
+   Trackly stored a disposition its active contract does not expose. Under MCP
+   contract 3.7.3, persist and checkpoint the conservative non-counting
+   `unknown_unobservable` disposition with `applicantControlsObserved: false`,
+   and report the local inactive reason separately without raw page text. Use a
+   future exact `inactive` disposition only when the fetched contract exposes
+   it. Preserve a typed control-plane conflict rather than inventing a
+   replacement run.
 
 ## Provider evidence
 
