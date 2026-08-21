@@ -131,6 +131,11 @@ function validateCurrentLineage(errors, receipt, expectedContext) {
     errors.push('expectedContext is required');
     return;
   }
+  const expectedFields = new Set([...COMMON_LINEAGE_FIELDS, 'approvedJobIds']);
+  if (receipt.workMode === 'accessible_execution') expectedFields.add('executionId');
+  for (const field of Object.keys(expectedContext)) {
+    if (!expectedFields.has(field)) errors.push(`unexpected expectedContext field: ${field}`);
+  }
   for (const field of COMMON_LINEAGE_FIELDS) {
     if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
   }
@@ -287,6 +292,11 @@ function validateCheckpoint(phase, receipt, expectedContext) {
 
 async function main() {
   const phase = process.argv[2];
+  if (process.stdin.isTTY) {
+    process.stderr.write('receipt envelope must be provided on standard input\n');
+    process.exitCode = 1;
+    return;
+  }
   let input = '';
   let inputBytes = 0;
   process.stdin.setEncoding('utf8');

@@ -210,6 +210,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     /jobId must belong to expectedContext\.approvedJobIds/
   );
   assert.match(
+    validateCheckpoint('fill', fill, { ...expectedContext, email: 'private@example.com' }).join('\n'),
+    /unexpected expectedContext field: email/
+  );
+  assert.match(
     validateCheckpoint('fill', { ...fill, humanizerRan: false }, expectedContext).join('\n'),
     /humanizerRan/
   );
@@ -323,6 +327,8 @@ test('phase checkpoint CLI decodes streamed UTF-8 safely and handles read failur
   assert.match(validatorSource, /process\.stdin\.setEncoding\('utf8'\)/);
   assert.match(validatorSource, /main\(\)\.catch\(\(\) => \{/);
   assert.match(validatorSource, /unable to read receipt/);
+  assert.match(validatorSource, /process\.stdin\.isTTY/);
+  assert.match(validatorSource, /receipt envelope must be provided on standard input/);
 });
 
 test('phase checkpoint CLI validates envelopes from a non-skill working directory', () => {
