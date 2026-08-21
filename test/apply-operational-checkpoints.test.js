@@ -70,9 +70,17 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validateCheckpoint('selection', {
       ...selection,
       latestExplicitTarget: 1,
-      approvedJobIds: [101, 102],
+      approvedJobIds: [101, 'private@example.com'],
     }).join('\n'),
     /must not exceed latestExplicitTarget/
+  );
+  assert.match(
+    validateCheckpoint('selection', {
+      ...selection,
+      latestExplicitTarget: 1,
+      approvedJobIds: [101, 'private@example.com'],
+    }).join('\n'),
+    /positive safe integers/
   );
   assert.match(
     validateCheckpoint('selection', { ...selection, approvedJobIds: [], queueExhausted: false }).join('\n'),

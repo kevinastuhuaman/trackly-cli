@@ -131,9 +131,10 @@ function validateSelection(receipt) {
   }
   if (!Array.isArray(receipt.approvedJobIds)) {
     errors.push('approvedJobIds must be an array');
-  } else if (receipt.approvedJobIds.length > receipt.latestExplicitTarget) {
-    errors.push('approvedJobIds must not exceed latestExplicitTarget');
   } else {
+    if (receipt.approvedJobIds.length > receipt.latestExplicitTarget) {
+      errors.push('approvedJobIds must not exceed latestExplicitTarget');
+    }
     const normalized = receipt.approvedJobIds.filter((id) => Number.isSafeInteger(id) && id > 0);
     if (normalized.length !== receipt.approvedJobIds.length) errors.push('approvedJobIds must contain positive safe integers');
     if (new Set(normalized).size !== normalized.length) errors.push('approvedJobIds must be unique');
