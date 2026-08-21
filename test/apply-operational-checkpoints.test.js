@@ -374,7 +374,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validateCheckpoint('reconciliation', { ...reconciliation, runId: 402 }, expectedContext).join('\n'),
     /runId must match expectedContext/
   );
-  for (const browserTabStatus of ['open', 'closure_unverified']) {
+  for (const browserTabStatus of ['open', 'missing', 'closure_unverified']) {
     const pending = { ...reconciliation, browserTabStatus };
     delete pending.completeTabInventoryRecorded;
     delete pending.closeReceiptRecorded;

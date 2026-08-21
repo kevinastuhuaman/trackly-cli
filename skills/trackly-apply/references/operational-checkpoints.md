@@ -162,12 +162,16 @@ Required fields:
 - `tracklyJobStatus: applied_confirmed`;
 - `cleanupPreference`: `never`, `submitted_only`, or
   `submitted_and_probe_blockers`;
-- `browserTabStatus`: `open`, `closure_unverified`, or `closed_verified`; and
+- `browserTabStatus`: `open`, `missing`, `closure_unverified`, or
+  `closed_verified`; `missing` records a durable missing-tab observation but is
+  not closure proof; and
 - for `closed_verified`, `completeTabInventoryRecorded`,
   `closeReceiptRecorded`, and `postCloseUnionAbsenceProven` true.
 
 `cleanupPreference: never` forbids `closed_verified`, even when closure evidence
 exists, because evidence cannot override the user's saved no-close policy.
+For `open`, `missing`, or `closure_unverified`, all three close-proof fields must
+be false or omitted.
 
 Every final report must state the application lifecycle, Trackly job status,
 browser tab status, and whether absence is actually `closed_verified`. These

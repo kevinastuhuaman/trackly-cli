@@ -20,7 +20,7 @@ const CLEANUP_PREFERENCES = new Set([
   'submitted_and_probe_blockers',
 ]);
 
-const TAB_STATES = new Set(['open', 'closure_unverified', 'closed_verified']);
+const TAB_STATES = new Set(['open', 'missing', 'closure_unverified', 'closed_verified']);
 const MAX_RECEIPT_BYTES = 64 * 1024;
 const WORK_MODES = new Set(['accessible_execution', 'fixed_inspection']);
 const COMMON_LINEAGE_FIELDS = ['workMode', 'batchId', 'memberId', 'jobId', 'runId', 'inspectionEpoch'];
