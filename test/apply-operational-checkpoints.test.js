@@ -195,6 +195,13 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     /knownOmissionCount/
   );
   assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      visibleControlCount: Number.MAX_SAFE_INTEGER + 1,
+    }, expectedContext).join('\n'),
+    /visibleControlCount must be a non-negative safe integer/
+  );
+  assert.match(
     validateCheckpoint('fill', { ...fill, inspectionEpoch: 3 }, expectedContext).join('\n'),
     /inspectionEpoch must match expectedContext/
   );

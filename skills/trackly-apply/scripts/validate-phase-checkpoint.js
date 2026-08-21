@@ -111,8 +111,8 @@ function requireTracklyId(errors, receipt, field) {
 }
 
 function requireCount(errors, receipt, field) {
-  if (!Number.isInteger(receipt[field]) || receipt[field] < 0) {
-    errors.push(`${field} must be a non-negative integer`);
+  if (!Number.isSafeInteger(receipt[field]) || receipt[field] < 0) {
+    errors.push(`${field} must be a non-negative safe integer`);
   }
 }
 
