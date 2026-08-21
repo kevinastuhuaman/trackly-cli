@@ -8,7 +8,11 @@ Use this reference for free-text questions such as "Why this company?", motivati
 - These fields never block an application run when they are unknown. The user can continue with the plain default style for the current run or use saved style instructions; asking the user to paste a sample is a fallback only when they explicitly want to calibrate before a completed run provides approved text.
 - Only after durable submitted/applied reconciliation, offer once to save one to three of the user's approved free-text answers as the global `writing.voice_sample`. Show which answers would be included, require an explicit yes, and save nothing on silence or ambiguity. Because the field is sensitive, make the offer only with active sensitive-storage consent; otherwise ask for consent first or skip it. If the user chooses to decline a voice sample, save `writing.voice_sample` with state `declined` at global scope and no answer text so the offer is not repeated. The user may also choose intentionally blank style instructions.
 - Treat the sample and preferences as private user data. Never copy them into the public skill, logs, observations, or another user's defaults.
-- A separate humanizer or writing skill may be used when available, but it is optional. This gate remains authoritative and self-contained.
+- When the Humanizer skill is available, run it automatically for every
+  supported employer-specific draft before the anti-slop gate. Humanizer is
+  mandatory when available; do not wait for the user to remind you. The
+  self-contained anti-slop gate remains the mandatory fallback when Humanizer
+  is unavailable and the final authority in every environment.
 
 ## Draft from evidence
 
@@ -30,7 +34,14 @@ Before entering the response:
 
 1. Remove generic praise, inflated claims, vague transitions, boilerplate conclusions, and chatbot phrases.
 2. Rewrite `not just X, but Y`, ornamental rule-of-three lists, and dangling `-ing` clauses unless the user's sample clearly uses them naturally.
-3. Resolve `writing.em_dash_policy`; unanswered defaults to `forbid`. Build the complete local claim-reference packet and set `claimsComplete: true` only after checking the whole draft. Call `trackly_lint_application_text` and treat its deterministic lint as a blocking gate. Missing claim metadata is a failure, even for an apparently claim-free draft. Never enter text with a failed lint result. `allow_if_voice_sample` requires explicit saved evidence that the approved sample uses that punctuation.
+3. Resolve `writing.em_dash_policy`; unanswered defaults to `forbid`, so the
+   default output contains no em dash. Build the complete local claim-reference
+   packet and set `claimsComplete: true` only after checking the whole draft.
+   Call `trackly_lint_application_text` and treat its deterministic lint as a
+   blocking gate. Missing claim metadata is a failure, even for an apparently
+   claim-free draft. Never enter text with a failed lint result or an unsupported
+   claim. `allow_if_voice_sample` requires explicit saved evidence that the
+   approved sample uses that punctuation.
 4. Vary sentence length and structure. Avoid a sequence of equally sized, equally formal sentences.
 5. Prefer active verbs, concrete nouns, real numbers, and named examples already supported by the profile.
 6. Read the answer aloud. If it sounds like a press release, generic cover letter, or assistant response, rewrite it.

@@ -1482,13 +1482,13 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.6.0 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.7.0 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.6\.0 requires protocol 3\.6\.0 or newer/);
+  assert.match(skill, /Skill 4\.7\.0 requires protocol 3\.6\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.6\.0/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.7\.0/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
@@ -1847,11 +1847,12 @@ test('Apply skill reconciles contradictory ATS submission states without retryin
   assert.match(integrity, /Without success or explicit user confirmation, record blocked/);
 });
 
-test('Apply skill calibrates free-text answers without requiring an external humanizer', () => {
+test('Apply skill runs Humanizer when available and retains a self-contained fallback', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
 
-  assert.match(skill, /Do not require a separate writing or humanizer skill/);
+  assert.match(skill, /Run Humanizer automatically when available/);
+  assert.match(skill, /Do not block the application when Humanizer is unavailable/);
   assert.match(writing, /`writing\.voice_sample` and `writing\.style_instructions`/);
   assert.match(writing, /learned from free-text answers the user actually approved/i);
   assert.match(writing, /never block an application run when they are unknown/);
@@ -1862,7 +1863,7 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /intentionally blank style instructions/);
   assert.match(writing, /continue with the plain default style for the current run/);
   assert.match(writing, /Never copy them into the public skill, logs, observations, or another user's defaults/);
-  assert.match(writing, /This gate remains authoritative and self-contained/);
+  assert.match(writing, /self-contained anti-slop gate remains the mandatory fallback/i);
   assert.match(writing, /unanswered defaults to `forbid`/);
   assert.match(writing, /`trackly_lint_application_text`/);
   assert.match(writing, /generic company praise or unsupported enthusiasm/);
@@ -1871,12 +1872,12 @@ test('Apply skill calibrates free-text answers without requiring an external hum
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.6.0 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.7.0 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.6\.0/);
+  assert.match(skill, /Skill 4\.7\.0/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);

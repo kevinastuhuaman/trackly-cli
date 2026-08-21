@@ -1,5 +1,9 @@
 # Application writing
 
+Run Humanizer automatically for every supported employer-specific draft when it
+is available, then run this local integrity gate. When Humanizer is unavailable,
+this self-contained gate is the mandatory fallback and final authority.
+
 Draft application text only from facts supported by the user's confirmed profile, resume artifact, or the current job record.
 
 When policy permits a strategically useful optional prompt and all facts are

@@ -5,7 +5,7 @@ description: Use trackly Apply to fill a user-approved job application in a cont
 
 # trackly Apply
 
-Use trackly as the source of truth for approved work, reusable application answers, resume artifacts, and durable application progress. Read [references/lifecycle-contract.md](references/lifecycle-contract.md), [references/browser-safety.md](references/browser-safety.md), and [references/review-handoff.md](references/review-handoff.md) before changing an employer form. Read and run [references/answer-resolution.md](references/answer-resolution.md) before generating an employer-form question packet or filling controls. Read [references/application-writing.md](references/application-writing.md) before drafting free text.
+Use trackly as the source of truth for approved work, reusable application answers, resume artifacts, and durable application progress. Read [references/operational-checkpoints.md](references/operational-checkpoints.md), [references/access-probe.md](references/access-probe.md), [references/lifecycle-contract.md](references/lifecycle-contract.md), [references/browser-safety.md](references/browser-safety.md), and [references/review-handoff.md](references/review-handoff.md) before selecting, probing, or changing an employer form. Read and run [references/answer-resolution.md](references/answer-resolution.md) before generating an employer-form question packet or filling controls. Read [references/application-writing.md](references/application-writing.md) before drafting free text.
 
 ## Non-negotiable rules
 
