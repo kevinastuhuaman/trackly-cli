@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -64,6 +65,25 @@ test('agent setup installs one canonical skill and links both clients', () => {
     assert.equal(result.skillVersion, '4.7.0');
     assert.ok(fs.existsSync(path.join(result.canonical, 'SKILL.md')));
     assert.ok(fs.existsSync(path.join(result.canonical, 'references', 'inbox-receipt-preflight.md')));
+    for (const reference of ['operational-checkpoints.md', 'access-probe.md', 'performance-telemetry.md']) {
+      assert.ok(fs.existsSync(path.join(result.canonical, 'references', reference)), reference);
+    }
+    const validator = path.join(result.canonical, 'scripts', 'validate-phase-checkpoint.js');
+    assert.ok(fs.existsSync(validator));
+    const validation = spawnSync(process.execPath, [validator, 'selection'], {
+      input: JSON.stringify({
+        receipt: {
+          latestExplicitTarget: 1,
+          approvedJobIds: [101],
+          approvalRecorded: true,
+          noFormMutationBeforeApproval: true,
+          queueExhausted: false,
+        },
+      }),
+      encoding: 'utf8',
+    });
+    assert.equal(validation.status, 0, validation.stderr);
+    assert.match(validation.stdout, /selection checkpoint valid/);
     assert.equal(result.clients.length, 2);
     for (const client of result.clients) {
       assert.ok(fs.existsSync(path.join(client.target, 'SKILL.md')));

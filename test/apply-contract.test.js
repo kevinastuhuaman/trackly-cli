@@ -1853,6 +1853,8 @@ test('Apply skill runs Humanizer when available and retains a self-contained fal
 
   assert.match(skill, /Run Humanizer automatically when available/);
   assert.match(skill, /Do not block the application when Humanizer is unavailable/);
+  assert.match(writing, /current session exposes the `humanizer` skill/i);
+  assert.match(writing, /matching file elsewhere on disk[\s\S]*not runtime[\s\S]*availability/i);
   assert.match(writing, /`writing\.voice_sample` and `writing\.style_instructions`/);
   assert.match(writing, /learned from free-text answers the user actually approved/i);
   assert.match(writing, /never block an application run when they are unknown/);

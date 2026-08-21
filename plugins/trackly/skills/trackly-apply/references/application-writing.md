@@ -2,7 +2,10 @@
 
 Run Humanizer automatically for every supported employer-specific draft when it
 is available, then run this local integrity gate. When Humanizer is unavailable,
-this self-contained gate is the mandatory fallback and final authority.
+this self-contained gate is the mandatory fallback and final authority. Treat
+Humanizer as available only when the current session exposes the `humanizer`
+skill and its `SKILL.md` can be read; a matching file elsewhere on disk does not
+prove runtime availability.
 
 Draft application text only from facts supported by the user's confirmed profile, resume artifact, or the current job record.
 

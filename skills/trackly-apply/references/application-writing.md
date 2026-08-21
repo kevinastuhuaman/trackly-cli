@@ -12,7 +12,10 @@ Use this reference for free-text questions such as "Why this company?", motivati
   supported employer-specific draft before the anti-slop gate. Humanizer is
   mandatory when available; do not wait for the user to remind you. The
   self-contained anti-slop gate remains the mandatory fallback when Humanizer
-  is unavailable and the final authority in every environment.
+  is unavailable and the final authority in every environment. Mark Humanizer
+  `available` only when the current session exposes the `humanizer` skill and
+  its `SKILL.md` can be read. A matching file elsewhere on disk is not runtime
+  availability. If either check fails, record `unavailable` and use the fallback.
 
 ## Draft from evidence
 
