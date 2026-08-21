@@ -123,6 +123,11 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     inspectionEpoch: 2,
     approvedJobIds: [101, 102],
   };
+  const accessContext = {
+    ...expectedContext,
+    waveJobIds: [101, 103],
+  };
+  delete accessContext.approvedJobIds;
   const access = {
     workMode: 'accessible_execution',
     executionId: 301,
@@ -138,9 +143,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     privateDataEntered: false,
     applicantControlsObserved: true,
   };
-  assert.deepEqual(validateCheckpoint('access', access, expectedContext), []);
+  assert.deepEqual(validateCheckpoint('access', access, accessContext), []);
   assert.match(
-    validateCheckpoint('access', { ...access, applicantControlsObserved: false }, expectedContext).join('\n'),
+    validateCheckpoint('access', { ...access, applicantControlsObserved: false }, accessContext).join('\n'),
     /applicantControlsObserved/
   );
   assert.match(
@@ -148,25 +153,40 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...access,
       classification: 'authentication_required',
       applicantControlsObserved: true,
-    }, expectedContext).join('\n'),
+    }, accessContext).join('\n'),
     /applicantControlsObserved/
   );
   assert.deepEqual(validateCheckpoint('access', {
     ...access,
     classification: 'captcha_at_submit',
-  }, expectedContext), []);
+  }, accessContext), []);
   assert.match(
-    validateCheckpoint('access', { ...access, memberId: 'https://private.example/path' }, expectedContext).join('\n'),
+    validateCheckpoint('access', { ...access, memberId: 'https://private.example/path' }, accessContext).join('\n'),
     /positive safe integer/
   );
   assert.match(
-    validateCheckpoint('access', { ...access, jobId: 102 }, expectedContext).join('\n'),
+    validateCheckpoint('access', { ...access, jobId: 103 }, accessContext).join('\n'),
     /jobId must match expectedContext/
   );
   assert.match(
-    validateCheckpoint('access', access, { ...expectedContext, approvedJobIds: [102] }).join('\n'),
-    /jobId must belong to expectedContext\.approvedJobIds/
+    validateCheckpoint('access', access, { ...accessContext, waveJobIds: [103] }).join('\n'),
+    /jobId must belong to expectedContext\.waveJobIds/
   );
+  const blockerAccess = {
+    ...access,
+    memberId: 203,
+    jobId: 103,
+    runId: 403,
+    classification: 'authentication_required',
+    applicantControlsObserved: false,
+  };
+  const blockerContext = {
+    ...accessContext,
+    memberId: 203,
+    jobId: 103,
+    runId: 403,
+  };
+  assert.deepEqual(validateCheckpoint('access', blockerAccess, blockerContext), []);
 
   const fill = {
     workMode: 'accessible_execution',

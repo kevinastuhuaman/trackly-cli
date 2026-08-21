@@ -65,9 +65,10 @@ node "<skill-dir>/scripts/validate-phase-checkpoint.js" <phase>
 Pass `{"receipt": {...}, "expectedContext": {...}}` on standard input. The
 envelope permits only those two fields. `expectedContext` is required for
 access, fill, review, and reconciliation, and must be omitted for selection. Build
-it only from the current authoritative work receipt plus the exact
-`approvedJobIds` from the validated selection or authoritative recovered
-approval receipt. A nonzero exit means the
+it only from the current authoritative work receipt. For access, include the
+exact current `waveJobIds`, including typed blockers. For later phases, include
+the exact `approvedJobIds` from the validated selection or authoritative
+recovered approval receipt. A nonzero exit means the
 phase is not complete. The script accepts `selection`, `access`, `fill`,
 `review`, and `reconciliation`.
 
@@ -92,7 +93,8 @@ Required fields:
   `batchId`, `memberId`, `jobId`, `runId`, and non-negative `inspectionEpoch`,
   plus `executionId` only for `accessible_execution`; every value must match
   the current `expectedContext`, and `jobId` must belong to its exact
-  `approvedJobIds` set;
+  `waveJobIds` set. This set includes terminal blockers so their required probe
+  receipts can validate before replacement scheduling;
 - a terminal `classification` from the access-probe state machine;
 - `exactRequisitionVerified`, `originAndTenantVerified`, and
   `nonMutatingProbe` all true;

@@ -124,7 +124,7 @@ function requireCount(errors, receipt, field) {
   }
 }
 
-function validateCurrentLineage(errors, receipt, expectedContext) {
+function validateCurrentLineage(errors, receipt, expectedContext, jobSetField = 'approvedJobIds') {
   if (!WORK_MODES.has(receipt.workMode)) errors.push('workMode must be accessible_execution or fixed_inspection');
   for (const field of ['batchId', 'memberId', 'jobId', 'runId']) requireTracklyId(errors, receipt, field);
   if (!Number.isSafeInteger(receipt.inspectionEpoch) || receipt.inspectionEpoch < 0) {
@@ -139,7 +139,7 @@ function validateCurrentLineage(errors, receipt, expectedContext) {
     errors.push('expectedContext is required');
     return;
   }
-  const expectedFields = new Set([...COMMON_LINEAGE_FIELDS, 'approvedJobIds']);
+  const expectedFields = new Set([...COMMON_LINEAGE_FIELDS, jobSetField]);
   if (receipt.workMode === 'accessible_execution') expectedFields.add('executionId');
   for (const field of Object.keys(expectedContext)) {
     if (!expectedFields.has(field)) errors.push(`unexpected expectedContext field: ${field}`);
@@ -154,11 +154,11 @@ function validateCurrentLineage(errors, receipt, expectedContext) {
   if (receipt.workMode === 'fixed_inspection' && Object.hasOwn(expectedContext, 'executionId')) {
     errors.push('expectedContext.executionId must be omitted for fixed_inspection');
   }
-  if (!Array.isArray(expectedContext.approvedJobIds)
-      || expectedContext.approvedJobIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
-    errors.push('expectedContext.approvedJobIds must contain positive safe integers');
-  } else if (!expectedContext.approvedJobIds.includes(receipt.jobId)) {
-    errors.push('jobId must belong to expectedContext.approvedJobIds');
+  if (!Array.isArray(expectedContext[jobSetField])
+      || expectedContext[jobSetField].some((id) => !Number.isSafeInteger(id) || id < 1)) {
+    errors.push(`expectedContext.${jobSetField} must contain positive safe integers`);
+  } else if (!expectedContext[jobSetField].includes(receipt.jobId)) {
+    errors.push(`jobId must belong to expectedContext.${jobSetField}`);
   }
 }
 
@@ -191,7 +191,7 @@ function validateSelection(receipt) {
 
 function validateAccess(receipt, expectedContext) {
   const errors = [];
-  validateCurrentLineage(errors, receipt, expectedContext);
+  validateCurrentLineage(errors, receipt, expectedContext, 'waveJobIds');
   if (!ACCESS_STATES.has(receipt.classification)) errors.push('classification must be a terminal access state');
   requireTrue(errors, receipt, 'exactRequisitionVerified');
   requireTrue(errors, receipt, 'originAndTenantVerified');
