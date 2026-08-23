@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   check-docs:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
 
     steps:
       # Pinned to commit SHA to prevent supply-chain attacks via tag re-pointing.

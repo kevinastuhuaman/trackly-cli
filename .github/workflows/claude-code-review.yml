@@ -65,7 +65,7 @@ jobs:
     # both plus checkout/precompute so a hung primary still leaves the fallback
     # its full window to post.
     timeout-minutes: 90
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
     env:
       API_FORCE_IDLE_TIMEOUT: "1"
       # Model pair (Kevin's choice 2026-07-16): Opus 4.8 primary, Sonnet 5
