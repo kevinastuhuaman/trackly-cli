@@ -13,7 +13,10 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Quota fallback (PR #119, until ~Sep 1 2026): same-repo PRs and trusted
+    # push/schedule events route via repo var CI_RUNNER_LINUX (unset = exactly
+    # ubuntu-latest); fork PRs always stay on GitHub-hosted (public repo).
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
     timeout-minutes: 15
 
     steps:

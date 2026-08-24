@@ -65,7 +65,10 @@ jobs:
     # both plus checkout/precompute so a hung primary still leaves the fallback
     # its full window to post.
     timeout-minutes: 90
-    runs-on: ubuntu-latest
+    # Quota fallback (PR #119, until ~Sep 1 2026): same-repo PRs route via repo
+    # var CI_RUNNER_LINUX (unset = exactly ubuntu-latest); fork PRs never reach
+    # the shared bridge (public repo). PR-only trigger, so no push-event term.
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
     env:
       API_FORCE_IDLE_TIMEOUT: "1"
       # Model pair (Kevin's choice 2026-07-16): Opus 4.8 primary, Sonnet 5
