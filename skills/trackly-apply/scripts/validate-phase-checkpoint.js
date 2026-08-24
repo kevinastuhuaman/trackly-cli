@@ -545,6 +545,10 @@ function validateFill(receipt, expectedContext) {
 
 function validateReview(receipt, expectedContext) {
   const errors = [];
+  const resolutionFields = [
+    'resolvedActionCount',
+    'resolvedActionIdsFingerprint',
+  ];
   const checkpointFields = [
     'checkpointAction',
     'continuationAllowed',
@@ -555,7 +559,13 @@ function validateReview(receipt, expectedContext) {
     'checkpointActionCount',
     'checkpointActionIdsFingerprint',
   ];
-  validateCurrentLineage(errors, receipt, expectedContext, 'approvedJobIds', checkpointFields);
+  validateCurrentLineage(
+    errors,
+    receipt,
+    expectedContext,
+    'approvedJobIds',
+    [...resolutionFields, ...checkpointFields],
+  );
   requireTrue(errors, receipt, 'finalIntegrityPassed');
   requireTrue(errors, receipt, 'truthConfirmationRecorded');
   requireFalse(errors, receipt, 'submitActivated');
@@ -584,14 +594,8 @@ function validateReview(receipt, expectedContext) {
   }
   requireCount(errors, receipt, 'checkpointActionCount');
   requireFingerprint(errors, receipt.checkpointActionIdsFingerprint, 'checkpointActionIdsFingerprint');
-  if (receipt.checkpointActionCount !== receipt.resolvedActionCount) {
-    errors.push('checkpointActionCount must equal resolvedActionCount');
-  }
-  if (receipt.checkpointActionIdsFingerprint !== receipt.resolvedActionIdsFingerprint) {
-    errors.push('checkpointActionIdsFingerprint must equal resolvedActionIdsFingerprint');
-  }
   if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
-    for (const field of checkpointFields) {
+    for (const field of [...resolutionFields, ...checkpointFields]) {
       if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
     }
   }
@@ -645,6 +649,10 @@ function validateHandoff(receipt, expectedContext) {
   }
   if (receipt.handoffVisibility === 'unverified' && receipt.reviewReadyClaimed !== false) {
     errors.push('reviewReadyClaimed must be false when handoff visibility is unverified');
+  }
+  if (receipt.browserTabState === 'durable_handoff_proven'
+      && receipt.handoffVisibility !== 'verified') {
+    errors.push('durable_handoff_proven requires verified visibility');
   }
   if (receipt.handoffVisibility === 'verified'
       && !['visible', 'durable_handoff_proven'].includes(receipt.browserTabState)) {
@@ -703,10 +711,26 @@ function validateHandoff(receipt, expectedContext) {
 
 function validateReconciliation(receipt, expectedContext) {
   const errors = [];
-  validateCurrentLineage(errors, receipt, expectedContext);
+  const reconciliationAuthorityFields = [
+    'positiveSubmissionEvidenceRecorded',
+    'memberLifecycle',
+    'tracklyJobStatus',
+  ];
+  validateCurrentLineage(
+    errors,
+    receipt,
+    expectedContext,
+    'approvedJobIds',
+    reconciliationAuthorityFields,
+  );
   requireTrue(errors, receipt, 'positiveSubmissionEvidenceRecorded');
   if (receipt.memberLifecycle !== 'submitted') errors.push('memberLifecycle must be submitted');
   if (receipt.tracklyJobStatus !== 'applied_confirmed') errors.push('tracklyJobStatus must be applied_confirmed');
+  if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
+    for (const field of reconciliationAuthorityFields) {
+      if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
+    }
+  }
   if (!CLEANUP_PREFERENCES.has(receipt.cleanupPreference)) errors.push('cleanupPreference is invalid');
   if (!TAB_STATES.has(receipt.browserTabStatus)) errors.push('browserTabStatus is invalid');
   if (receipt.cleanupPreference === 'never' && receipt.browserTabStatus === 'closed_verified') {

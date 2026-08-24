@@ -602,6 +602,8 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...expectedContext,
     checkpointAction: 'review/manual_submit',
     continuationAllowed: false,
+    resolvedActionCount: 2,
+    resolvedActionIdsFingerprint: 'e'.repeat(64),
     checkpointStatus: 'recorded',
     checkpointMemberVersion: 8,
     checkpointInspectionEpoch: 2,
@@ -622,7 +624,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
     ...Object.fromEntries(Object.entries(reviewContext).filter(([field]) => (
-      field.startsWith('checkpoint') || field === 'continuationAllowed'
+      field.startsWith('checkpoint')
+      || field.startsWith('resolvedAction')
+      || field === 'continuationAllowed'
     ))),
     checkpointInspectionEpoch: 0,
   }), []);
@@ -648,25 +652,21 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     }).join('\n'),
     /checkpointInspectionEpoch must equal inspectionEpoch/
   );
+  assert.deepEqual(validateCheckpoint('review', {
+    ...review,
+    checkpointActionCount: 1,
+    checkpointActionIdsFingerprint: 'f'.repeat(64),
+  }, {
+    ...reviewContext,
+    checkpointActionCount: 1,
+    checkpointActionIdsFingerprint: 'f'.repeat(64),
+  }), []);
   assert.match(
-    validateCheckpoint('review', {
-      ...review,
-      checkpointActionCount: 1,
-    }, {
+    validateCheckpoint('review', review, {
       ...reviewContext,
-      checkpointActionCount: 1,
+      resolvedActionCount: 1,
     }).join('\n'),
-    /checkpointActionCount must equal resolvedActionCount/
-  );
-  assert.match(
-    validateCheckpoint('review', {
-      ...review,
-      checkpointActionIdsFingerprint: 'f'.repeat(64),
-    }, {
-      ...reviewContext,
-      checkpointActionIdsFingerprint: 'f'.repeat(64),
-    }).join('\n'),
-    /checkpointActionIdsFingerprint must equal resolvedActionIdsFingerprint/
+    /resolvedActionCount must match expectedContext/
   );
   assert.match(
     validateCheckpoint('review', { ...review, continuationAllowed: true }, reviewContext).join('\n'),
@@ -821,6 +821,20 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('handoff', {
       ...handoff,
+      browserTabState: 'durable_handoff_proven',
+      handoffVisibility: 'unverified',
+      reviewReadyClaimed: false,
+    }, {
+      ...expectedContext,
+      employerApplicationState: handoff.employerApplicationState,
+      tracklyMemberState: handoff.tracklyMemberState,
+      tracklyJobState: handoff.tracklyJobState,
+    }).join('\n'),
+    /durable_handoff_proven requires verified visibility/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
       browserTabState: 'closed_verified',
       handoffVisibility: 'verified',
       reviewReadyClaimed: true,
@@ -910,21 +924,42 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     closeReceiptRecorded: true,
     postCloseUnionAbsenceProven: true,
   };
-  assert.deepEqual(validateCheckpoint('reconciliation', reconciliation, expectedContext), []);
+  const reconciliationContext = {
+    ...expectedContext,
+    positiveSubmissionEvidenceRecorded: true,
+    memberLifecycle: 'submitted',
+    tracklyJobStatus: 'applied_confirmed',
+  };
+  assert.deepEqual(validateCheckpoint('reconciliation', reconciliation, reconciliationContext), []);
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, tracklyJobStatus: 'applied' }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, tracklyJobStatus: 'applied' }, reconciliationContext).join('\n'),
     /tracklyJobStatus/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, completeTabInventoryRecorded: false }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', reconciliation, {
+      ...reconciliationContext,
+      memberLifecycle: 'awaiting_manual_submit',
+      tracklyJobStatus: 'check_later',
+    }).join('\n'),
+    /memberLifecycle must match expectedContext[\s\S]*tracklyJobStatus must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('reconciliation', reconciliation, {
+      ...reconciliationContext,
+      positiveSubmissionEvidenceRecorded: false,
+    }).join('\n'),
+    /positiveSubmissionEvidenceRecorded must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('reconciliation', { ...reconciliation, completeTabInventoryRecorded: false }, reconciliationContext).join('\n'),
     /completeTabInventoryRecorded/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, cleanupPreference: 'never' }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, cleanupPreference: 'never' }, reconciliationContext).join('\n'),
     /cannot be closed_verified/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, runId: 402 }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, runId: 402 }, reconciliationContext).join('\n'),
     /runId must match expectedContext/
   );
   for (const browserTabStatus of ['open', 'missing', 'closure_unverified']) {
@@ -932,14 +967,14 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     delete pending.completeTabInventoryRecorded;
     delete pending.closeReceiptRecorded;
     delete pending.postCloseUnionAbsenceProven;
-    assert.deepEqual(validateCheckpoint('reconciliation', pending, expectedContext), []);
+    assert.deepEqual(validateCheckpoint('reconciliation', pending, reconciliationContext), []);
   }
   assert.match(
     validateCheckpoint('reconciliation', {
       ...reconciliation,
       browserTabStatus: 'open',
       closeReceiptRecorded: 'private text',
-    }, expectedContext).join('\n'),
+    }, reconciliationContext).join('\n'),
     /closeReceiptRecorded must be false or omitted/
   );
 });

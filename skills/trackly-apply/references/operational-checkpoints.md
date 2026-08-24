@@ -208,14 +208,17 @@ Required fields:
   `continuationAllowed: false` in both the receipt and `expectedContext` to the
   exact backend-accepted action result; a
   non-negative `resolvedActionCount`, and a value-free
-  `resolvedActionIdsFingerprint`. Do not include raw action IDs;
+  `resolvedActionIdsFingerprint`. Both fields must match the authoritative
+  `expectedContext`; do not include raw action IDs;
 - bind the receipt and `expectedContext` to the exact backend result:
   `checkpointStatus` (`recorded` or `replayed`), positive
   `checkpointMemberVersion`, non-negative `checkpointInspectionEpoch`,
   `checkpointLifecycle: review_ready`, `checkpointActionCount`, and
-  `checkpointActionIdsFingerprint`. The action count and fingerprint must also
-  equal the resolved-action summary, and `checkpointInspectionEpoch` must equal
-  the receipt's current `inspectionEpoch`. A rejected or malformed checkpoint
+  `checkpointActionIdsFingerprint`. Newly recorded checkpoint actions and
+  previously open actions resolved by the review are separate sets, so each
+  summary binds independently to `expectedContext` rather than being forced to
+  equal the other. `checkpointInspectionEpoch` must equal the receipt's current
+  `inspectionEpoch`. A rejected or malformed checkpoint
   fails closed: refetch the current contract once, correct the payload only when
   the current schema proves how, and never claim durable review readiness until
   the backend accepts it; and
@@ -230,7 +233,9 @@ Set `handoffVisibility` to `verified` only for a visibly proven or exact
 durably handed-off tab. Otherwise use `unverified` and
 `reviewReadyClaimed: false`. A state in one system never implies a state in
 another, and a valid unverified handoff receipt never authorizes telling the
-user to submit. A true `reviewReadyClaimed` requires `checkpointStatus`,
+user to submit. `browserTabState: durable_handoff_proven` is invalid with
+unverified visibility and requires a `durable_handoff_receipt`. A true
+`reviewReadyClaimed` requires `checkpointStatus`,
 `checkpointMemberVersion`, `checkpointInspectionEpoch`, and
 `checkpointLifecycle`; the checkpoint epoch must equal the receipt's current
 `inspectionEpoch`. The reported `employerApplicationState`,
@@ -251,9 +256,11 @@ Required fields:
 - the same mode-specific current work lineage and approved-job binding required
   by Review. Reconciliation stays bound to the submitted run even though it is
   a post-submission phase;
-- `positiveSubmissionEvidenceRecorded: true`;
-- `memberLifecycle: submitted`;
-- `tracklyJobStatus: applied_confirmed`;
+- bind the receipt and `expectedContext` to the freshly refetched backend
+  result: `positiveSubmissionEvidenceRecorded: true`,
+  `memberLifecycle: submitted`, and `tracklyJobStatus: applied_confirmed`.
+  Self-authored terminal values are not authority; if the backend still reports
+  any nonterminal state, reconciliation and cleanup fail closed;
 - `cleanupPreference`: `never`, `submitted_only`, or
   `submitted_and_probe_blockers`;
 - `browserTabStatus`: `open`, `missing`, `closure_unverified`, or

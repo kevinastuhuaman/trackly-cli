@@ -328,6 +328,8 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
     'src/config/database.ts',
     'src/config/database-pool.ts',
     'src/services/review-identity.ts',
+    'src/services/application-profile/apply-checkpoint-contract.ts',
+    'src/services/application-profile/batch-service.ts',
     'src/__tests__/cors-origins.integration.test.ts',
     'src/mcp/plugin-router.ts',
     'src/mcp/__tests__/plugin-server.test.ts',
