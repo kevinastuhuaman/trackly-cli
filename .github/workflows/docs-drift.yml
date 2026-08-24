@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   check-docs:
-    runs-on: ${{ vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
 
     steps:
       # Pinned to commit SHA to prevent supply-chain attacks via tag re-pointing.

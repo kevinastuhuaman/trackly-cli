@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ${{ vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && vars.CI_RUNNER_LINUX || 'ubuntu-latest' }}
     timeout-minutes: 15
 
     steps:
