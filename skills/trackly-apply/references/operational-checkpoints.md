@@ -199,7 +199,9 @@ Required fields:
   `expectedContext`, and `jobId` must remain in its approved set;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
   `reviewTabPreserved`, and `userVisibleHandoffProven` all true; and
-- `checkpointAction: review/manual_submit`, `continuationAllowed: false`, a
+- bind `checkpointAction: review/manual_submit` and
+  `continuationAllowed: false` in both the receipt and `expectedContext` to the
+  exact backend-accepted action result; a
   non-negative `resolvedActionCount`, and a value-free
   `resolvedActionIdsFingerprint`. Do not include raw action IDs;
 - bind the receipt and `expectedContext` to the exact backend result:

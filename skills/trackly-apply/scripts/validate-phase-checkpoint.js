@@ -540,6 +540,8 @@ function validateFill(receipt, expectedContext) {
 function validateReview(receipt, expectedContext) {
   const errors = [];
   const checkpointFields = [
+    'checkpointAction',
+    'continuationAllowed',
     'checkpointStatus',
     'checkpointMemberVersion',
     'checkpointInspectionEpoch',

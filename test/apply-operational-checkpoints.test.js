@@ -588,6 +588,8 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   };
   const reviewContext = {
     ...expectedContext,
+    checkpointAction: 'review/manual_submit',
+    continuationAllowed: false,
     checkpointStatus: 'recorded',
     checkpointMemberVersion: 8,
     checkpointInspectionEpoch: 2,
@@ -607,7 +609,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...fixedExpectedContext,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
-    ...Object.fromEntries(Object.entries(reviewContext).filter(([field]) => field.startsWith('checkpoint'))),
+    ...Object.fromEntries(Object.entries(reviewContext).filter(([field]) => (
+      field.startsWith('checkpoint') || field === 'continuationAllowed'
+    ))),
     checkpointInspectionEpoch: 0,
   }), []);
   assert.match(
@@ -655,6 +659,20 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('review', { ...review, continuationAllowed: true }, reviewContext).join('\n'),
     /continuationAllowed must be false for review\/manual_submit/
+  );
+  assert.match(
+    validateCheckpoint('review', review, {
+      ...reviewContext,
+      checkpointAction: 'captcha/at_submit',
+    }).join('\n'),
+    /checkpointAction must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('review', review, {
+      ...reviewContext,
+      continuationAllowed: true,
+    }).join('\n'),
+    /continuationAllowed must match expectedContext/
   );
   assert.match(
     validateCheckpoint('review', {
