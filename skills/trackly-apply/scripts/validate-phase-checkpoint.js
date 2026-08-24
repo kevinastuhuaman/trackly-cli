@@ -57,6 +57,7 @@ const HISTORY_FIELDS = [
 ];
 const RESUME_AUDIT_FIELDS = [
   'control',
+  'mode',
   'approval',
   'preAttachVerification',
   'attachmentCommit',
@@ -394,7 +395,11 @@ function validateFill(receipt, expectedContext) {
     'resumeControl',
   ]);
   if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
-    requireCount(errors, expectedContext, 'profileRevision');
+    if (receipt.workMode === 'accessible_execution') {
+      requireTracklyId(errors, expectedContext, 'profileRevision');
+    } else {
+      requireCount(errors, expectedContext, 'profileRevision');
+    }
     requireCount(errors, expectedContext, 'canonicalEducationRecordCount');
     requireCount(errors, expectedContext, 'canonicalEmploymentPositionCount');
     requireFingerprint(errors, expectedContext.formInventoryFingerprint, 'expectedContext.formInventoryFingerprint');
@@ -480,8 +485,23 @@ function validateFill(receipt, expectedContext) {
       errors.push('resumeAudit.control must match expectedContext');
     }
     const attachmentExpected = ['required', 'optional'].includes(receipt.resumeAudit.control);
-    for (const field of RESUME_AUDIT_FIELDS.slice(1)) {
-      const expected = attachmentExpected ? 'passed' : 'not_applicable';
+    const allowedModes = attachmentExpected
+      ? ['automated_verified', 'manual_unbound']
+      : ['not_applicable'];
+    if (!allowedModes.includes(receipt.resumeAudit.mode)) {
+      errors.push('resumeAudit.mode must match the declared control mode');
+    }
+    const expectedOutcomes = attachmentExpected
+      ? {
+        approval: 'passed',
+        preAttachVerification: receipt.resumeAudit.mode === 'manual_unbound' ? 'not_applicable' : 'passed',
+        attachmentCommit: receipt.resumeAudit.mode === 'manual_unbound' ? 'user_confirmed' : 'passed',
+        filenameVerification: 'passed',
+        parserRecheck: 'passed',
+        finalSweep: 'passed',
+      }
+      : Object.fromEntries(RESUME_AUDIT_FIELDS.slice(2).map((field) => [field, 'not_applicable']));
+    for (const [field, expected] of Object.entries(expectedOutcomes)) {
       if (receipt.resumeAudit[field] !== expected) {
         errors.push(`resumeAudit.${field} must match the declared control mode`);
       }
@@ -548,6 +568,9 @@ function validateReview(receipt, expectedContext) {
   if (!Number.isSafeInteger(receipt.checkpointInspectionEpoch) || receipt.checkpointInspectionEpoch < 0) {
     errors.push('checkpointInspectionEpoch must be a non-negative safe integer');
   }
+  if (receipt.checkpointInspectionEpoch !== receipt.inspectionEpoch) {
+    errors.push('checkpointInspectionEpoch must equal inspectionEpoch');
+  }
   if (receipt.checkpointLifecycle !== 'review_ready') {
     errors.push('checkpointLifecycle must be review_ready');
   }
@@ -573,6 +596,7 @@ function validateHandoff(receipt, expectedContext) {
   const reviewAuthorityFields = [
     'employerApplicationState',
     'tracklyMemberState',
+    'tracklyJobState',
     'checkpointStatus',
     'checkpointMemberVersion',
     'checkpointInspectionEpoch',
@@ -648,6 +672,11 @@ function validateHandoff(receipt, expectedContext) {
       for (const field of reviewAuthorityFields) {
         if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
       }
+    }
+  } else {
+    const checkpointAuthorityFields = reviewAuthorityFields.slice(3);
+    if (checkpointAuthorityFields.some((field) => Object.hasOwn(receipt, field))) {
+      errors.push('checkpoint authority fields must be omitted when reviewReadyClaimed is false');
     }
   }
   return errors;

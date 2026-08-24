@@ -12,6 +12,14 @@ attachment, committed-filename inspection, and parser-field recheck. If any is
 missing, fail closed before opening the chooser and hand the upload to the user. Never
 navigate to a `file://` URL or paste a local path into an ordinary text field.
 
+When the user performs that handoff upload, keep it explicitly manual,
+browser-local, and unbound. Record `resumeAudit.mode: manual_unbound`,
+`approval: passed`, `preAttachVerification: not_applicable`, and
+`attachmentCommit: user_confirmed` only for this genuine manual path; do not use
+those values for an agent-performed upload or a failed verifier. Before
+continuing, require `passed` filename verification and parser recheck, then
+prove during the `passed` final sweep that the attachment and filename persist.
+
 Perform these stages in exact order:
 
 1. identify the exact semantic Resume or CV control;

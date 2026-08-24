@@ -39,7 +39,9 @@ test('operational checkpoints require audited whole-form, history, resume, looku
 
   assert.match(checkpoints, /controlAccounting[\s\S]*formInventoryFingerprint/);
   assert.match(checkpoints, /canonicalEducationRecordCount[\s\S]*canonicalEmploymentPositionCount/);
-  assert.match(checkpoints, /resumeAudit[\s\S]*preAttachVerification[\s\S]*finalSweep/);
+  assert.match(checkpoints, /resumeAudit/i);
+  assert.match(checkpoints, /preAttachVerification/);
+  assert.match(checkpoints, /finalSweep/);
   assert.match(checkpoints, /review\/manual_submit[\s\S]*checkpointStatus/);
   assert.match(checkpoints, /continuationAllowed[\s\S]*false[\s\S]*review\/manual_submit|review\/manual_submit[\s\S]*continuationAllowed[\s\S]*false/i);
   assert.match(checkpoints, /handoff[\s\S]*visibility[\s\S]*unverified/i);
@@ -329,6 +331,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     },
     resumeAudit: {
       control: 'required',
+      mode: 'automated_verified',
       approval: 'passed',
       preAttachVerification: 'passed',
       attachmentCommit: 'passed',
@@ -352,10 +355,13 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     resumeControl: 'required',
   };
   assert.deepEqual(validateCheckpoint('fill', fill, fillContext), []);
-  assert.deepEqual(validateCheckpoint('fill', fill, { ...fillContext, profileRevision: 0 }), []);
+  assert.match(
+    validateCheckpoint('fill', fill, { ...fillContext, profileRevision: 0 }).join('\n'),
+    /profileRevision must be a positive safe integer/
+  );
   assert.match(
     validateCheckpoint('fill', fill, { ...fillContext, profileRevision: -1 }).join('\n'),
-    /profileRevision must be a non-negative safe integer/
+    /profileRevision must be a positive safe integer/
   );
   const { executionId: omittedFillExecutionId, ...fixedFill } = fill;
   const { executionId: omittedContextExecutionId, ...fixedExpectedContext } = expectedContext;
@@ -369,12 +375,29 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...fixedExpectedContext,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
-    profileRevision: 7,
+    profileRevision: 0,
     canonicalEducationRecordCount: 2,
     canonicalEmploymentPositionCount: 6,
     formInventoryFingerprint: fill.formInventoryFingerprint,
     resumeControl: 'required',
   }), []);
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fixedFill,
+      workMode: 'fixed_inspection',
+      inspectionEpoch: 0,
+    }, {
+      ...fixedExpectedContext,
+      workMode: 'fixed_inspection',
+      inspectionEpoch: 0,
+      profileRevision: -1,
+      canonicalEducationRecordCount: 2,
+      canonicalEmploymentPositionCount: 6,
+      formInventoryFingerprint: fill.formInventoryFingerprint,
+      resumeControl: 'required',
+    }).join('\n'),
+    /profileRevision must be a non-negative safe integer/
+  );
   assert.match(
     validateCheckpoint('fill', { ...fill, knownOmissionCount: 1 }, fillContext).join('\n'),
     /knownOmissionCount/
@@ -445,7 +468,53 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.deepEqual(validateCheckpoint('fill', {
     ...fill,
     resumeAudit: {
+      control: 'required',
+      mode: 'manual_unbound',
+      approval: 'passed',
+      preAttachVerification: 'not_applicable',
+      attachmentCommit: 'user_confirmed',
+      filenameVerification: 'passed',
+      parserRecheck: 'passed',
+      finalSweep: 'passed',
+    },
+  }, fillContext), []);
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      resumeAudit: {
+        control: 'required',
+        mode: 'manual_unbound',
+        approval: 'passed',
+        preAttachVerification: 'not_applicable',
+        attachmentCommit: 'passed',
+        filenameVerification: 'passed',
+        parserRecheck: 'passed',
+        finalSweep: 'passed',
+      },
+    }, fillContext).join('\n'),
+    /resumeAudit\.attachmentCommit must match the declared control mode/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      resumeAudit: {
+        control: 'required',
+        mode: 'manual_unbound',
+        approval: 'passed',
+        preAttachVerification: 'not_applicable',
+        attachmentCommit: 'user_confirmed',
+        filenameVerification: 'passed',
+        parserRecheck: 'not_applicable',
+        finalSweep: 'passed',
+      },
+    }, fillContext).join('\n'),
+    /resumeAudit\.parserRecheck must match the declared control mode/
+  );
+  assert.deepEqual(validateCheckpoint('fill', {
+    ...fill,
+    resumeAudit: {
       control: 'absent',
+      mode: 'not_applicable',
       approval: 'not_applicable',
       preAttachVerification: 'not_applicable',
       attachmentCommit: 'not_applicable',
@@ -533,11 +602,13 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...fixedReview,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
+    checkpointInspectionEpoch: 0,
   }, {
     ...fixedExpectedContext,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
     ...Object.fromEntries(Object.entries(reviewContext).filter(([field]) => field.startsWith('checkpoint'))),
+    checkpointInspectionEpoch: 0,
   }), []);
   assert.match(
     validateCheckpoint('review', { ...review, submitActivated: true }, reviewContext).join('\n'),
@@ -550,6 +621,36 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('review', { ...review, checkpointStatus: 'fabricated' }, reviewContext).join('\n'),
     /checkpointStatus/
+  );
+  assert.match(
+    validateCheckpoint('review', {
+      ...review,
+      checkpointInspectionEpoch: 3,
+    }, {
+      ...reviewContext,
+      checkpointInspectionEpoch: 3,
+    }).join('\n'),
+    /checkpointInspectionEpoch must equal inspectionEpoch/
+  );
+  assert.match(
+    validateCheckpoint('review', {
+      ...review,
+      checkpointActionCount: 1,
+    }, {
+      ...reviewContext,
+      checkpointActionCount: 1,
+    }).join('\n'),
+    /checkpointActionCount must equal resolvedActionCount/
+  );
+  assert.match(
+    validateCheckpoint('review', {
+      ...review,
+      checkpointActionIdsFingerprint: 'f'.repeat(64),
+    }, {
+      ...reviewContext,
+      checkpointActionIdsFingerprint: 'f'.repeat(64),
+    }).join('\n'),
+    /checkpointActionIdsFingerprint must equal resolvedActionIdsFingerprint/
   );
   assert.match(
     validateCheckpoint('review', { ...review, continuationAllowed: true }, reviewContext).join('\n'),
@@ -583,6 +684,25 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validateCheckpoint('handoff', { ...handoff, reviewReadyClaimed: true }, expectedContext).join('\n'),
     /reviewReadyClaimed must be false when handoff visibility is unverified/
   );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      browserBindingHash: 'f'.repeat(64),
+      handoffEvidenceFingerprint: '1'.repeat(64),
+      handoffEvidenceType: 'visible_tab_inventory',
+    }, expectedContext).join('\n'),
+    /handoff evidence fields must be omitted when visibility is unverified/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      checkpointStatus: 'recorded',
+      checkpointMemberVersion: 8,
+      checkpointInspectionEpoch: 2,
+      checkpointLifecycle: 'review_ready',
+    }, expectedContext).join('\n'),
+    /checkpoint authority fields must be omitted when reviewReadyClaimed is false/
+  );
   const visibleHandoff = {
     ...handoff,
     tracklyMemberState: 'awaiting_manual_submit',
@@ -601,6 +721,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...expectedContext,
     employerApplicationState: visibleHandoff.employerApplicationState,
     tracklyMemberState: visibleHandoff.tracklyMemberState,
+    tracklyJobState: visibleHandoff.tracklyJobState,
     browserBindingHash: visibleHandoff.browserBindingHash,
     handoffEvidenceFingerprint: visibleHandoff.handoffEvidenceFingerprint,
     handoffEvidenceType: visibleHandoff.handoffEvidenceType,
@@ -624,6 +745,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...expectedContext,
     employerApplicationState: durableHandoff.employerApplicationState,
     tracklyMemberState: durableHandoff.tracklyMemberState,
+    tracklyJobState: durableHandoff.tracklyJobState,
     browserBindingHash: durableHandoff.browserBindingHash,
     handoffEvidenceFingerprint: durableHandoff.handoffEvidenceFingerprint,
     handoffEvidenceType: durableHandoff.handoffEvidenceType,
@@ -649,6 +771,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...expectedContext,
       employerApplicationState: 'review_state_prepared',
       tracklyMemberState: 'review_ready',
+      tracklyJobState: 'check_later',
       browserBindingHash: '4'.repeat(64),
       handoffEvidenceFingerprint: '5'.repeat(64),
       handoffEvidenceType: 'visible_tab_inventory',
@@ -687,6 +810,23 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       checkpointMemberVersion: 9,
     }).join('\n'),
     /checkpointMemberVersion must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      checkpointInspectionEpoch: 3,
+    }, {
+      ...visibleHandoffContext,
+      checkpointInspectionEpoch: 3,
+    }).join('\n'),
+    /checkpointInspectionEpoch must equal inspectionEpoch/
+  );
+  assert.match(
+    validateCheckpoint('handoff', visibleHandoff, {
+      ...visibleHandoffContext,
+      tracklyJobState: 'applied_confirmed',
+    }).join('\n'),
+    /tracklyJobState must match expectedContext/
   );
 
   const reconciliation = {
