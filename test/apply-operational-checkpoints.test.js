@@ -892,6 +892,16 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     /reviewReadyClaimed requires prepared employer state/
   );
   assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      tracklyJobState: 'not_interested',
+    }, {
+      ...visibleHandoffContext,
+      tracklyJobState: 'not_interested',
+    }).join('\n'),
+    /reviewReadyClaimed requires prepared employer state, review_ready or awaiting_manual_submit member state, check_later job state/
+  );
+  assert.match(
     validateCheckpoint('handoff', visibleHandoff, {
       ...visibleHandoffContext,
       tracklyMemberState: 'needs_input',

@@ -9,8 +9,9 @@ No state in one system implies a state in another. A preserved or
 controller-owned tab with visibility unverified must be labeled that way and
 must not be presented as ready for the user's Submit action.
 Verified visibility must remain bound to the exact browser-binding hash and a
-value-free visible-inventory or durable-handoff evidence fingerprint; a boolean
-claim alone is not proof.
+value-free exact-tab presentation, tab-bound user-visible handoff, or durable
+handoff evidence fingerprint. Inventory membership and a boolean claim alone
+are not visibility proof.
 
 ## Required checks
 

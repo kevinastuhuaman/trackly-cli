@@ -244,7 +244,9 @@ unverified visibility and requires a `durable_handoff_receipt`. A true
 checkpoint fields must also match when readiness is claimed. The member may be
 in the durable `review_ready` checkpoint state or the subsequent
 `awaiting_manual_submit` state produced after the certified review-ready outcome
-is recorded. A verified handoff must bind the receipt and `expectedContext` to
+is recorded, but the current job state must still be `check_later`; a revoked,
+already-applied, or unknown job cannot be handed off as review-ready. A verified
+handoff must bind the receipt and `expectedContext` to
 the exact `browserBindingHash`, a value-free `handoffEvidenceFingerprint`, and
 `handoffEvidenceType`. A visible tab requires either
 `visible_presentation_receipt` from the adapter's exact-tab focus/reveal action

@@ -35,10 +35,11 @@ unverified, say so, preserve the exact binding, and do not claim a review-ready
 handoff or tell the user to submit.
 
 A verified handoff receipt must carry the exact browser-binding hash, a
-value-free evidence fingerprint, and whether the proof came from a complete
-visible-tab inventory or a durable handoff receipt. Bind those same fields into
-the validator's expected context; never substitute a self-asserted visibility
-boolean.
+value-free evidence fingerprint, and whether the proof came from the adapter's
+exact-tab presentation action, an exact tab-bound user-visible handoff receipt,
+or a durable handoff receipt. A complete tab inventory proves reachability, not
+visibility. Bind those same fields into the validator's expected context; never
+substitute a self-asserted visibility boolean.
 
 ### Recovery
 

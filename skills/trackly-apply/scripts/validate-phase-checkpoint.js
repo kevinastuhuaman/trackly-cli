@@ -687,8 +687,9 @@ function validateHandoff(receipt, expectedContext) {
   if (receipt.reviewReadyClaimed === true
       && (receipt.employerApplicationState !== 'review_state_prepared'
         || !['review_ready', 'awaiting_manual_submit'].includes(receipt.tracklyMemberState)
+        || receipt.tracklyJobState !== 'check_later'
         || receipt.handoffVisibility !== 'verified')) {
-    errors.push('reviewReadyClaimed requires prepared employer state, review_ready or awaiting_manual_submit Trackly state, and verified visibility');
+    errors.push('reviewReadyClaimed requires prepared employer state, review_ready or awaiting_manual_submit member state, check_later job state, and verified visibility');
   }
   if (receipt.reviewReadyClaimed === true) {
     if (!['recorded', 'replayed'].includes(receipt.checkpointStatus)) {
