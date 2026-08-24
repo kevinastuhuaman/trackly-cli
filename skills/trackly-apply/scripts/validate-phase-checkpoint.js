@@ -661,8 +661,16 @@ function validateHandoff(receipt, expectedContext) {
   if (receipt.handoffVisibility === 'verified') {
     requireFingerprint(errors, receipt.browserBindingHash, 'browserBindingHash');
     requireFingerprint(errors, receipt.handoffEvidenceFingerprint, 'handoffEvidenceFingerprint');
-    if (!['visible_tab_inventory', 'durable_handoff_receipt'].includes(receipt.handoffEvidenceType)) {
-      errors.push('handoffEvidenceType must identify visible inventory or a durable handoff receipt');
+    if (![
+      'visible_presentation_receipt',
+      'user_visible_handoff_receipt',
+      'durable_handoff_receipt',
+    ].includes(receipt.handoffEvidenceType)) {
+      errors.push('handoffEvidenceType must identify visible presentation, a user-visible handoff receipt, or a durable handoff receipt');
+    }
+    if (receipt.browserTabState === 'visible'
+        && !['visible_presentation_receipt', 'user_visible_handoff_receipt'].includes(receipt.handoffEvidenceType)) {
+      errors.push('visible browser state requires presentation or exact tab-bound user-visible handoff evidence');
     }
     if (receipt.browserTabState === 'durable_handoff_proven'
         && receipt.handoffEvidenceType !== 'durable_handoff_receipt') {

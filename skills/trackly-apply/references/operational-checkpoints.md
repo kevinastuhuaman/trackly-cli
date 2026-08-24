@@ -246,8 +246,13 @@ in the durable `review_ready` checkpoint state or the subsequent
 `awaiting_manual_submit` state produced after the certified review-ready outcome
 is recorded. A verified handoff must bind the receipt and `expectedContext` to
 the exact `browserBindingHash`, a value-free `handoffEvidenceFingerprint`, and
-`handoffEvidenceType` (`visible_tab_inventory` or `durable_handoff_receipt`). Omit
-those evidence fields when visibility is unverified.
+`handoffEvidenceType`. A visible tab requires either
+`visible_presentation_receipt` from the adapter's exact-tab focus/reveal action
+and verified visible state, or `user_visible_handoff_receipt` from an exact
+current tab-bound user-visible handoff. Inventory membership alone is never
+visibility proof. A durably handed-off tab requires
+`durable_handoff_receipt`. Omit those evidence fields when visibility is
+unverified.
 
 ### Reconciliation
 

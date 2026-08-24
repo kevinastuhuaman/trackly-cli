@@ -756,7 +756,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     reviewReadyClaimed: true,
     browserBindingHash: 'f'.repeat(64),
     handoffEvidenceFingerprint: '1'.repeat(64),
-    handoffEvidenceType: 'visible_tab_inventory',
+    handoffEvidenceType: 'visible_presentation_receipt',
     checkpointStatus: 'recorded',
     checkpointMemberVersion: 8,
     checkpointInspectionEpoch: 2,
@@ -776,6 +776,23 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointLifecycle: visibleHandoff.checkpointLifecycle,
   };
   assert.deepEqual(validateCheckpoint('handoff', visibleHandoff, visibleHandoffContext), []);
+  assert.deepEqual(validateCheckpoint('handoff', {
+    ...visibleHandoff,
+    handoffEvidenceType: 'user_visible_handoff_receipt',
+  }, {
+    ...visibleHandoffContext,
+    handoffEvidenceType: 'user_visible_handoff_receipt',
+  }), []);
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      handoffEvidenceType: 'visible_tab_inventory',
+    }, {
+      ...visibleHandoffContext,
+      handoffEvidenceType: 'visible_tab_inventory',
+    }).join('\n'),
+    /handoffEvidenceType must identify visible presentation/
+  );
   const durableHandoff = {
     ...visibleHandoff,
     tracklyMemberState: 'review_ready',
@@ -802,7 +819,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('handoff', {
       ...durableHandoff,
-      handoffEvidenceType: 'visible_tab_inventory',
+      handoffEvidenceType: 'visible_presentation_receipt',
     }, {
       ...expectedContext,
       employerApplicationState: durableHandoff.employerApplicationState,
@@ -810,7 +827,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       tracklyJobState: durableHandoff.tracklyJobState,
       browserBindingHash: durableHandoff.browserBindingHash,
       handoffEvidenceFingerprint: durableHandoff.handoffEvidenceFingerprint,
-      handoffEvidenceType: 'visible_tab_inventory',
+      handoffEvidenceType: 'visible_presentation_receipt',
       checkpointStatus: durableHandoff.checkpointStatus,
       checkpointMemberVersion: durableHandoff.checkpointMemberVersion,
       checkpointInspectionEpoch: durableHandoff.checkpointInspectionEpoch,
@@ -840,7 +857,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       reviewReadyClaimed: true,
       browserBindingHash: '4'.repeat(64),
       handoffEvidenceFingerprint: '5'.repeat(64),
-      handoffEvidenceType: 'visible_tab_inventory',
+      handoffEvidenceType: 'visible_presentation_receipt',
       checkpointStatus: 'recorded',
       checkpointMemberVersion: 8,
       checkpointInspectionEpoch: 2,
@@ -852,7 +869,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       tracklyJobState: 'check_later',
       browserBindingHash: '4'.repeat(64),
       handoffEvidenceFingerprint: '5'.repeat(64),
-      handoffEvidenceType: 'visible_tab_inventory',
+      handoffEvidenceType: 'visible_presentation_receipt',
       checkpointStatus: 'recorded',
       checkpointMemberVersion: 8,
       checkpointInspectionEpoch: 2,
