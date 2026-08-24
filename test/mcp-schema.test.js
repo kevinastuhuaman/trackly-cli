@@ -193,6 +193,12 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
   });
   assert.equal(mixedLifecycle.isError, true, 'mixed lifecycle checkpoint was accepted');
   const invalidCheckpoints = [
+    ['missing actions', checkpointArguments('auth/otp', true, sequence++, {
+      actions: undefined,
+    })],
+    ['non-array actions', checkpointArguments('auth/otp', true, sequence++, {
+      actions: 'not-an-array',
+    })],
     ['question without packetPhase', checkpointArguments('answer/unknown', true, sequence++, {})],
     ['question before known fields commit', checkpointArguments('answer/unknown', true, sequence++, {
       packetPhase: 'first_pass',
