@@ -131,8 +131,9 @@ Required fields:
   `expectedContext.approvedJobIds`;
 - positive safe-integer `executionId` for `accessible_execution`, matching
   `expectedContext`; omit it from both objects for `fixed_inspection`;
-- bind the receipt to the independently captured form/profile baseline in
-  `expectedContext`: `profileRevision` is a non-negative safe integer for
+- bind the receipt to the independently captured form/profile baseline: the
+  same `profileRevision` must appear in both the receipt and `expectedContext`;
+  it is a non-negative safe integer for
   `fixed_inspection` (so revision `0` is valid) and a positive safe integer for
   `accessible_execution`; canonical education and employment-position counts
   are non-negative safe integers; also include the exact value-free
@@ -228,10 +229,11 @@ another, and a valid unverified handoff receipt never authorizes telling the
 user to submit. A true `reviewReadyClaimed` requires `checkpointStatus`,
 `checkpointMemberVersion`, `checkpointInspectionEpoch`, and
 `checkpointLifecycle`; the checkpoint epoch must equal the receipt's current
-`inspectionEpoch`. Those checkpoint fields and the reported
-`employerApplicationState`, `tracklyMemberState`, and `tracklyJobState` must all
-match the current authoritative `expectedContext`. The member may be in the
-durable `review_ready` checkpoint state or the subsequent
+`inspectionEpoch`. The reported `employerApplicationState`,
+`tracklyMemberState`, and `tracklyJobState` must match the current authoritative
+`expectedContext` for every handoff, even when readiness is not claimed. The
+checkpoint fields must also match when readiness is claimed. The member may be
+in the durable `review_ready` checkpoint state or the subsequent
 `awaiting_manual_submit` state produced after the certified review-ready outcome
 is recorded. A verified handoff must bind the receipt and `expectedContext` to
 the exact `browserBindingHash`, a value-free `handoffEvidenceFingerprint`, and

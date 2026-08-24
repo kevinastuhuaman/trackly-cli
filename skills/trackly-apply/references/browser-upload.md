@@ -6,11 +6,16 @@ other.
 
 ## Capability gate
 
-Before opening a file chooser, require the active browser adapter to advertise
-all five capabilities: semantic control discovery, chooser arming, file
-attachment, committed-filename inspection, and parser-field recheck. If any is
-missing, fail closed before opening the chooser and hand the upload to the user. Never
-navigate to a `file://` URL or paste a local path into an ordinary text field.
+Before an automated upload, require the active browser adapter to advertise all
+five capabilities: semantic control discovery, chooser arming, file attachment,
+committed-filename inspection, and parser-field recheck. If only chooser arming
+or file attachment is unavailable, fail closed before opening the chooser and
+hand the upload to the user only when semantic control discovery,
+committed-filename inspection, and parser-field recheck remain available. If
+any of those three verification capabilities is unavailable, stop the fill as
+unverified; do not route it into `manual_unbound`, claim a passed audit, or
+continue to review. Never navigate to a `file://` URL or paste a local path into
+an ordinary text field.
 
 When the user performs that handoff upload, keep it explicitly manual,
 browser-local, and unbound. Record `resumeAudit.mode: manual_unbound`,

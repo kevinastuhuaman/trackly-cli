@@ -133,6 +133,7 @@ const PHASE_FIELDS = {
     'jobId',
     'runId',
     'inspectionEpoch',
+    'profileRevision',
     'visibleControlCount',
     'committedControlCount',
     'typedExceptionCount',
@@ -396,9 +397,14 @@ function validateFill(receipt, expectedContext) {
   ]);
   if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
     if (receipt.workMode === 'accessible_execution') {
+      requireTracklyId(errors, receipt, 'profileRevision');
       requireTracklyId(errors, expectedContext, 'profileRevision');
     } else {
+      requireCount(errors, receipt, 'profileRevision');
       requireCount(errors, expectedContext, 'profileRevision');
+    }
+    if (receipt.profileRevision !== expectedContext.profileRevision) {
+      errors.push('profileRevision must match expectedContext');
     }
     requireCount(errors, expectedContext, 'canonicalEducationRecordCount');
     requireCount(errors, expectedContext, 'canonicalEmploymentPositionCount');
@@ -595,15 +601,18 @@ function validateReview(receipt, expectedContext) {
 function validateHandoff(receipt, expectedContext) {
   const errors = [];
   const evidenceFields = ['browserBindingHash', 'handoffEvidenceFingerprint', 'handoffEvidenceType'];
-  const reviewAuthorityFields = [
+  const stateAuthorityFields = [
     'employerApplicationState',
     'tracklyMemberState',
     'tracklyJobState',
+  ];
+  const checkpointAuthorityFields = [
     'checkpointStatus',
     'checkpointMemberVersion',
     'checkpointInspectionEpoch',
     'checkpointLifecycle',
   ];
+  const reviewAuthorityFields = [...stateAuthorityFields, ...checkpointAuthorityFields];
   validateCurrentLineage(
     errors,
     receipt,
@@ -619,6 +628,11 @@ function validateHandoff(receipt, expectedContext) {
   }
   if (!TRACKLY_JOB_STATES.has(receipt.tracklyJobState)) {
     errors.push('tracklyJobState is invalid');
+  }
+  if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
+    for (const field of stateAuthorityFields) {
+      if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
+    }
   }
   if (!BROWSER_HANDOFF_STATES.has(receipt.browserTabState)) {
     errors.push('browserTabState is invalid');
@@ -671,12 +685,11 @@ function validateHandoff(receipt, expectedContext) {
       errors.push('reviewReadyClaimed requires checkpointLifecycle review_ready');
     }
     if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
-      for (const field of reviewAuthorityFields) {
+      for (const field of checkpointAuthorityFields) {
         if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
       }
     }
   } else {
-    const checkpointAuthorityFields = reviewAuthorityFields.slice(3);
     if (checkpointAuthorityFields.some((field) => Object.hasOwn(receipt, field))) {
       errors.push('checkpoint authority fields must be omitted when reviewReadyClaimed is false');
     }
