@@ -24,6 +24,79 @@ const TAB_STATES = new Set(['open', 'missing', 'closure_unverified', 'closed_ver
 const MAX_RECEIPT_BYTES = 64 * 1024;
 const WORK_MODES = new Set(['accessible_execution', 'fixed_inspection']);
 const COMMON_LINEAGE_FIELDS = ['workMode', 'batchId', 'memberId', 'jobId', 'runId', 'inspectionEpoch'];
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const COMMITTED_CONTROL_FIELDS = [
+  'filledExactProfile',
+  'filledSafeDerivation',
+  'filledSupportedDraft',
+  'preservedUserEdit',
+];
+const EXCEPTION_CONTROL_FIELDS = [
+  'missingFact',
+  'liveConsent',
+  'authenticationBlocker',
+  'unobservableCommit',
+  'unsupportedControl',
+  'notApplicable',
+];
+const CONTROL_ACCOUNTING_FIELDS = [
+  ...COMMITTED_CONTROL_FIELDS,
+  ...EXCEPTION_CONTROL_FIELDS,
+];
+const ANSWER_SCOPE_FIELDS = ['run', 'question', 'office', 'jurisdiction', 'company', 'provider', 'global'];
+const HISTORY_FIELDS = [
+  'canonicalEducationRecordCount',
+  'accountedEducationRecordCount',
+  'canonicalEmploymentPositionCount',
+  'accountedEmploymentPositionCount',
+  'educationOrderVerified',
+  'employmentOrderVerified',
+  'datePrecisionInvented',
+  'educationReconciliationFingerprint',
+  'employmentReconciliationFingerprint',
+];
+const RESUME_AUDIT_FIELDS = [
+  'control',
+  'approval',
+  'preAttachVerification',
+  'attachmentCommit',
+  'filenameVerification',
+  'parserRecheck',
+  'finalSweep',
+];
+const EMPLOYER_APPLICATION_STATES = new Set([
+  'not_opened',
+  'access_probed',
+  'form_reached',
+  'partially_filled',
+  'needs_answers',
+  'review_state_prepared',
+  'manually_submitted',
+  'ats_success_observed',
+  'blocked',
+]);
+const TRACKLY_MEMBER_STATES = new Set([
+  'reserved',
+  'inspecting',
+  'needs_input',
+  'review_ready',
+  'awaiting_manual_submit',
+  'submitted',
+  'blocked',
+  'parked',
+  'stopped',
+]);
+const TRACKLY_JOB_STATES = new Set(['new', 'check_later', 'not_interested', 'applied_confirmed', 'unknown']);
+const BROWSER_HANDOFF_STATES = new Set([
+  'no_known_tab',
+  'controller_owned',
+  'user_inventory',
+  'visible',
+  'durable_handoff_proven',
+  'missing',
+  'closure_unverified',
+  'closed_verified',
+]);
 
 const PHASE_FIELDS = {
   selection: new Set([
@@ -62,10 +135,17 @@ const PHASE_FIELDS = {
     'visibleControlCount',
     'committedControlCount',
     'typedExceptionCount',
+    'controlAccounting',
+    'formInventoryFingerprint',
     'knownOmissionCount',
     'knownFieldsFilledBeforeQuestions',
+    'answerLookupCompleted',
+    'answerLookupScopeCounts',
+    'answerLookupFingerprint',
     'parserSensitiveFieldsRechecked',
     'educationAndEmploymentVerified',
+    'historyReconciliation',
+    'resumeAudit',
     'writingPresent',
     'localWritingGate',
     'humanizerAvailability',
@@ -86,6 +166,34 @@ const PHASE_FIELDS = {
     'submitActivated',
     'reviewTabPreserved',
     'userVisibleHandoffProven',
+    'checkpointAction',
+    'continuationAllowed',
+    'resolvedActionCount',
+    'resolvedActionIdsFingerprint',
+    'checkpointStatus',
+    'checkpointMemberVersion',
+    'checkpointInspectionEpoch',
+    'checkpointLifecycle',
+    'checkpointActionCount',
+    'checkpointActionIdsFingerprint',
+  ]),
+  handoff: new Set([
+    'workMode',
+    'executionId',
+    'batchId',
+    'memberId',
+    'jobId',
+    'runId',
+    'inspectionEpoch',
+    'employerApplicationState',
+    'tracklyMemberState',
+    'tracklyJobState',
+    'browserTabState',
+    'handoffVisibility',
+    'reviewReadyClaimed',
+    'browserBindingHash',
+    'handoffEvidenceFingerprint',
+    'handoffEvidenceType',
   ]),
   reconciliation: new Set([
     'workMode',
@@ -126,7 +234,30 @@ function requireCount(errors, receipt, field) {
   }
 }
 
-function validateCurrentLineage(errors, receipt, expectedContext, jobSetField = 'approvedJobIds') {
+function requireFingerprint(errors, value, field) {
+  if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
+    errors.push(`${field} must be a lowercase SHA-256 fingerprint`);
+  }
+}
+
+function requireExactObject(errors, value, field, allowedFields) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    errors.push(`${field} must be an object`);
+    return false;
+  }
+  for (const key of Object.keys(value)) {
+    if (!allowedFields.includes(key)) errors.push(`${field} contains an unexpected field`);
+  }
+  return true;
+}
+
+function validateCurrentLineage(
+  errors,
+  receipt,
+  expectedContext,
+  jobSetField = 'approvedJobIds',
+  additionalExpectedFields = [],
+) {
   if (!WORK_MODES.has(receipt.workMode)) errors.push('workMode must be accessible_execution or fixed_inspection');
   for (const field of ['batchId', 'memberId', 'jobId', 'runId']) requireTracklyId(errors, receipt, field);
   if (!Number.isSafeInteger(receipt.inspectionEpoch) || receipt.inspectionEpoch < 0) {
@@ -141,10 +272,10 @@ function validateCurrentLineage(errors, receipt, expectedContext, jobSetField = 
     errors.push('expectedContext is required');
     return;
   }
-  const expectedFields = new Set([...COMMON_LINEAGE_FIELDS, jobSetField]);
+  const expectedFields = new Set([...COMMON_LINEAGE_FIELDS, jobSetField, ...additionalExpectedFields]);
   if (receipt.workMode === 'accessible_execution') expectedFields.add('executionId');
   for (const field of Object.keys(expectedContext)) {
-    if (!expectedFields.has(field)) errors.push(`unexpected expectedContext field: ${field}`);
+    if (!expectedFields.has(field)) errors.push('expectedContext contains an unexpected field');
   }
   for (const field of COMMON_LINEAGE_FIELDS) {
     if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
@@ -179,7 +310,7 @@ function validateSelection(receipt, expectedContext) {
   if (!Number.isInteger(receipt.latestExplicitTarget)
       || receipt.latestExplicitTarget < 1
       || receipt.latestExplicitTarget > maximumTarget) {
-    errors.push(`latestExplicitTarget must be an integer from 1 to ${maximumTarget} for ${receipt.workMode || 'the selected work mode'}`);
+    errors.push(`latestExplicitTarget must be an integer from 1 to ${maximumTarget} for the selected work mode`);
   }
   if (!Array.isArray(receipt.approvedJobIds)) {
     errors.push('approvedJobIds must be an array');
@@ -205,7 +336,7 @@ function validateSelection(receipt, expectedContext) {
   const expectedFields = new Set(['workMode', 'batchId', 'latestExplicitTarget', 'selectableJobIds', 'queueExhausted']);
   if (receipt.workMode === 'accessible_execution') expectedFields.add('executionId');
   for (const field of Object.keys(expectedContext)) {
-    if (!expectedFields.has(field)) errors.push(`unexpected expectedContext field: ${field}`);
+    if (!expectedFields.has(field)) errors.push('expectedContext contains an unexpected field');
   }
   if (receipt.workMode !== expectedContext.workMode) errors.push('workMode must match expectedContext');
   if (receipt.batchId !== expectedContext.batchId) errors.push('batchId must match expectedContext');
@@ -251,20 +382,107 @@ function validateAccess(receipt, expectedContext) {
 
 function validateFill(receipt, expectedContext) {
   const errors = [];
-  validateCurrentLineage(errors, receipt, expectedContext);
+  validateCurrentLineage(errors, receipt, expectedContext, 'approvedJobIds', [
+    'profileRevision',
+    'canonicalEducationRecordCount',
+    'canonicalEmploymentPositionCount',
+    'formInventoryFingerprint',
+    'resumeControl',
+  ]);
+  if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
+    requireTracklyId(errors, expectedContext, 'profileRevision');
+    requireCount(errors, expectedContext, 'canonicalEducationRecordCount');
+    requireCount(errors, expectedContext, 'canonicalEmploymentPositionCount');
+    requireFingerprint(errors, expectedContext.formInventoryFingerprint, 'expectedContext.formInventoryFingerprint');
+    if (!['required', 'optional', 'absent'].includes(expectedContext.resumeControl)) {
+      errors.push('expectedContext.resumeControl must be required, optional, or absent');
+    }
+  }
   for (const field of ['visibleControlCount', 'committedControlCount', 'typedExceptionCount', 'knownOmissionCount']) {
     requireCount(errors, receipt, field);
   }
+  if (receipt.visibleControlCount === 0) errors.push('visibleControlCount must be at least 1 for a fill checkpoint');
   if (Number.isSafeInteger(receipt.visibleControlCount)
       && Number.isSafeInteger(receipt.committedControlCount)
       && Number.isSafeInteger(receipt.typedExceptionCount)
       && receipt.committedControlCount + receipt.typedExceptionCount !== receipt.visibleControlCount) {
     errors.push('committedControlCount plus typedExceptionCount must equal visibleControlCount');
   }
+  if (requireExactObject(errors, receipt.controlAccounting, 'controlAccounting', CONTROL_ACCOUNTING_FIELDS)) {
+    for (const field of CONTROL_ACCOUNTING_FIELDS) requireCount(errors, receipt.controlAccounting, field);
+    const accountingCount = CONTROL_ACCOUNTING_FIELDS
+      .reduce((total, field) => total + (Number.isSafeInteger(receipt.controlAccounting[field]) ? receipt.controlAccounting[field] : 0), 0);
+    const committedCount = COMMITTED_CONTROL_FIELDS
+      .reduce((total, field) => total + (Number.isSafeInteger(receipt.controlAccounting[field]) ? receipt.controlAccounting[field] : 0), 0);
+    const exceptionCount = EXCEPTION_CONTROL_FIELDS
+      .reduce((total, field) => total + (Number.isSafeInteger(receipt.controlAccounting[field]) ? receipt.controlAccounting[field] : 0), 0);
+    if (Number.isSafeInteger(receipt.visibleControlCount) && accountingCount !== receipt.visibleControlCount) {
+      errors.push('controlAccounting counts must equal visibleControlCount');
+    }
+    if (Number.isSafeInteger(receipt.committedControlCount) && committedCount !== receipt.committedControlCount) {
+      errors.push('committed control accounting must equal committedControlCount');
+    }
+    if (Number.isSafeInteger(receipt.typedExceptionCount) && exceptionCount !== receipt.typedExceptionCount) {
+      errors.push('typed exception accounting must equal typedExceptionCount');
+    }
+  }
+  requireFingerprint(errors, receipt.formInventoryFingerprint, 'formInventoryFingerprint');
+  if (receipt.formInventoryFingerprint !== expectedContext?.formInventoryFingerprint) {
+    errors.push('formInventoryFingerprint must match expectedContext');
+  }
   if (receipt.knownOmissionCount !== 0) errors.push('knownOmissionCount must be 0');
   requireTrue(errors, receipt, 'knownFieldsFilledBeforeQuestions');
+  requireTrue(errors, receipt, 'answerLookupCompleted');
+  if (requireExactObject(errors, receipt.answerLookupScopeCounts, 'answerLookupScopeCounts', ANSWER_SCOPE_FIELDS)) {
+    for (const field of ANSWER_SCOPE_FIELDS) requireCount(errors, receipt.answerLookupScopeCounts, field);
+  }
+  requireFingerprint(errors, receipt.answerLookupFingerprint, 'answerLookupFingerprint');
   requireTrue(errors, receipt, 'parserSensitiveFieldsRechecked');
   requireTrue(errors, receipt, 'educationAndEmploymentVerified');
+  if (requireExactObject(errors, receipt.historyReconciliation, 'historyReconciliation', HISTORY_FIELDS)) {
+    for (const field of [
+      'canonicalEducationRecordCount',
+      'accountedEducationRecordCount',
+      'canonicalEmploymentPositionCount',
+      'accountedEmploymentPositionCount',
+    ]) requireCount(errors, receipt.historyReconciliation, field);
+    if (receipt.historyReconciliation.canonicalEducationRecordCount
+        !== receipt.historyReconciliation.accountedEducationRecordCount) {
+      errors.push('education record counts must match');
+    }
+    if (receipt.historyReconciliation.canonicalEmploymentPositionCount
+        !== receipt.historyReconciliation.accountedEmploymentPositionCount) {
+      errors.push('employment position counts must match');
+    }
+    if (receipt.historyReconciliation.canonicalEducationRecordCount
+        !== expectedContext?.canonicalEducationRecordCount) {
+      errors.push('canonical education record count must match expectedContext');
+    }
+    if (receipt.historyReconciliation.canonicalEmploymentPositionCount
+        !== expectedContext?.canonicalEmploymentPositionCount) {
+      errors.push('canonical employment position count must match expectedContext');
+    }
+    requireTrue(errors, receipt.historyReconciliation, 'educationOrderVerified');
+    requireTrue(errors, receipt.historyReconciliation, 'employmentOrderVerified');
+    requireFalse(errors, receipt.historyReconciliation, 'datePrecisionInvented');
+    requireFingerprint(errors, receipt.historyReconciliation.educationReconciliationFingerprint, 'historyReconciliation.educationReconciliationFingerprint');
+    requireFingerprint(errors, receipt.historyReconciliation.employmentReconciliationFingerprint, 'historyReconciliation.employmentReconciliationFingerprint');
+  }
+  if (requireExactObject(errors, receipt.resumeAudit, 'resumeAudit', RESUME_AUDIT_FIELDS)) {
+    if (!['required', 'optional', 'absent'].includes(receipt.resumeAudit.control)) {
+      errors.push('resumeAudit.control must be required, optional, or absent');
+    }
+    if (receipt.resumeAudit.control !== expectedContext?.resumeControl) {
+      errors.push('resumeAudit.control must match expectedContext');
+    }
+    const attachmentExpected = ['required', 'optional'].includes(receipt.resumeAudit.control);
+    for (const field of RESUME_AUDIT_FIELDS.slice(1)) {
+      const expected = attachmentExpected ? 'passed' : 'not_applicable';
+      if (receipt.resumeAudit[field] !== expected) {
+        errors.push(`resumeAudit.${field} must match the declared control mode`);
+      }
+    }
+  }
   if (typeof receipt.writingPresent !== 'boolean') errors.push('writingPresent must be a boolean');
   if (!['passed', 'not_applicable'].includes(receipt.localWritingGate)) {
     errors.push('localWritingGate must be passed or not_applicable');
@@ -297,12 +515,103 @@ function validateFill(receipt, expectedContext) {
 
 function validateReview(receipt, expectedContext) {
   const errors = [];
-  validateCurrentLineage(errors, receipt, expectedContext);
+  const checkpointFields = [
+    'checkpointStatus',
+    'checkpointMemberVersion',
+    'checkpointInspectionEpoch',
+    'checkpointLifecycle',
+    'checkpointActionCount',
+    'checkpointActionIdsFingerprint',
+  ];
+  validateCurrentLineage(errors, receipt, expectedContext, 'approvedJobIds', checkpointFields);
   requireTrue(errors, receipt, 'finalIntegrityPassed');
   requireTrue(errors, receipt, 'truthConfirmationRecorded');
   requireFalse(errors, receipt, 'submitActivated');
   requireTrue(errors, receipt, 'reviewTabPreserved');
   requireTrue(errors, receipt, 'userVisibleHandoffProven');
+  if (receipt.checkpointAction !== 'review/manual_submit') {
+    errors.push('checkpointAction must be review/manual_submit');
+  }
+  if (receipt.continuationAllowed !== false) {
+    errors.push('continuationAllowed must be false for review/manual_submit');
+  }
+  requireCount(errors, receipt, 'resolvedActionCount');
+  requireFingerprint(errors, receipt.resolvedActionIdsFingerprint, 'resolvedActionIdsFingerprint');
+  if (!['recorded', 'replayed'].includes(receipt.checkpointStatus)) {
+    errors.push('checkpointStatus must be recorded or replayed');
+  }
+  requireTracklyId(errors, receipt, 'checkpointMemberVersion');
+  if (!Number.isSafeInteger(receipt.checkpointInspectionEpoch) || receipt.checkpointInspectionEpoch < 0) {
+    errors.push('checkpointInspectionEpoch must be a non-negative safe integer');
+  }
+  if (receipt.checkpointLifecycle !== 'review_ready') {
+    errors.push('checkpointLifecycle must be review_ready');
+  }
+  requireCount(errors, receipt, 'checkpointActionCount');
+  requireFingerprint(errors, receipt.checkpointActionIdsFingerprint, 'checkpointActionIdsFingerprint');
+  if (receipt.checkpointActionCount !== receipt.resolvedActionCount) {
+    errors.push('checkpointActionCount must equal resolvedActionCount');
+  }
+  if (receipt.checkpointActionIdsFingerprint !== receipt.resolvedActionIdsFingerprint) {
+    errors.push('checkpointActionIdsFingerprint must equal resolvedActionIdsFingerprint');
+  }
+  if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
+    for (const field of checkpointFields) {
+      if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
+    }
+  }
+  return errors;
+}
+
+function validateHandoff(receipt, expectedContext) {
+  const errors = [];
+  const evidenceFields = ['browserBindingHash', 'handoffEvidenceFingerprint', 'handoffEvidenceType'];
+  validateCurrentLineage(errors, receipt, expectedContext, 'approvedJobIds', evidenceFields);
+  if (!EMPLOYER_APPLICATION_STATES.has(receipt.employerApplicationState)) {
+    errors.push('employerApplicationState is invalid');
+  }
+  if (!TRACKLY_MEMBER_STATES.has(receipt.tracklyMemberState)) {
+    errors.push('tracklyMemberState is invalid');
+  }
+  if (!TRACKLY_JOB_STATES.has(receipt.tracklyJobState)) {
+    errors.push('tracklyJobState is invalid');
+  }
+  if (!BROWSER_HANDOFF_STATES.has(receipt.browserTabState)) {
+    errors.push('browserTabState is invalid');
+  }
+  if (!['verified', 'unverified'].includes(receipt.handoffVisibility)) {
+    errors.push('handoffVisibility must be verified or unverified');
+  }
+  if (typeof receipt.reviewReadyClaimed !== 'boolean') {
+    errors.push('reviewReadyClaimed must be a boolean');
+  }
+  if (receipt.handoffVisibility === 'unverified' && receipt.reviewReadyClaimed !== false) {
+    errors.push('reviewReadyClaimed must be false when handoff visibility is unverified');
+  }
+  if (receipt.handoffVisibility === 'verified'
+      && !['visible', 'durable_handoff_proven'].includes(receipt.browserTabState)) {
+    errors.push('verified handoff requires a visible or durably handed-off browser tab');
+  }
+  if (receipt.handoffVisibility === 'verified') {
+    requireFingerprint(errors, receipt.browserBindingHash, 'browserBindingHash');
+    requireFingerprint(errors, receipt.handoffEvidenceFingerprint, 'handoffEvidenceFingerprint');
+    if (!['visible_tab_inventory', 'durable_handoff_receipt'].includes(receipt.handoffEvidenceType)) {
+      errors.push('handoffEvidenceType must identify visible inventory or a durable handoff receipt');
+    }
+    if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
+      for (const field of evidenceFields) {
+        if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
+      }
+    }
+  } else if (evidenceFields.some((field) => Object.hasOwn(receipt, field))) {
+    errors.push('handoff evidence fields must be omitted when visibility is unverified');
+  }
+  if (receipt.reviewReadyClaimed === true
+      && (receipt.employerApplicationState !== 'review_state_prepared'
+        || !['review_ready', 'awaiting_manual_submit'].includes(receipt.tracklyMemberState)
+        || receipt.handoffVisibility !== 'verified')) {
+    errors.push('reviewReadyClaimed requires prepared employer state, review_ready or awaiting_manual_submit Trackly state, and verified visibility');
+  }
   return errors;
 }
 
@@ -336,6 +645,7 @@ const VALIDATORS = {
   access: validateAccess,
   fill: validateFill,
   review: validateReview,
+  handoff: validateHandoff,
   reconciliation: validateReconciliation,
 };
 
@@ -344,7 +654,7 @@ function validateCheckpoint(phase, receipt, expectedContext) {
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return ['receipt must be a JSON object'];
   const unexpectedFields = Object.keys(receipt)
     .filter((field) => !PHASE_FIELDS[phase].has(field))
-    .map((field) => `unexpected field: ${field}`);
+    .map(() => 'receipt contains an unexpected field');
   return [...unexpectedFields, ...VALIDATORS[phase](receipt, expectedContext)];
 }
 
@@ -352,20 +662,16 @@ async function readReceiptInput(stream) {
   const decoder = new StringDecoder('utf8');
   let input = '';
   let inputBytes = 0;
-  let oversized = false;
   for await (const chunk of stream) {
-    if (oversized) continue;
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     inputBytes += bytes.length;
     if (inputBytes > MAX_RECEIPT_BYTES) {
-      oversized = true;
-      input = '';
-      continue;
+      return { input: '', oversized: true };
     }
     input += decoder.write(bytes);
   }
-  if (!oversized) input += decoder.end();
-  return { input, oversized };
+  input += decoder.end();
+  return { input, oversized: false };
 }
 
 async function main() {

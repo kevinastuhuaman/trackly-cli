@@ -30,17 +30,22 @@ Before ending every browser turn, reconcile the complete current inventory of li
 
 ## Field integrity
 
-- Inventory the entire form before mutation and again before review.
+- Inventory the entire form before mutation and again before review. Give every
+  visible control one committed or typed-exception accounting row; the row
+  count must equal the visible inventory and known omissions must be zero.
 - Preserve user edits byte-for-byte unless the user explicitly asks for a rewrite.
 - Use semantic labels for selects, radios, and checkboxes; never choose by index or proximity.
 - Verify email and phone values exactly and reject duplicate or concatenated values.
 - Treat missing date precision as unknown. Ask instead of choosing a default month or day.
+- Reconcile all canonical education entries and position-level employment
+  records in reverse chronological order. Promotions remain separate records;
+  never flatten them into one employer row or invent missing date precision.
 - Keep employer-specific, provider-specific, and global answers in their correct scopes.
 - Never interpret one consent as permission for a different consent.
 
 ## Resume integrity
 
-Prepare a resume only after finding a real attachment control. When trackly returns `requiresLocalAgentOrManualUpload`, ask the user to attach it, verify only the filename visibly committed on the employer page, and never claim an artifact identity, preview, or hash exists. When trackly supplies a verifiable artifact identity and safe preview, bind approval to that exact artifact, let the user inspect it, verify it immediately before upload, and confirm the displayed filename after attachment. Never expose an internal cache identifier to the employer.
+Prepare a resume only after finding a real attachment control. When trackly returns `requiresLocalAgentOrManualUpload`, ask the user to attach it, verify only the filename visibly committed on the employer page, and never claim an artifact identity, preview, or hash exists. When trackly supplies a verifiable artifact identity and safe preview, bind approval to that exact artifact, let the user inspect it, verify it immediately before upload, and confirm the displayed filename after attachment. In both paths, recheck parser-sensitive fields and prove during the final sweep that the attachment is still present. Never expose an internal cache identifier to the employer.
 
 ## Challenges and final boundary
 

@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '5a5350f04e0f4afb5449bde7a35bae20518e8595310fa1dc321b9beb9188ec5f';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '54699332fa5a144b34d5dea9d0eef9cf38741919513683cf78631a79b74a05ca';
 
 const parsedSourceCache = new Map();
 
@@ -2926,7 +2926,7 @@ function assertPluginReviewReadyPersistenceSemantics(
   expectedRouteStatement,
   {
     routeAstSha256 = 'a4b0a5ba28a0c80c2ddbc438b3cde25f61a7bb092ead4efe1813384f9e7d46ec',
-    certifyAstSha256 = '28c7b9132231755052051724fd0fde9a2fc24b2ac5b9902db10aa98301deab12',
+    certifyAstSha256 = '134b267af1163f83330181ff151e2604271d6980d701c2a93bd5878ab326a852',
     serviceSourceSha256 = null,
   } = {},
 ) {
@@ -4787,14 +4787,16 @@ for (const toolName of LOCAL_ONLY_TOOLS) {
   assert.equal(hosted.tools[toolName], undefined, `${toolName} must not be advertised by hosted MCP`);
   assert.doesNotMatch(hostedApplySource, new RegExp(`['"]${toolName}['"]`), `${toolName} must not be registered by hosted MCP`);
 }
+const { schemaDigests: localOnlySchemaDigests, ...sharedLocalContract } = local;
+assert.ok(localOnlySchemaDigests, 'Local contract must lock local-only checkpoint helper semantics');
 const sharedLocal = {
-  ...local,
+  ...sharedLocalContract,
   constants: Object.fromEntries(
     Object.entries(local.constants).filter(([name]) => !LOCAL_ONLY_CONSTANTS.includes(name)),
   ),
   tools: Object.fromEntries(Object.entries(local.tools).filter(([name]) => !LOCAL_ONLY_TOOLS.includes(name))),
 };
-assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented local-only tools');
+assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented local-only metadata');
 assert.match(
   local.tools.trackly_record_apply_execution_dispositions,
   /applyExecutionDispositionSchema/,

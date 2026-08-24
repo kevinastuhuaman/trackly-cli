@@ -30,13 +30,27 @@ receipts.
    typed access state recorded; no private data transmitted.
 2. **Selection:** after access proof, latest target retained; exact accessible
    set shown; approval recorded; no form mutation occurred first.
-3. **Fill:** every visible control has a committed receipt or typed exception;
-   known omissions are zero; deterministic fields preceded questions; writing
-   passed Humanizer when available and the local gate.
-4. **Review:** final integrity and per-run truth confirmation passed; Submit was
-   not activated; exact tabs were durably handed off and proven visible.
+3. **Fill:** whole-form control accounting assigns every visible control one
+   committed result or typed exception; known omissions are zero. Typed answer
+   lookup across run-only, exact-question, office, jurisdiction, company,
+   provider, and global scopes precedes questions. Canonical education records
+   and position-level employment records reconcile in reverse chronological
+   order without invented date precision. Every attachment-capable form audits
+   resume approval, pre-attach verification, committed filename, parser
+   recheck, and final sweep separately. Writing passed Humanizer when available
+   and the local gate.
+4. **Review:** final integrity and per-run truth confirmation passed; the
+   `review/manual_submit` action used literal `continuationAllowed: false` and
+   the checkpoint was accepted under the current action
+   contract; Submit was not activated; exact tabs were durably handed off and
+   proven visible. A preserved tab with visibility unverified is reported as a
+   blocked handoff, never review-ready.
 5. **Reconciliation:** positive submission evidence preceded outcome; fresh
    state proves `submitted` plus `applied_confirmed`; cleanup follows the saved
    preference and complete inventory proof.
 
 Do not claim a phase complete when any listed fact is unknown.
+
+Every handoff reports employer application state, trackly member/job state,
+and browser presence/visibility state independently. No state in one system
+implies a state in another.

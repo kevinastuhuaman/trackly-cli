@@ -2,6 +2,28 @@
 
 Run this gate after each semantic selection and again across the entire form before review.
 
+## Whole-form accounting
+
+Create one accounting row for every visible control across every reachable
+step, including optional, repeated, conditional, consent, and attachment
+controls. Each row has one semantic fingerprint and exactly one disposition:
+`filled_exact_profile`, `filled_safe_derivation`, `filled_supported_draft`,
+`preserved_user_edit`, `missing_fact`, `live_consent`,
+`authentication_blocker`, `unobservable_commit`, `unsupported_control`, or
+`not_applicable`. The inventory count must equal committed plus typed
+exceptions, and known omissions must be zero. Reinventory after navigation,
+conditional reveal, resume parsing, validation, and rerender; an earlier
+inventory cannot prove a later form complete.
+
+Reconcile education and employment separately against all canonical eligible
+records. Education entries and position-level employment records must be
+accounted for in reverse chronological order. Multiple promotions at one
+employer remain separate positions. Preserve user-owned rows, use only the date
+precision actually stored, and ask when a form requires missing precision;
+never accept a default month or invent promotion, start, or end precision. A
+flattened employer summary or a “most recent roles” subset fails reconciliation.
+Keep only value-free counts and fingerprints in the checkpoint.
+
 ## Local field ownership
 
 Maintain a private local field ledger keyed by execution, run, inspection

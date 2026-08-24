@@ -19,14 +19,19 @@ Perform these stages in exact order:
 3. prove the chooser opened;
 4. run `trackly_verify_prepared_resume`, then immediately attach that verified
    file through the adapter's documented file-setting primitive;
-5. verify the employer-facing filename committed; and
+5. verify the employer-facing filename committed;
 6. recheck every contact, employment, education, and other field that resume
-   parsing may have changed.
+   parsing may have changed; and
+7. during the final sweep, prove the attachment is still committed and the
+   visible filename remains the approved employer-facing filename.
 
 Pass only the value-free stage outcomes to
 `trackly_validate_apply_resume_upload`. Do not pass a filename, local path,
 resume hash, form value, URL, page text, or tab identifier. Claim attachment
-success only when it returns `safeToClaimAttachment: true`.
+success only when it returns `safeToClaimAttachment: true`. Record the six
+audited outcomes separately: approval, pre-attach verification, attachment
+commit, filename verification, parser recheck, and final-sweep persistence. A
+single upload-success boolean cannot replace this chain.
 
 Stable failure codes include capability unavailable, ambiguous control,
 chooser timeout, chooser opened without a commit, missing or expired file,

@@ -1,15 +1,18 @@
 {
-  "contractVersion": "3.7.3",
+  "contractVersion": "3.7.4",
   "constants": {
     "applyExecutionMaxTarget": 20,
     "applyScenarioCodes": ["browser_reclaim", "resume_upload", "resume_parser_recheck", "semantic_boolean_commit", "custom_select_commit", "multi_step_navigation", "free_text_voice", "required_error_sweep", "final_consent", "handoff_reclaim", "critical_contact_integrity", "manual_submit_boundary", "job_identity_match"],
     "applyBrowserSurfaces": ["codex_in_app", "chrome_extension", "claude_in_chrome"],
     "applyCheckpointActionCodes": ["answer/unknown", "auth/sign_in", "auth/account_creation", "auth/otp", "captcha/before_form", "captcha/at_submit", "artifact/upload_required", "legal/decision_required", "consent/decision_required", "review/manual_submit", "trust/origin_mismatch", "observability/unverifiable_state"],
+    "applyCheckpointContinuationByAction": {"answer/unknown": true, "auth/sign_in": true, "auth/account_creation": true, "auth/otp": true, "captcha/before_form": true, "captcha/at_submit": false, "artifact/upload_required": true, "legal/decision_required": true, "consent/decision_required": true, "review/manual_submit": false, "trust/origin_mismatch": false, "observability/unverifiable_state": false},
+    "applyCheckpointLifecycleByAction": {"answer/unknown": "needs_input", "auth/sign_in": "needs_input", "auth/account_creation": "needs_input", "auth/otp": "needs_input", "captcha/before_form": "needs_input", "captcha/at_submit": "review_ready", "artifact/upload_required": "needs_input", "legal/decision_required": "needs_input", "consent/decision_required": "needs_input", "review/manual_submit": "review_ready", "trust/origin_mismatch": "blocked", "observability/unverifiable_state": "blocked"},
+    "applyCheckpointQuestionPacketByAction": {"answer/unknown": true, "auth/sign_in": false, "auth/account_creation": false, "auth/otp": false, "captcha/before_form": false, "captcha/at_submit": false, "artifact/upload_required": false, "legal/decision_required": true, "consent/decision_required": true, "review/manual_submit": false, "trust/origin_mismatch": false, "observability/unverifiable_state": false},
     "applyAccessClassifications": ["accessible", "authentication_required", "account_creation_required", "otp_required", "captcha_before_form", "captcha_at_submit", "manual_only", "unknown_unobservable"],
     "applyExecutionDispositionSources": ["live_probe"],
     "applyProbeCleanupPreferences": ["never", "submitted_only", "submitted_and_probe_blockers"],
     "applyExecutionStopReasonCodes": ["user_requested", "target_changed", "session_ended", "execution_restarted", "operator_stop"],
-    "applyBatchConflictCodes": ["state_changed", "lease_unavailable", "idempotency_key_reused", "fixed_batch_not_found", "execution_child_batch", "fixed_batch_not_active", "fixed_batch_revision_changed", "submission_in_progress", "attestation_dependencies_changed", "legacy_fixed_batch_active", "dedicated_recovery_required"],
+    "applyBatchConflictCodes": ["state_changed", "lease_unavailable", "idempotency_key_reused", "fixed_batch_not_found", "execution_child_batch", "fixed_batch_not_active", "fixed_batch_revision_changed", "submission_in_progress", "attestation_dependencies_changed", "legacy_fixed_batch_active", "dedicated_recovery_required", "recovery_migration_not_ready"],
     "fixedApplyBatchCancelReasonCodes": ["user_requested_restart"],
     "applyCheckpointPacketPhases": ["first_pass", "delta"],
     "applySurfaceBindingReasons": ["initial_binding", "recovery_binding"],
@@ -27,6 +30,11 @@
     "trackly_get_apply_execution_snapshot": {
       "officeProjectionMemberIdsMustExistInMemberIds": true
     }
+  },
+  "schemaDigests": {
+    "applyCheckpointActionVariant": "db6b69924b791b3e50c4c7464519fa1a786c7b39ed86c3cc9482e18c211553d2",
+    "applyCheckpointActionSchema": "99baf25b27ae4bd41183bf47f8e1eb7522e1d471156f6090a784362d5b248e95",
+    "applyCheckpointSchema": "4875190ed9d2d8dd2145f2d08c4bb6159a0ce9f751b1e41246c93f33d652c99c"
   },
   "tools": {
     "trackly_get_apply_queue": "{limit:z.number().int().min(1).max(100).optional(),cursor:z.string().min(1).max(2048).optional()}",
@@ -51,7 +59,7 @@
     "trackly_get_active_apply_batch": "{limit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),cursor:z.string().min(1).max(2048).optional(),actionLimit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),actionCursor:z.string().min(1).max(2048).optional()}",
     "trackly_get_apply_batch": "{batchId:z.number().int().min(1),limit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),cursor:z.string().min(1).max(2048).optional(),actionLimit:z.number().int().min(1).max(APPLY_BATCH_MAX_MEMBERS).optional(),actionCursor:z.string().min(1).max(2048).optional()}",
     "trackly_claim_apply_batch": "{batchId:z.number().int().min(1),expectedRevision:z.number().int().min(1),leaseOwner:z.string().min(1).max(1024),leaseToken:z.string().min(1).max(1024),leaseDurationMs:z.number().int().min(15000).max(300000)}",
-    "trackly_checkpoint_apply_batch": "{batchId:z.number().int().min(1),leaseToken:z.string().min(1).max(1024),checkpoints:z.array(z.object({memberId:z.number().int().min(1),runId:z.number().int().min(1),expectedMemberVersion:z.number().int().min(1),expectedInspectionEpoch:z.number().int().min(0),inspectionEpoch:z.number().int().min(0),packetPhase:z.enum(APPLY_CHECKPOINT_PACKET_PHASES).optional(),knownFieldsCommitted:z.boolean(),resolvedActionIds:z.array(z.string().regex(/^[1-9][0-9]*$/)).max(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT).optional(),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),actions:z.array(z.object({actionCode:z.enum(APPLY_CHECKPOINT_ACTION_CODES),continuationAllowed:z.boolean(),fieldFingerprint:z.string().regex(/^[a-f0-9]{64}$/).optional()})).min(1).max(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT)})).min(1).max(APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST)}",
+    "trackly_checkpoint_apply_batch": "{batchId:z.number().int().min(1),leaseToken:z.string().min(1).max(1024),checkpoints:z.array(applyCheckpointSchema).min(1).max(APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST)}",
     "trackly_bind_apply_surface": "{batchId:z.number().int().min(1),memberId:z.number().int().min(1),runId:z.number().int().min(1),expectedMemberVersion:z.number().int().min(1),expectedInspectionEpoch:z.number().int().min(0),leaseToken:z.string().min(1).max(1024),browserBindingHash:z.string().regex(/^[a-f0-9]{64}$/),browserSurface:z.enum(APPLY_BROWSER_SURFACES),adapterCode:z.string().regex(SAFE_OBSERVATION_CODE),bindingReason:z.enum(APPLY_SURFACE_BINDING_REASONS),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_record_apply_surface_evidence": "{batchId:z.number().int().min(1),memberId:z.number().int().min(1),runId:z.number().int().min(1),expectedMemberVersion:z.number().int().min(1),expectedInspectionEpoch:z.number().int().min(1),leaseToken:z.string().min(1).max(1024),browserBindingHash:z.string().regex(/^[a-f0-9]{64}$/),browserSurface:z.enum(APPLY_BROWSER_SURFACES),adapterCode:z.string().regex(SAFE_OBSERVATION_CODE),ownershipState:z.enum(APPLY_SURFACE_OWNERSHIP_STATES),completeInventory:z.boolean(),evidenceType:z.enum(APPLY_SURFACE_EVIDENCE_TYPES),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_record_apply_submission_evidence": "{batchId:z.number().int().min(1),memberId:z.number().int().min(1),runId:z.number().int().min(1),expectedMemberVersion:z.number().int().min(1),expectedInspectionEpoch:z.number().int().min(1),leaseToken:z.string().min(1).max(1024),browserBindingHash:z.string().regex(/^[a-f0-9]{64}$/),evidenceType:z.enum(APPLY_SUBMISSION_EVIDENCE_TYPES),evidenceSource:z.enum(APPLY_SUBMISSION_EVIDENCE_SOURCES),evidenceFingerprint:z.string().regex(/^[a-f0-9]{64}$/),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",

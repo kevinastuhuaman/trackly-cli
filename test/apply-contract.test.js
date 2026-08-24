@@ -43,6 +43,16 @@ function activeFunctionDigest(sourceText, name, sourcePath) {
   ));
 }
 
+test('checkpoint helper semantics match their versioned AST digests', () => {
+  assert.deepEqual(
+    Object.fromEntries(Object.keys(contract.schemaDigests).map((name) => [
+      name,
+      activeFunctionDigest(source, name, 'mcp/apply-tools.js'),
+    ])),
+    contract.schemaDigests,
+  );
+});
+
 function startServerListenDigest(sourceText, sourcePath) {
   const startServer = activeNamedDefinitionAst(sourceText, 'startServer', sourcePath);
   const listenStatement = startServer.body.body.find((statement) => (
@@ -151,7 +161,7 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.7.3');
+  assert.equal(contract.contractVersion, '3.7.4');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -177,6 +187,7 @@ function contractDigest(candidate) {
   const crypto = require('node:crypto');
   const executableContract = canonicalJsonValue({
     constants: candidate.constants,
+    schemaDigests: candidate.schemaDigests,
     tools: candidate.tools,
   });
   return crypto.createHash('sha256').update(JSON.stringify(executableContract)).digest('hex');
@@ -218,6 +229,16 @@ test('contract history covers changes to constants as well as tools', () => {
   const historicalContract = JSON.parse(JSON.stringify(contract));
   historicalContract.contractVersion = contract.contractVersion;
   historicalContract.constants.applyBatchConflictCodes.push('future_conflict');
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
+});
+
+test('contract history covers changes to internal schema semantics', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.schemaDigests.applyCheckpointSchema = '0'.repeat(64);
   assert.throws(
     () => assertNoHistoricalVersionReuse(historicalContract),
     (error) => error?.code === 'ERR_ASSERTION',
@@ -854,29 +875,54 @@ test('Apply contract owns value-free bulk checkpoint semantics', () => {
   ]);
   assert.deepEqual(contract.constants.applyCheckpointPacketPhases, ['first_pass', 'delta']);
   const schema = normalizeSchema(toolArguments('trackly_checkpoint_apply_batch')[2]);
-  assert.match(schema, /checkpoints:z\.array\(z\.object\(/);
-  assert.match(schema, /actions:z\.array\(z\.object\(/);
+  const actionSchema = normalizeSchema(schemaDefinition('applyCheckpointActionSchema'));
+  const actionVariant = normalizeSchema(schemaDefinition('applyCheckpointActionVariant'));
+  assert.match(schema, /checkpoints:z\.array\(applyCheckpointSchema\)/);
+  const checkpointSchema = normalizeSchema(schemaDefinition('applyCheckpointSchema'));
+  assert.match(checkpointSchema, /actions:z\.array\(applyCheckpointActionSchema\)/);
   assert.match(
-    schema,
+    checkpointSchema,
     /actions:.*\.min\(1\)\.max\(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT\)/,
   );
-  assert.match(schema, /inspectionEpoch:.*packetPhase:.*knownFieldsCommitted:.*actions:/);
+  assert.match(checkpointSchema, /inspectionEpoch:.*packetPhase:.*knownFieldsCommitted:.*actions:/);
   assert.match(
     schema,
     /\.min\(1\)\.max\(APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST\)/,
   );
-  assert.match(schema, /expectedMemberVersion/);
-  assert.match(schema, /expectedInspectionEpoch/);
-  assert.match(schema, /inspectionEpoch/);
-  assert.match(schema, /continuationAllowed/);
-  assert.match(schema, /fieldFingerprint/);
-  assert.match(schema, /knownFieldsCommitted/);
-  assert.match(schema, /idempotencyKey/);
+  assert.match(checkpointSchema, /expectedMemberVersion/);
+  assert.match(checkpointSchema, /expectedInspectionEpoch/);
+  assert.match(checkpointSchema, /inspectionEpoch/);
+  assert.match(actionVariant, /continuationAllowed/);
+  assert.match(actionVariant, /fieldFingerprint/);
+  assert.match(checkpointSchema, /knownFieldsCommitted/);
+  assert.match(checkpointSchema, /idempotencyKey/);
   assert.doesNotMatch(
-    schema,
+    checkpointSchema,
     /questionLabel|fieldLabel|rawLabel|options|answerValue|credential|captchaText|pageText/i,
   );
   assert.match(source, /\/api\/jobscout\/apply\/batches\/\$\{batchId\}\/checkpoints/);
+});
+
+test('local checkpoint schema binds every action to its canonical continuation value', () => {
+  const canonicalContinuationByAction = contract.constants
+    .applyCheckpointContinuationByAction;
+  const lifecycleByAction = contract.constants.applyCheckpointLifecycleByAction;
+  const questionPacketByAction = contract.constants.applyCheckpointQuestionPacketByAction;
+
+  assert.deepEqual(Object.keys(canonicalContinuationByAction), contract.constants.applyCheckpointActionCodes);
+  assert.deepEqual(Object.keys(lifecycleByAction), contract.constants.applyCheckpointActionCodes);
+  assert.deepEqual(Object.keys(questionPacketByAction), contract.constants.applyCheckpointActionCodes);
+  assert.ok(Object.values(lifecycleByAction).every((lifecycle) => (
+    ['needs_input', 'review_ready', 'blocked'].includes(lifecycle)
+  )));
+  assert.match(
+    schemaDefinition('applyCheckpointActionSchema'),
+    /z\.discriminatedUnion\(\s*['"]actionCode['"]/,
+  );
+  assert.match(
+    schemaDefinition('applyCheckpointSchema'),
+    /actions:\s*z\.array\(applyCheckpointActionSchema\)/,
+  );
 });
 
 test('Apply contract binds recovered surfaces and proves close from three current-epoch facts', () => {
@@ -1482,13 +1528,13 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.7.0 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.7.1 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.7\.0 requires protocol 3\.6\.0 or newer/);
+  assert.match(skill, /Skill 4\.7\.1 requires protocol 3\.6\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.7\.0/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.7\.1/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
@@ -1875,12 +1921,12 @@ test('Apply skill runs Humanizer when available and retains a self-contained fal
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.7.0 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.7.1 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.7\.0/);
+  assert.match(skill, /Skill 4\.7\.1/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);
