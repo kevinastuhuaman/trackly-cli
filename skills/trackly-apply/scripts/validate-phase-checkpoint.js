@@ -194,6 +194,10 @@ const PHASE_FIELDS = {
     'browserBindingHash',
     'handoffEvidenceFingerprint',
     'handoffEvidenceType',
+    'checkpointStatus',
+    'checkpointMemberVersion',
+    'checkpointInspectionEpoch',
+    'checkpointLifecycle',
   ]),
   reconciliation: new Set([
     'workMode',
@@ -390,7 +394,7 @@ function validateFill(receipt, expectedContext) {
     'resumeControl',
   ]);
   if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
-    requireTracklyId(errors, expectedContext, 'profileRevision');
+    requireCount(errors, expectedContext, 'profileRevision');
     requireCount(errors, expectedContext, 'canonicalEducationRecordCount');
     requireCount(errors, expectedContext, 'canonicalEmploymentPositionCount');
     requireFingerprint(errors, expectedContext.formInventoryFingerprint, 'expectedContext.formInventoryFingerprint');
@@ -566,7 +570,21 @@ function validateReview(receipt, expectedContext) {
 function validateHandoff(receipt, expectedContext) {
   const errors = [];
   const evidenceFields = ['browserBindingHash', 'handoffEvidenceFingerprint', 'handoffEvidenceType'];
-  validateCurrentLineage(errors, receipt, expectedContext, 'approvedJobIds', evidenceFields);
+  const reviewAuthorityFields = [
+    'employerApplicationState',
+    'tracklyMemberState',
+    'checkpointStatus',
+    'checkpointMemberVersion',
+    'checkpointInspectionEpoch',
+    'checkpointLifecycle',
+  ];
+  validateCurrentLineage(
+    errors,
+    receipt,
+    expectedContext,
+    'approvedJobIds',
+    [...evidenceFields, ...reviewAuthorityFields],
+  );
   if (!EMPLOYER_APPLICATION_STATES.has(receipt.employerApplicationState)) {
     errors.push('employerApplicationState is invalid');
   }
@@ -611,6 +629,26 @@ function validateHandoff(receipt, expectedContext) {
         || !['review_ready', 'awaiting_manual_submit'].includes(receipt.tracklyMemberState)
         || receipt.handoffVisibility !== 'verified')) {
     errors.push('reviewReadyClaimed requires prepared employer state, review_ready or awaiting_manual_submit Trackly state, and verified visibility');
+  }
+  if (receipt.reviewReadyClaimed === true) {
+    if (!['recorded', 'replayed'].includes(receipt.checkpointStatus)) {
+      errors.push('reviewReadyClaimed requires a recorded or replayed checkpointStatus');
+    }
+    requireTracklyId(errors, receipt, 'checkpointMemberVersion');
+    if (!Number.isSafeInteger(receipt.checkpointInspectionEpoch) || receipt.checkpointInspectionEpoch < 0) {
+      errors.push('checkpointInspectionEpoch must be a non-negative safe integer');
+    }
+    if (receipt.checkpointInspectionEpoch !== receipt.inspectionEpoch) {
+      errors.push('checkpointInspectionEpoch must equal inspectionEpoch');
+    }
+    if (receipt.checkpointLifecycle !== 'review_ready') {
+      errors.push('reviewReadyClaimed requires checkpointLifecycle review_ready');
+    }
+    if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
+      for (const field of reviewAuthorityFields) {
+        if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
+      }
+    }
   }
   return errors;
 }

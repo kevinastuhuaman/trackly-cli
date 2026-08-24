@@ -15,6 +15,7 @@ const {
   HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertCoordinatedCheckpointHelperSemantics,
   assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
   assertInstallProcessGuardsSemantics,
@@ -50,6 +51,49 @@ test('checkpoint helper semantics match their versioned AST digests', () => {
       activeFunctionDigest(source, name, 'mcp/apply-tools.js'),
     ])),
     contract.schemaDigests,
+  );
+});
+
+test('hosted checkpoint helper drift fails coordinated semantic parity even when the tool alias is unchanged', () => {
+  const helperSource = `
+    const applyCheckpointActionVariant = (actionCode) => z.object({
+      actionCode: z.literal(actionCode),
+    });
+    const applyCheckpointActionSchema = z.discriminatedUnion(
+      'actionCode',
+      ACTION_CODES.map(applyCheckpointActionVariant),
+    );
+    const applyCheckpointSchema = z.object({
+      actions: z.array(applyCheckpointActionSchema),
+    }).superRefine((checkpoint, context) => {
+      if (checkpoint.actions.length === 0) {
+        context.addIssue({ message: 'At least one action is required' });
+      }
+    });
+  `;
+  const helperNames = [
+    'applyCheckpointActionVariant',
+    'applyCheckpointActionSchema',
+    'applyCheckpointSchema',
+  ];
+  const expectedDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(helperSource, name, 'checkpoint helper fixture'),
+  ]));
+  const fixture = {
+    localContract: { schemaDigests: expectedDigests },
+    localApplySource: helperSource,
+    hostedApplySource: helperSource,
+    expectedHostedDigests: expectedDigests,
+  };
+
+  assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: helperSource.replace('checkpoint.actions.length === 0', 'checkpoint.actions.length < 0'),
+    }),
+    /Hosted checkpoint helper ASTs drifted from the coordinated semantic digest lock/,
   );
 });
 

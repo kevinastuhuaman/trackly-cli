@@ -352,6 +352,11 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     resumeControl: 'required',
   };
   assert.deepEqual(validateCheckpoint('fill', fill, fillContext), []);
+  assert.deepEqual(validateCheckpoint('fill', fill, { ...fillContext, profileRevision: 0 }), []);
+  assert.match(
+    validateCheckpoint('fill', fill, { ...fillContext, profileRevision: -1 }).join('\n'),
+    /profileRevision must be a non-negative safe integer/
+  );
   const { executionId: omittedFillExecutionId, ...fixedFill } = fill;
   const { executionId: omittedContextExecutionId, ...fixedExpectedContext } = expectedContext;
   assert.equal(omittedFillExecutionId, 301);
@@ -587,16 +592,27 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     browserBindingHash: 'f'.repeat(64),
     handoffEvidenceFingerprint: '1'.repeat(64),
     handoffEvidenceType: 'visible_tab_inventory',
+    checkpointStatus: 'recorded',
+    checkpointMemberVersion: 8,
+    checkpointInspectionEpoch: 2,
+    checkpointLifecycle: 'review_ready',
   };
   const visibleHandoffContext = {
     ...expectedContext,
+    employerApplicationState: visibleHandoff.employerApplicationState,
+    tracklyMemberState: visibleHandoff.tracklyMemberState,
     browserBindingHash: visibleHandoff.browserBindingHash,
     handoffEvidenceFingerprint: visibleHandoff.handoffEvidenceFingerprint,
     handoffEvidenceType: visibleHandoff.handoffEvidenceType,
+    checkpointStatus: visibleHandoff.checkpointStatus,
+    checkpointMemberVersion: visibleHandoff.checkpointMemberVersion,
+    checkpointInspectionEpoch: visibleHandoff.checkpointInspectionEpoch,
+    checkpointLifecycle: visibleHandoff.checkpointLifecycle,
   };
   assert.deepEqual(validateCheckpoint('handoff', visibleHandoff, visibleHandoffContext), []);
   const durableHandoff = {
-    ...handoff,
+    ...visibleHandoff,
+    tracklyMemberState: 'review_ready',
     browserTabState: 'durable_handoff_proven',
     handoffVisibility: 'verified',
     reviewReadyClaimed: true,
@@ -606,9 +622,15 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   };
   assert.deepEqual(validateCheckpoint('handoff', durableHandoff, {
     ...expectedContext,
+    employerApplicationState: durableHandoff.employerApplicationState,
+    tracklyMemberState: durableHandoff.tracklyMemberState,
     browserBindingHash: durableHandoff.browserBindingHash,
     handoffEvidenceFingerprint: durableHandoff.handoffEvidenceFingerprint,
     handoffEvidenceType: durableHandoff.handoffEvidenceType,
+    checkpointStatus: durableHandoff.checkpointStatus,
+    checkpointMemberVersion: durableHandoff.checkpointMemberVersion,
+    checkpointInspectionEpoch: durableHandoff.checkpointInspectionEpoch,
+    checkpointLifecycle: durableHandoff.checkpointLifecycle,
   }), []);
   assert.match(
     validateCheckpoint('handoff', {
@@ -619,11 +641,21 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       browserBindingHash: '4'.repeat(64),
       handoffEvidenceFingerprint: '5'.repeat(64),
       handoffEvidenceType: 'visible_tab_inventory',
+      checkpointStatus: 'recorded',
+      checkpointMemberVersion: 8,
+      checkpointInspectionEpoch: 2,
+      checkpointLifecycle: 'review_ready',
     }, {
       ...expectedContext,
+      employerApplicationState: 'review_state_prepared',
+      tracklyMemberState: 'review_ready',
       browserBindingHash: '4'.repeat(64),
       handoffEvidenceFingerprint: '5'.repeat(64),
       handoffEvidenceType: 'visible_tab_inventory',
+      checkpointStatus: 'recorded',
+      checkpointMemberVersion: 8,
+      checkpointInspectionEpoch: 2,
+      checkpointLifecycle: 'review_ready',
     }).join('\n'),
     /verified handoff requires a visible or durably handed-off browser tab/
   );
@@ -640,6 +672,21 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       tracklyMemberState: 'needs_input',
     }, visibleHandoffContext).join('\n'),
     /reviewReadyClaimed requires prepared employer state/
+  );
+  assert.match(
+    validateCheckpoint('handoff', visibleHandoff, {
+      ...visibleHandoffContext,
+      tracklyMemberState: 'needs_input',
+      checkpointLifecycle: 'needs_input',
+    }).join('\n'),
+    /tracklyMemberState must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('handoff', visibleHandoff, {
+      ...visibleHandoffContext,
+      checkpointMemberVersion: 9,
+    }).join('\n'),
+    /checkpointMemberVersion must match expectedContext/
   );
 
   const reconciliation = {

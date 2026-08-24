@@ -11,6 +11,11 @@ const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '54699332fa5a144b34d5dea9d0eef9cf38741919513683cf78631a79b74a05ca';
+const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
+  applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
+  applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
+  applyCheckpointSchema: '4759f1b7e1533e95ec1b5872c8bfe805ea6a6fd1c6e24c14f9499cd536331d1a',
+});
 
 const parsedSourceCache = new Map();
 
@@ -3968,6 +3973,42 @@ function canonicalSchemaAst(value) {
   );
 }
 
+function namedDefinitionAstDigests(source, names, sourcePath) {
+  return Object.fromEntries(names.map((name) => [
+    name,
+    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(
+      activeNamedDefinitionAst(source, name, sourcePath),
+    ))),
+  ]));
+}
+
+function assertCoordinatedCheckpointHelperSemantics({
+  localContract,
+  localApplySource,
+  hostedApplySource,
+  sourcePaths = {},
+  expectedHostedDigests = HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256,
+}) {
+  const localApplyPath = sourcePaths.localApply || 'local Apply source';
+  const hostedApplyPath = sourcePaths.hostedApply || 'hosted Apply source';
+  const helperNames = Object.keys(expectedHostedDigests);
+  assert.deepEqual(
+    Object.keys(localContract.schemaDigests || {}),
+    helperNames,
+    'Local checkpoint schema digests must lock the complete coordinated helper set',
+  );
+  assert.deepEqual(
+    namedDefinitionAstDigests(localApplySource, helperNames, localApplyPath),
+    localContract.schemaDigests,
+    'Local checkpoint helper ASTs drifted from their versioned semantic digests',
+  );
+  assert.deepEqual(
+    namedDefinitionAstDigests(hostedApplySource, helperNames, hostedApplyPath),
+    expectedHostedDigests,
+    'Hosted checkpoint helper ASTs drifted from the coordinated semantic digest lock',
+  );
+}
+
 function parseSchemaExpression(source, name, sourcePath) {
   const expression = schemaDefinition(source, name, sourcePath);
   const ast = acorn.parseExpressionAt(expression, 0, { ecmaVersion: 'latest' });
@@ -4746,6 +4787,15 @@ verifyCoordinatedBackendCore({
     hostedPlugin: hostedPluginSourcePath,
   },
 });
+assertCoordinatedCheckpointHelperSemantics({
+  localContract: local,
+  localApplySource,
+  hostedApplySource,
+  sourcePaths: {
+    localApply: localApplySourcePath,
+    hostedApply: hostedApplySourcePath,
+  },
+});
 
 const LOCAL_ONLY_TOOLS = [
   'trackly_lint_application_text',
@@ -4787,8 +4837,8 @@ for (const toolName of LOCAL_ONLY_TOOLS) {
   assert.equal(hosted.tools[toolName], undefined, `${toolName} must not be advertised by hosted MCP`);
   assert.doesNotMatch(hostedApplySource, new RegExp(`['"]${toolName}['"]`), `${toolName} must not be registered by hosted MCP`);
 }
-const { schemaDigests: localOnlySchemaDigests, ...sharedLocalContract } = local;
-assert.ok(localOnlySchemaDigests, 'Local contract must lock local-only checkpoint helper semantics');
+const { schemaDigests: coordinatedSchemaDigests, ...sharedLocalContract } = local;
+assert.ok(coordinatedSchemaDigests, 'Local contract must publish coordinated checkpoint helper digests');
 const sharedLocal = {
   ...sharedLocalContract,
   constants: Object.fromEntries(
@@ -4796,7 +4846,7 @@ const sharedLocal = {
   ),
   tools: Object.fromEntries(Object.entries(local.tools).filter(([name]) => !LOCAL_ONLY_TOOLS.includes(name))),
 };
-assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented local-only metadata');
+assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented CLI digest metadata');
 assert.match(
   local.tools.trackly_record_apply_execution_dispositions,
   /applyExecutionDispositionSchema/,
@@ -7471,11 +7521,13 @@ console.log(
 
 module.exports = {
   CHECKED_IN_HOSTED_FIXTURE_SHA256,
+  HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256,
   HOSTED_DEPLOYABLE_PATHS,
   HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertCoordinatedCheckpointHelperSemantics,
   assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
   assertInstallProcessGuardsSemantics,
