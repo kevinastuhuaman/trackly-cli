@@ -1,0 +1,161 @@
+# CI runner autopilot — fully autonomous quota failover AND recovery.
+#
+# Replaces the manual Sep-1 flip-back and any human quota watching. Hourly:
+# a trivial probe job asks for a GitHub-hosted runner; a decide job pinned to
+# the always-available RunsOn ephemeral runner reconciles the CI_RUNNER_LINUX
+# repo variable with the probe's outcome:
+#
+#   hosted refused  + var unset -> SET var (failover) + rerun recent failed
+#                                    runs so in-flight PRs recover + alert
+#   hosted healthy  + var set   -> DELETE var (CI returns to hosted) + alert
+#   otherwise                   -> no-op
+#
+# The decide job never runs on hosted, so the autopilot keeps working during
+# exactly the billing block it exists to handle (2026-08-23 incident: hosted
+# jobs refused with "recent account payments have failed" while self-hosted
+# class jobs kept running). Probe cost: hosted jobs bill rounded up to whole
+# minutes, so hourly = ~720 hosted minutes/month (~1.4% of the 50k included)
+# when healthy, and nothing when blocked (refused jobs never start). Flip direction
+# is fail-safe: a transient probe failure moves CI onto RunsOn, which works.
+name: ci-runner-autopilot
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      selftest:
+        description: 'Prove the variables token (VARS_TOKEN: AUTOPILOT_VARIABLES_TOKEN or fallback github.token) can create/delete repo variables (uses CI_AUTOPILOT_SELFTEST, never touches CI_RUNNER_LINUX)'
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ci-runner-autopilot
+  cancel-in-progress: false
+
+jobs:
+  hosted-probe:
+    # No continue-on-error: with it, needs.hosted-probe.result reports
+    # 'success' even on failure (documented), which would blind the decide
+    # job. A refused probe makes this run red — honest signal during a block.
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Prove a GitHub-hosted runner is obtainable
+        run: echo "hosted runner allocated on $(uname -a)"
+
+  decide:
+    needs: [hosted-probe]
+    if: always()
+    # Pinned to RunsOn (never the variable): the autopilot must be able to act
+    # precisely when hosted is refused. RunsOn stack: AWS 042215120949.
+    runs-on: runs-on=trackly-autopilot/runner=2cpu-linux-x64
+    timeout-minutes: 5
+    env:
+      # github.token serves every Actions API call (run listing + reruns need
+      # Actions read/write, which it has). Variable create/delete needs more
+      # (403 'Resource not accessible by integration', run 32764894707), so
+      # ONLY the variable operations use VARS_TOKEN — a fine-grained PAT
+      # scoped to Variables RW on the four routed repos (least privilege;
+      # falls back to github.token, whose variable writes fail loudly).
+      GH_TOKEN: ${{ github.token }}
+      VARS_TOKEN: ${{ secrets.AUTOPILOT_VARIABLES_TOKEN || github.token }}
+      FALLBACK_LABEL: runs-on=trackly-fallback/runner=2cpu-linux-x64
+      SLACK_WEBHOOK_CRITICAL: ${{ secrets.SLACK_WEBHOOK_CRITICAL }}
+    steps:
+      - name: Self-test VARS_TOKEN variable write permission (dispatch-only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.selftest }}
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$VARS_TOKEN" gh api -X POST "repos/${{ github.repository }}/actions/variables" \
+            -f name=CI_AUTOPILOT_SELFTEST -f value="ok-${{ github.run_id }}"
+          got="$(GH_TOKEN="$VARS_TOKEN" gh api "repos/${{ github.repository }}/actions/variables/CI_AUTOPILOT_SELFTEST" --jq '.value')"
+          GH_TOKEN="$VARS_TOKEN" gh api -X DELETE "repos/${{ github.repository }}/actions/variables/CI_AUTOPILOT_SELFTEST"
+          [ "$got" = "ok-${{ github.run_id }}" ] && echo "SELFTEST PASS: VARS_TOKEN can create/read/delete repo variables"
+
+      - name: Reconcile CI_RUNNER_LINUX with hosted health
+        run: |
+          set -euo pipefail
+          PROBE="${{ needs.hosted-probe.result }}"
+          # 404 means genuinely unset; any other failure (bad/expired token,
+          # API error) must fail the run loudly — misreading it as unset could
+          # silently suppress recovery (variable stays set, no red signal).
+          set +e
+          CUR_RAW="$(GH_TOKEN="$VARS_TOKEN" gh api "repos/${{ github.repository }}/actions/variables/CI_RUNNER_LINUX" --jq '.value' 2>&1)"
+          CUR_RC=$?
+          set -e
+          if [ "$CUR_RC" -eq 0 ]; then
+            CUR="$CUR_RAW"
+          elif echo "$CUR_RAW" | grep -q "HTTP 404"; then
+            CUR="__unset__"
+          else
+            echo "::error::CI_RUNNER_LINUX read failed (not a 404): $CUR_RAW"
+            exit 1
+          fi
+          echo "probe=$PROBE current_variable=$CUR"
+          notify() {
+            if [ -n "${SLACK_WEBHOOK_CRITICAL:-}" ]; then
+              curl -sf -X POST -H 'Content-Type: application/json' \
+                --data "{\"text\":\"[ci-runner-autopilot] ${{ github.repository }}: $1\"}" \
+                "$SLACK_WEBHOOK_CRITICAL" >/dev/null || true
+            fi
+          }
+          rerun_refused_pr_runs() {
+            # Recover in-flight PRs whose hosted jobs were refused a runner.
+            # Runs on EVERY tick while the fallback is active (not just the
+            # transition), so stragglers that failed around the flip are still
+            # picked up. Only the newest failed run per workflow+branch is
+            # retried: both test-gate and claude-review use PR-scoped
+            # concurrency with cancel-in-progress, so rerunning an older
+            # attempt could cancel the newer one's recovery. Excludes
+            # push/schedule workflows (a partially failed production deploy
+            # must never be auto-retried) and real test failures.
+            cutoff="$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
+            reruns=0
+            # Cap applies to RERUNS, after the refusal filter — capping the
+            # scan first would let non-refused newer failures crowd out actual
+            # block victims. The grouped candidate list is naturally small
+            # (latest run per workflow+branch), so scanning all of it is cheap.
+            for rid in $(gh api --paginate --slurp "repos/${{ github.repository }}/actions/runs?event=pull_request&per_page=100&created=>$cutoff" \
+              --jq "[.[].workflow_runs[] | select(.conclusion==\"failure\" or .conclusion==\"startup_failure\")] | group_by([.workflow_id, .head_branch]) | map(max_by(.created_at)) | .[].id"); do
+                [ "$reruns" -ge 10 ] && { echo "rerun cap reached (10); remaining candidates picked up next tick"; break; }
+                refused="$(gh api "repos/${{ github.repository }}/actions/runs/$rid/jobs?per_page=30" \
+                  --jq '[.jobs[] | select(.conclusion=="failure") | select((.runner_name // "") == "")] | length')"
+                if [ "${refused:-0}" -gt 0 ]; then
+                  echo "run $rid: $refused runner-refused job(s) -> rerunning failed jobs"
+                  if gh api -X POST "repos/${{ github.repository }}/actions/runs/$rid/rerun-failed-jobs"; then
+                    reruns=$((reruns + 1))
+                  else
+                    echo "run $rid: rerun request failed; will retry next tick"
+                  fi
+                else
+                  echo "run $rid: failures are real (runner was assigned) -> skipping"
+                fi
+              done
+          }
+          if [ "$PROBE" != "success" ] && [ "$CUR" = "__unset__" ]; then
+            echo "Hosted runners refused and no fallback active -> failing over to RunsOn"
+            GH_TOKEN="$VARS_TOKEN" gh api -X POST "repos/${{ github.repository }}/actions/variables" \
+              -f name=CI_RUNNER_LINUX -f value="$FALLBACK_LABEL" \
+              || GH_TOKEN="$VARS_TOKEN" gh api -X PATCH "repos/${{ github.repository }}/actions/variables/CI_RUNNER_LINUX" \
+                   -f name=CI_RUNNER_LINUX -f value="$FALLBACK_LABEL"
+            notify "hosted runners UNAVAILABLE -> CI failed over to RunsOn ephemeral automatically (probe run ${{ github.run_id }})"
+            rerun_refused_pr_runs
+          elif [ "$PROBE" = "success" ] && [ "$CUR" != "__unset__" ]; then
+            echo "Hosted runners healthy and fallback active -> flipping back to hosted"
+            GH_TOKEN="$VARS_TOKEN" gh api -X DELETE "repos/${{ github.repository }}/actions/variables/CI_RUNNER_LINUX"
+            notify "hosted runners healthy again -> CI flipped back to GitHub-hosted automatically (probe run ${{ github.run_id }})"
+            # Final sweep: victims from the outage tail rerun on now-healthy
+            # hosted runners so no PR is left red after recovery.
+            rerun_refused_pr_runs
+          else
+            echo "No variable action: state already matches hosted health."
+            if [ "$PROBE" != "success" ] && [ "$CUR" != "__unset__" ]; then
+              # Outage ongoing: keep sweeping for straggler runner-refused PRs.
+              rerun_refused_pr_runs
+            fi
+          fi
