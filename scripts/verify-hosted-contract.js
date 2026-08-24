@@ -4068,6 +4068,9 @@ function checkpointHelperSemanticDescriptor(
     continuationByAction,
     lifecycleByAction,
     questionPacketByAction,
+    mixedPacketEnforcement: checkpointSchema.includes('hasQuestions && hasNonQuestions')
+      ? 'local-preflight'
+      : 'replay-aware-backend',
     invariants: [
       'current-inspection-epoch',
       'unique-resolved-action-ids',
@@ -4113,6 +4116,7 @@ function assertCoordinatedCheckpointHelperSemantics({
       localApplySource,
       localContract,
       localApplyPath,
+      hostedBatchServiceSource,
     ),
     checkpointHelperSemanticDescriptor(
       hostedApplySource,

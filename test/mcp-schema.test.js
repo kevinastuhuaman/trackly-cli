@@ -169,7 +169,11 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
       ],
     }),
   });
-  assert.equal(mixedQuestionAndBlocker.isError, true, 'mixed question and non-question packet was accepted');
+  assert.notEqual(
+    mixedQuestionAndBlocker.isError,
+    true,
+    'local schema must delegate mixed-packet replay authority to the backend',
+  );
   const missingQuestionFingerprint = await client.callTool({
     name: 'trackly_checkpoint_apply_batch',
     arguments: checkpointArguments('answer/unknown', true, 3, {
@@ -240,7 +244,7 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
   assert.equal(Object.hasOwn(forwardedBody.checkpoints[0].actions[0], 'answerValue'), false);
   assert.equal(
     requests.length,
-    Object.keys(canonicalContinuationByAction).length + 2,
+    Object.keys(canonicalContinuationByAction).length + 3,
     'invalid checkpoint reached the API',
   );
 });

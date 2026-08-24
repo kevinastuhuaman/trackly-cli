@@ -93,14 +93,6 @@ const applyCheckpointSchema = z.object({
     });
   }
   const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);
-  const hasNonQuestions = actionCodes.some((code) => !APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);
-  if (hasQuestions && hasNonQuestions) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['actions'],
-      message: 'Question checkpoints cannot mix question and non-question actions',
-    });
-  }
   if (hasQuestions && checkpoint.packetPhase === undefined) {
     context.addIssue({
       code: z.ZodIssueCode.custom,

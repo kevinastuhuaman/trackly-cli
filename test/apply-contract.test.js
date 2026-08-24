@@ -56,6 +56,15 @@ test('checkpoint helper semantics match their versioned AST digests', () => {
 
 test('hosted checkpoint helper drift fails coordinated semantic parity even when the tool alias is unchanged', () => {
   const helperSource = source;
+  const replayAwareServiceSource = `
+    const existing = await loadStoredApplyBatchCheckpoint();
+    if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');
+    const hasQuestions = true;
+    const hasNonQuestions = true;
+    if (hasQuestions && hasNonQuestions) {
+      throw new Error('Question checkpoints cannot mix question and non-question actions.');
+    }
+  `;
   const helperNames = [
     'applyCheckpointActionVariant',
     'applyCheckpointActionSchema',
@@ -69,6 +78,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     localContract: { ...contract, schemaDigests: expectedDigests },
     localApplySource: helperSource,
     hostedApplySource: helperSource,
+    hostedBatchServiceSource: replayAwareServiceSource,
     expectedHostedDigests: expectedDigests,
   };
 
@@ -76,14 +86,17 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
-      hostedApplySource: helperSource.replace('hasQuestions && hasNonQuestions', 'hasQuestions || hasNonQuestions'),
+      hostedApplySource: helperSource.replace(
+        'hasQuestions && checkpoint.packetPhase === undefined',
+        '!hasQuestions && checkpoint.packetPhase === undefined',
+      ),
     }),
     /Hosted checkpoint helper ASTs drifted from the coordinated semantic digest lock/,
   );
 
   const locallyDrifted = helperSource.replace(
-    'hasQuestions && hasNonQuestions',
-    'hasQuestions || hasNonQuestions',
+    "if (hasQuestions && checkpoint.packetPhase === undefined)",
+    "const hasNonQuestions = actionCodes.some((code) => !APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);\n  if (hasQuestions && hasNonQuestions) context.addIssue({ code: z.ZodIssueCode.custom, path: ['actions'], message: 'Question checkpoints cannot mix question and non-question actions' });\n  if (hasQuestions && checkpoint.packetPhase === undefined)",
   );
   const driftedLocalDigests = Object.fromEntries(helperNames.map((name) => [
     name,
@@ -95,7 +108,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       localContract: { ...fixture.localContract, schemaDigests: driftedLocalDigests },
       localApplySource: locallyDrifted,
     }),
-    /hasQuestions && hasNonQuestions|language-neutral semantic contract|delegate mixed-packet enforcement/,
+    /language-neutral semantic contract/,
   );
 });
 
