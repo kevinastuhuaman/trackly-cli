@@ -57,12 +57,14 @@ test('checkpoint helper semantics match their versioned AST digests', () => {
 test('hosted checkpoint helper drift fails coordinated semantic parity even when the tool alias is unchanged', () => {
   const helperSource = source;
   const replayAwareServiceSource = `
-    const existing = await loadStoredApplyBatchCheckpoint();
-    if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');
-    const hasQuestions = true;
-    const hasNonQuestions = true;
-    if (hasQuestions && hasNonQuestions) {
-      throw new Error('Question checkpoints cannot mix question and non-question actions.');
+    async function recordOneApplyBatchCheckpoint() {
+      const existing = await loadStoredApplyBatchCheckpoint();
+      if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');
+      const hasQuestions = true;
+      const hasNonQuestions = true;
+      if (hasQuestions && hasNonQuestions) {
+        throw new Error('Question checkpoints cannot mix question and non-question actions.');
+      }
     }
   `;
   const helperNames = [
@@ -120,6 +122,39 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       localApplySource: locallyDrifted,
     }),
     /language-neutral semantic contract/,
+  );
+  const invertedEpoch = helperSource.replace(
+    'checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch',
+    'checkpoint.inspectionEpoch === checkpoint.expectedInspectionEpoch',
+  );
+  const invertedEpochDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(invertedEpoch, name, 'inverted epoch checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: invertedEpochDigests },
+      localApplySource: invertedEpoch,
+    }),
+    /locked executable condition/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: `
+        async function recordOneApplyBatchCheckpoint() {
+          const existing = await loadStoredApplyBatchCheckpoint();
+          const hasQuestions = true;
+          const hasNonQuestions = true;
+          if (hasQuestions && hasNonQuestions) {
+            throw new Error('Question checkpoints cannot mix question and non-question actions.');
+          }
+          if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');
+        }
+      `,
+    }),
+    /only after exact replay lookup/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({

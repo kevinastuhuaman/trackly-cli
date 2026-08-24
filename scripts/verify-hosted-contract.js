@@ -3986,6 +3986,103 @@ function namedDefinitionAstDigests(source, names, sourcePath) {
   ]));
 }
 
+function statementContainsString(node, expected) {
+  let found = false;
+  function visit(value) {
+    if (found || value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child);
+      return;
+    }
+    if (value.type === 'StringLiteral' && value.value === expected) {
+      found = true;
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (!AST_METADATA_FIELDS.has(key)) visit(child);
+    }
+  }
+  visit(node);
+  return found;
+}
+
+function checkpointRefinementCallback(source, sourcePath) {
+  const schema = activeNamedDefinitionAst(source, 'applyCheckpointSchema', sourcePath);
+  assert.equal(schema?.type, 'CallExpression', `applyCheckpointSchema in ${sourcePath} must call superRefine`);
+  assert.equal(schema.callee?.type, 'MemberExpression', `applyCheckpointSchema in ${sourcePath} must call superRefine`);
+  assert.equal(schema.callee.computed, false, `applyCheckpointSchema in ${sourcePath} must use static superRefine`);
+  assert.equal(schema.callee.property?.name, 'superRefine', `applyCheckpointSchema in ${sourcePath} must call superRefine`);
+  assert.equal(schema.arguments.length, 1, `applyCheckpointSchema in ${sourcePath} must have one refinement callback`);
+  const callback = unwrapStaticExpression(schema.arguments[0]);
+  assert.ok(
+    callback?.type === 'ArrowFunctionExpression' || callback?.type === 'FunctionExpression',
+    `applyCheckpointSchema in ${sourcePath} must use an executable refinement callback`,
+  );
+  assert.equal(callback.body?.type, 'BlockStatement', `applyCheckpointSchema in ${sourcePath} refinement must use a block`);
+  return callback;
+}
+
+function assertCheckpointRefinementConditions(source, sourcePath, shape) {
+  const callback = checkpointRefinementCallback(source, sourcePath);
+  const common = {
+    'inspectionEpoch must equal expectedInspectionEpoch': 'checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch',
+    'resolvedActionIds must be unique': 'checkpoint.resolvedActionIds && new Set(checkpoint.resolvedActionIds).size !== checkpoint.resolvedActionIds.length',
+    'Question checkpoints require a packet phase': 'hasQuestions && checkpoint.packetPhase === undefined',
+    'Question checkpoints require committed known fields': 'hasQuestions && !checkpoint.knownFieldsCommitted',
+    'packetPhase is only valid for grouped questions': '!hasQuestions && checkpoint.packetPhase !== undefined',
+    'Access-blocking checkpoints cannot report private-field commits or other actions': 'accessBlocked && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)',
+    'Review checkpoints require all known fields to be committed': 'reviewReady && !checkpoint.knownFieldsCommitted',
+  };
+  const expected = {
+    ...common,
+    'Actions in one inspection checkpoint must share one lifecycle': shape === 'hosted-map'
+      ? 'new Set(mappings.map(({ lifecycleState }) => lifecycleState)).size !== 1'
+      : 'new Set(actionCodes.map((code) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION[code])).size !== 1',
+  };
+  for (const [message, expression] of Object.entries(expected)) {
+    const matches = callback.body.body.filter((statement) => (
+      statement.type === 'IfStatement' && statementContainsString(statement.consequent, message)
+    ));
+    assert.equal(matches.length, 1, `${sourcePath} must enforce ${message} in exactly one executable branch`);
+    assert.deepEqual(
+      canonicalSchemaAst(matches[0].test),
+      canonicalSchemaAst(babelParser.parseExpression(expression, { plugins: ['typescript'] })),
+      `${sourcePath} must enforce ${message} with its locked executable condition`,
+    );
+  }
+  return Object.keys(expected);
+}
+
+function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
+  const definition = activeNamedDefinitionAst(source, 'recordOneApplyBatchCheckpoint', sourcePath);
+  assert.equal(definition?.type, 'FunctionDeclaration', `recordOneApplyBatchCheckpoint in ${sourcePath} must be a function`);
+  const statements = definition.body.body;
+  const replayIndex = statements.findIndex((statement) => (
+    statement.type === 'IfStatement'
+    && statementContainsString(statement.consequent, 'replayed')
+  ));
+  assert.ok(replayIndex >= 0, `${sourcePath} checkpoint execution must preserve exact stored replays`);
+  assert.deepEqual(
+    canonicalSchemaAst(statements[replayIndex].test),
+    canonicalSchemaAst(babelParser.parseExpression('existing.length > 0', { plugins: ['typescript'] })),
+    `${sourcePath} checkpoint replay branch must be guarded by stored checkpoint presence`,
+  );
+  const mixedIndex = statements.findIndex((statement) => (
+    statement.type === 'IfStatement'
+    && statementContainsString(
+      statement.consequent,
+      'Question checkpoints cannot mix question and non-question actions.',
+    )
+  ));
+  assert.ok(mixedIndex >= 0, `${sourcePath} checkpoint execution must reject new mixed packets`);
+  assert.deepEqual(
+    canonicalSchemaAst(statements[mixedIndex].test),
+    canonicalSchemaAst(babelParser.parseExpression('hasQuestions && hasNonQuestions', { plugins: ['typescript'] })),
+    `${sourcePath} mixed-packet branch must use both executable classifications`,
+  );
+  assert.ok(mixedIndex > replayIndex, `${sourcePath} must reject new mixed packets only after exact replay lookup`);
+}
+
 function checkpointHelperSemanticDescriptor(
   source,
   contract,
@@ -4023,6 +4120,7 @@ function checkpointHelperSemanticDescriptor(
     }
     assert.match(checkpointSchema, /actionCodes\.includes\('captcha\/before_form'\)/);
     assert.match(checkpointSchema, /actionCodes\.includes\('review\/manual_submit'\)/);
+    assertCheckpointRefinementConditions(source, sourcePath, 'local-map');
   } else if (variant.includes('mapping.continuationAllowed')) {
     assert.match(variant, /z\.literal\(mapping\.continuationAllowed\)/);
     assert.match(variant, /mapping\.questionPacket/);
@@ -4037,22 +4135,11 @@ function checkpointHelperSemanticDescriptor(
     }
     assert.match(checkpointSchema, /actionCodes\.has\('captcha\/before_form'\)/);
     assert.match(checkpointSchema, /actionCodes\.has\('review\/manual_submit'\)/);
+    assertCheckpointRefinementConditions(source, sourcePath, 'hosted-map');
   } else {
     assert.fail(`${sourcePath} uses an unrecognized checkpoint action-variant shape`);
   }
 
-  for (const semanticMarker of [
-    'inspectionEpoch must equal expectedInspectionEpoch',
-    'resolvedActionIds must be unique',
-    'Actions in one inspection checkpoint must share one lifecycle',
-    'Question checkpoints require a packet phase',
-    'Question checkpoints require committed known fields',
-    'packetPhase is only valid for grouped questions',
-    'Access-blocking checkpoints cannot report private-field commits or other actions',
-    'Review checkpoints require all known fields to be committed',
-  ]) {
-    assert.ok(checkpointSchema.includes(semanticMarker), `${sourcePath} must enforce ${semanticMarker}`);
-  }
   const checkpointInvariant = contract.toolInputInvariants?.trackly_checkpoint_apply_batch;
   assert.deepEqual(checkpointInvariant, {
     questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
@@ -4065,14 +4152,7 @@ function checkpointHelperSemanticDescriptor(
     );
   } else {
     assert.equal(typeof replayAwareServiceSource, 'string', `${sourcePath} must delegate mixed-packet enforcement to a replay-aware service`);
-    const existingReplayIndex = replayAwareServiceSource.indexOf("return storedCheckpointResult(existing, 'replayed')");
-    const mixedPacketIndex = replayAwareServiceSource.indexOf('if (hasQuestions && hasNonQuestions)');
-    assert.ok(existingReplayIndex >= 0, `${sourcePath} service must preserve exact stored checkpoint replays`);
-    assert.ok(mixedPacketIndex > existingReplayIndex, `${sourcePath} service must reject new mixed packets only after exact replay lookup`);
-    assert.ok(
-      replayAwareServiceSource.includes('Question checkpoints cannot mix question and non-question actions.'),
-      `${sourcePath} service must enforce the versioned mixed-packet invariant`,
-    );
+    assertReplayAwareMixedPacketOrdering(replayAwareServiceSource, `${sourcePath} replay-aware service`);
   }
 
   return {

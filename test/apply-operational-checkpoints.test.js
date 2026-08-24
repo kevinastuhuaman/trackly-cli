@@ -838,6 +838,26 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(
     validateCheckpoint('handoff', {
       ...handoff,
+      browserTabState: 'controller_owned',
+      handoffVisibility: 'verified',
+      reviewReadyClaimed: false,
+      browserBindingHash: '4'.repeat(64),
+      handoffEvidenceFingerprint: '5'.repeat(64),
+      handoffEvidenceType: 'visible_presentation_receipt',
+    }, {
+      ...expectedContext,
+      employerApplicationState: handoff.employerApplicationState,
+      tracklyMemberState: handoff.tracklyMemberState,
+      tracklyJobState: handoff.tracklyJobState,
+      browserBindingHash: '4'.repeat(64),
+      handoffEvidenceFingerprint: '5'.repeat(64),
+      handoffEvidenceType: 'visible_presentation_receipt',
+    }).join('\n'),
+    /verified handoff requires a visible or durably handed-off browser tab/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
       browserTabState: 'durable_handoff_proven',
       handoffVisibility: 'unverified',
       reviewReadyClaimed: false,
