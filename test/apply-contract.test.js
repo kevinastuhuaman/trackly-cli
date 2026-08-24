@@ -55,22 +55,7 @@ test('checkpoint helper semantics match their versioned AST digests', () => {
 });
 
 test('hosted checkpoint helper drift fails coordinated semantic parity even when the tool alias is unchanged', () => {
-  const helperSource = `
-    const applyCheckpointActionVariant = (actionCode) => z.object({
-      actionCode: z.literal(actionCode),
-    });
-    const applyCheckpointActionSchema = z.discriminatedUnion(
-      'actionCode',
-      ACTION_CODES.map(applyCheckpointActionVariant),
-    );
-    const applyCheckpointSchema = z.object({
-      actions: z.array(applyCheckpointActionSchema),
-    }).superRefine((checkpoint, context) => {
-      if (checkpoint.actions.length === 0) {
-        context.addIssue({ message: 'At least one action is required' });
-      }
-    });
-  `;
+  const helperSource = source;
   const helperNames = [
     'applyCheckpointActionVariant',
     'applyCheckpointActionSchema',
@@ -81,7 +66,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     activeFunctionDigest(helperSource, name, 'checkpoint helper fixture'),
   ]));
   const fixture = {
-    localContract: { schemaDigests: expectedDigests },
+    localContract: { ...contract, schemaDigests: expectedDigests },
     localApplySource: helperSource,
     hostedApplySource: helperSource,
     expectedHostedDigests: expectedDigests,
@@ -91,9 +76,26 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
-      hostedApplySource: helperSource.replace('checkpoint.actions.length === 0', 'checkpoint.actions.length < 0'),
+      hostedApplySource: helperSource.replace('hasQuestions && hasNonQuestions', 'hasQuestions || hasNonQuestions'),
     }),
     /Hosted checkpoint helper ASTs drifted from the coordinated semantic digest lock/,
+  );
+
+  const locallyDrifted = helperSource.replace(
+    'hasQuestions && hasNonQuestions',
+    'hasQuestions || hasNonQuestions',
+  );
+  const driftedLocalDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(locallyDrifted, name, 'drifted local checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: driftedLocalDigests },
+      localApplySource: locallyDrifted,
+    }),
+    /hasQuestions && hasNonQuestions|language-neutral semantic contract|delegate mixed-packet enforcement/,
   );
 });
 
@@ -205,12 +207,19 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.7.4');
+  assert.equal(contract.contractVersion, '3.7.5');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
     assert.equal(normalizeSchema(executableSchema), localSchema, `${name} schema drifted`);
   }
+});
+
+test('Apply contract publishes mixed-packet and replay invariants', () => {
+  assert.deepEqual(contract.toolInputInvariants.trackly_checkpoint_apply_batch, {
+    questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
+    exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
+  });
 });
 
 function canonicalJsonValue(value) {
@@ -232,6 +241,7 @@ function contractDigest(candidate) {
   const executableContract = canonicalJsonValue({
     constants: candidate.constants,
     schemaDigests: candidate.schemaDigests,
+    toolInputInvariants: candidate.toolInputInvariants,
     tools: candidate.tools,
   });
   return crypto.createHash('sha256').update(JSON.stringify(executableContract)).digest('hex');
@@ -289,6 +299,17 @@ test('contract history covers changes to internal schema semantics', () => {
   );
 });
 
+test('contract history covers changes to published cross-field invariants', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.toolInputInvariants.trackly_checkpoint_apply_batch
+    .exactReplayOfPreviouslyAcceptedPayloadPreserved = false;
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
+});
+
 test('release manifests stay on one package version', () => {
   assert.equal(serverManifest.version, packageManifest.version);
   assert.equal(serverManifest.packages[0].version, packageManifest.version);
@@ -305,6 +326,7 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
     'package-lock.json',
     'src/index.ts',
     'src/config/database.ts',
+    'src/config/database-pool.ts',
     'src/services/review-identity.ts',
     'src/__tests__/cors-origins.integration.test.ts',
     'src/mcp/plugin-router.ts',

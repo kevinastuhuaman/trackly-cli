@@ -40,6 +40,7 @@ test('operational checkpoints require audited whole-form, history, resume, looku
   assert.match(checkpoints, /controlAccounting[\s\S]*formInventoryFingerprint/);
   assert.match(checkpoints, /canonicalEducationRecordCount[\s\S]*canonicalEmploymentPositionCount/);
   assert.match(checkpoints, /same `profileRevision`[\s\S]*receipt and `expectedContext`/i);
+  assert.match(checkpoints, /browser-surface fields[\s\S]*independently captured[\s\S]*browser baseline/i);
   assert.match(checkpoints, /resumeAudit/i);
   assert.match(checkpoints, /preAttachVerification/);
   assert.match(checkpoints, /finalSweep/);
@@ -798,6 +799,25 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointInspectionEpoch: durableHandoff.checkpointInspectionEpoch,
     checkpointLifecycle: durableHandoff.checkpointLifecycle,
   }), []);
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...durableHandoff,
+      handoffEvidenceType: 'visible_tab_inventory',
+    }, {
+      ...expectedContext,
+      employerApplicationState: durableHandoff.employerApplicationState,
+      tracklyMemberState: durableHandoff.tracklyMemberState,
+      tracklyJobState: durableHandoff.tracklyJobState,
+      browserBindingHash: durableHandoff.browserBindingHash,
+      handoffEvidenceFingerprint: durableHandoff.handoffEvidenceFingerprint,
+      handoffEvidenceType: 'visible_tab_inventory',
+      checkpointStatus: durableHandoff.checkpointStatus,
+      checkpointMemberVersion: durableHandoff.checkpointMemberVersion,
+      checkpointInspectionEpoch: durableHandoff.checkpointInspectionEpoch,
+      checkpointLifecycle: durableHandoff.checkpointLifecycle,
+    }).join('\n'),
+    /durable_handoff_proven requires durable_handoff_receipt evidence/
+  );
   assert.match(
     validateCheckpoint('handoff', {
       ...handoff,

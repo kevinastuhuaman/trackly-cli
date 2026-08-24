@@ -93,6 +93,14 @@ const applyCheckpointSchema = z.object({
     });
   }
   const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);
+  const hasNonQuestions = actionCodes.some((code) => !APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);
+  if (hasQuestions && hasNonQuestions) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['actions'],
+      message: 'Question checkpoints cannot mix question and non-question actions',
+    });
+  }
   if (hasQuestions && checkpoint.packetPhase === undefined) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -1288,7 +1296,7 @@ function registerApplyTools(
       role: 'user',
       content: {
         type: 'text',
-        text: 'Protocol 3.6.0 reliability gate for new work: require MCP contract 3.7.4 and skill 4.7.1. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
+        text: 'Protocol 3.6.0 reliability gate for new work: require MCP contract 3.7.5 and skill 4.7.1. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
       },
     }, {
       role: 'user',

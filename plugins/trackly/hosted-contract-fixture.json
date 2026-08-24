@@ -1,20 +1,20 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-08-24T09:03:44-07:00",
+  "capturedAt": "2026-08-24T12:00:23-07:00",
   "sourceRuntime": {
-    "commit": "123d0b7d349ddb6729697267128af2f92e5fe6a2",
-    "parent": "e73da87cf21d24d44c476507aadba2cf2105b10c",
-    "committedAt": "2026-08-24T08:03:12-07:00"
+    "commit": "117a59944c247aa9cd5bd3fe488efa606b1822cf",
+    "parent": "96c8a27b275deaf989c39164cad38a80781c9a11",
+    "committedAt": "2026-08-24T11:46:46-07:00"
   },
   "mergedRuntime": {
-    "commit": "214038c30fb2d9d29f7ed0ecd29b71ea9e1b2d3f",
+    "commit": "272bbc9936415da60516d6c0246e474643b26e15",
     "parents": [
-      "eeeccd5f008d0e9d8c0e34d63879f2ad5a133141",
-      "123d0b7d349ddb6729697267128af2f92e5fe6a2"
+      "e80fcb5fe2e22d8b2b663be74516eee2786a2998",
+      "117a59944c247aa9cd5bd3fe488efa606b1822cf"
     ],
-    "committedAt": "2026-08-24T08:11:04-07:00"
+    "committedAt": "2026-08-24T11:57:56-07:00"
   },
-  "applyContractVersion": "3.7.4",
+  "applyContractVersion": "3.7.5",
   "pluginContractVersion": "1.0.0",
   "publicTools": [
     ["trackly_search_jobs", "6e72672960c93c127fcd38588fcd2444ba59dea169c0d46d300c70201b6aca1a", "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481"],
@@ -96,7 +96,8 @@
     "jobBriefService": "e8dad5884d6647176c780bf7e87bdf53f24216a7580b0980bff1f1faad6ecb91",
     "backendUiRedirect": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceMode": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBinding": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
+    "databaseBinding": "510123c5846db1899960903ecab37c9cf446f7215451149e863f344b4672a93a",
+    "databasePoolPolicy": "17c716980598100cfd91aa0630f93ee967652daf256bfaeaffe4b37802e98928",
     "reviewIdentity": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
     "authRateLimit": "6929621038a85cc53da3fe239851de693148cb9fb917504ac04bb4cac44e5e17",

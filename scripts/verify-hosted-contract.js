@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '54699332fa5a144b34d5dea9d0eef9cf38741919513683cf78631a79b74a05ca';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '3005166ba124e14060d7f0ff16b54cc9c4301fe32329ef2b477b3f830f156295';
 const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
   applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
   applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
@@ -549,6 +549,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/index.ts',
   'src/__tests__/cors-origins.integration.test.ts',
   'src/config/database.ts',
+  'src/config/database-pool.ts',
   'src/mcp/server.ts',
   'src/mcp/plugin-server.ts',
   'src/mcp/__tests__/plugin-server.test.ts',
@@ -647,6 +648,7 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     authRateLimit: 'src/middleware/auth-rate-limit.ts',
     maintenanceMode: 'src/middleware/maintenance-mode.ts',
     databaseBinding: 'src/config/database.ts',
+    databasePoolPolicy: 'src/config/database-pool.ts',
     reviewIdentity: 'src/services/review-identity.ts',
     applicationProfileService: 'src/services/application-profile/service.ts',
   };
@@ -3982,10 +3984,107 @@ function namedDefinitionAstDigests(source, names, sourcePath) {
   ]));
 }
 
+function checkpointHelperSemanticDescriptor(
+  source,
+  contract,
+  sourcePath,
+  replayAwareServiceSource = null,
+) {
+  const actionCodes = contract.constants.applyCheckpointActionCodes;
+  const continuationByAction = contract.constants.applyCheckpointContinuationByAction;
+  const questionPacketByAction = contract.constants.applyCheckpointQuestionPacketByAction;
+  const lifecycleByAction = contract.constants.applyCheckpointLifecycleByAction;
+  const variant = exactSchemaDefinition(source, 'applyCheckpointActionVariant', sourcePath);
+  const actionSchema = exactSchemaDefinition(source, 'applyCheckpointActionSchema', sourcePath);
+  const checkpointSchema = exactSchemaDefinition(source, 'applyCheckpointSchema', sourcePath);
+
+  if (variant.includes('APPLY_CHECKPOINT_CONTINUATION_BY_ACTION[actionCode]')) {
+    assert.match(variant, /z\.literal\(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION\[actionCode\]\)/);
+    assert.match(variant, /APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[actionCode\]/);
+    assert.match(actionSchema, /APPLY_CHECKPOINT_ACTION_CODES\.map\(applyCheckpointActionVariant\)/);
+    assert.match(checkpointSchema, /actionCodes\.map\(\(code\) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION\[code\]\)/);
+    assert.match(checkpointSchema, /actionCodes\.some\(\(code\) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[code\]\)/);
+    if (checkpointSchema.includes('hasNonQuestions')) {
+      assert.match(checkpointSchema, /actionCodes\.some\(\(code\) => !APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[code\]\)/);
+    }
+    assert.match(checkpointSchema, /actionCodes\.includes\('captcha\/before_form'\)/);
+    assert.match(checkpointSchema, /actionCodes\.includes\('review\/manual_submit'\)/);
+  } else if (variant.includes('mapping.continuationAllowed')) {
+    assert.match(variant, /z\.literal\(mapping\.continuationAllowed\)/);
+    assert.match(variant, /mapping\.questionPacket/);
+    const declaredActionCodes = [...actionSchema.matchAll(
+      /applyCheckpointActionVariant\('([^']+)'\)/g,
+    )].map((match) => match[1]);
+    assert.deepEqual(declaredActionCodes, actionCodes);
+    assert.match(checkpointSchema, /mappings\.map\(\(\{ lifecycleState \}\) => lifecycleState\)/);
+    assert.match(checkpointSchema, /mappings\.some\(\(\{ questionPacket \}\) => questionPacket\)/);
+    if (checkpointSchema.includes('hasNonQuestions')) {
+      assert.match(checkpointSchema, /mappings\.some\(\(\{ questionPacket \}\) => !questionPacket\)/);
+    }
+    assert.match(checkpointSchema, /actionCodes\.has\('captcha\/before_form'\)/);
+    assert.match(checkpointSchema, /actionCodes\.has\('review\/manual_submit'\)/);
+  } else {
+    assert.fail(`${sourcePath} uses an unrecognized checkpoint action-variant shape`);
+  }
+
+  for (const semanticMarker of [
+    'inspectionEpoch must equal expectedInspectionEpoch',
+    'resolvedActionIds must be unique',
+    'Actions in one inspection checkpoint must share one lifecycle',
+    'Question checkpoints require a packet phase',
+    'Question checkpoints require committed known fields',
+    'packetPhase is only valid for grouped questions',
+    'Access-blocking checkpoints cannot report private-field commits or other actions',
+    'Review checkpoints require all known fields to be committed',
+  ]) {
+    assert.ok(checkpointSchema.includes(semanticMarker), `${sourcePath} must enforce ${semanticMarker}`);
+  }
+  const checkpointInvariant = contract.toolInputInvariants?.trackly_checkpoint_apply_batch;
+  assert.deepEqual(checkpointInvariant, {
+    questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
+    exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
+  });
+  if (checkpointSchema.includes('hasQuestions && hasNonQuestions')) {
+    assert.ok(
+      checkpointSchema.includes('Question checkpoints cannot mix question and non-question actions'),
+      `${sourcePath} must reject mixed question packets when it enforces the invariant locally`,
+    );
+  } else {
+    assert.equal(typeof replayAwareServiceSource, 'string', `${sourcePath} must delegate mixed-packet enforcement to a replay-aware service`);
+    const existingReplayIndex = replayAwareServiceSource.indexOf("return storedCheckpointResult(existing, 'replayed')");
+    const mixedPacketIndex = replayAwareServiceSource.indexOf('if (hasQuestions && hasNonQuestions)');
+    assert.ok(existingReplayIndex >= 0, `${sourcePath} service must preserve exact stored checkpoint replays`);
+    assert.ok(mixedPacketIndex > existingReplayIndex, `${sourcePath} service must reject new mixed packets only after exact replay lookup`);
+    assert.ok(
+      replayAwareServiceSource.includes('Question checkpoints cannot mix question and non-question actions.'),
+      `${sourcePath} service must enforce the versioned mixed-packet invariant`,
+    );
+  }
+
+  return {
+    actionCodes,
+    continuationByAction,
+    lifecycleByAction,
+    questionPacketByAction,
+    invariants: [
+      'current-inspection-epoch',
+      'unique-resolved-action-ids',
+      'single-lifecycle',
+      'question-packet-homogeneous',
+      'question-packet-phase-required',
+      'question-known-fields-committed',
+      'packet-phase-question-only',
+      'access-blocker-exclusive-before-private-commit',
+      'review-ready-after-known-fields-commit',
+    ],
+  };
+}
+
 function assertCoordinatedCheckpointHelperSemantics({
   localContract,
   localApplySource,
   hostedApplySource,
+  hostedBatchServiceSource = null,
   sourcePaths = {},
   expectedHostedDigests = HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256,
 }) {
@@ -4006,6 +4105,20 @@ function assertCoordinatedCheckpointHelperSemantics({
     namedDefinitionAstDigests(hostedApplySource, helperNames, hostedApplyPath),
     expectedHostedDigests,
     'Hosted checkpoint helper ASTs drifted from the coordinated semantic digest lock',
+  );
+  assert.deepEqual(
+    checkpointHelperSemanticDescriptor(
+      localApplySource,
+      localContract,
+      localApplyPath,
+    ),
+    checkpointHelperSemanticDescriptor(
+      hostedApplySource,
+      localContract,
+      hostedApplyPath,
+      hostedBatchServiceSource,
+    ),
+    'Local and hosted checkpoint helpers drifted from one language-neutral semantic contract',
   );
 }
 
@@ -4603,6 +4716,7 @@ function verifyCheckedInHostedContractFixture(
     backendUiRedirect: lock.publicExecutableContract.backendUiRedirectSha256,
     maintenanceMode: lock.publicExecutableContract.maintenanceModeSha256,
     databaseBinding: lock.publicExecutableContract.databaseBindingSha256,
+    databasePoolPolicy: lock.publicExecutableContract.databasePoolPolicySha256,
     reviewIdentity: lock.publicExecutableContract.reviewIdentitySha256,
     azureRateLimitOptions: lock.publicExecutableContract.azureRateLimitOptionsSha256,
     authRateLimit: lock.publicExecutableContract.authRateLimitSha256,
@@ -4615,6 +4729,7 @@ function verifyCheckedInHostedContractFixture(
     lock.publicExecutableContract.backendUiRedirectSha256,
     lock.publicExecutableContract.maintenanceModeSha256,
     lock.publicExecutableContract.databaseBindingSha256,
+    lock.publicExecutableContract.databasePoolPolicySha256,
     lock.publicExecutableContract.reviewIdentitySha256,
     lock.publicExecutableContract.azureRateLimitOptionsSha256,
     lock.publicExecutableContract.authRateLimitSha256,
@@ -4655,6 +4770,7 @@ const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.joi
   || backendCandidates[0];
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
 const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
+const hostedBatchServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'batch-service.ts');
 const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
 const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
@@ -4706,6 +4822,7 @@ if (
     `Hosted plugin contract at ${hostedPluginContractPath} must contain a top-level "tools" JSON object before tool parity can be verified.`,
   );
 }
+const hostedBatchServiceSource = fs.readFileSync(hostedBatchServicePath, 'utf8');
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
@@ -4778,6 +4895,7 @@ verifyCoordinatedBackendCore({
   hostedContract: hosted,
   localApplySource,
   hostedApplySource,
+  hostedBatchServiceSource,
   hostedPluginContract,
   pluginLock,
   hostedPluginSource,
@@ -4791,6 +4909,7 @@ assertCoordinatedCheckpointHelperSemantics({
   localContract: local,
   localApplySource,
   hostedApplySource,
+  hostedBatchServiceSource,
   sourcePaths: {
     localApply: localApplySourcePath,
     hostedApply: hostedApplySourcePath,
@@ -7564,6 +7683,7 @@ module.exports = {
   assertWrappedHandlerStatementSequenceAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
+  checkpointHelperSemanticDescriptor,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
   directHostedToolRegistrationsInNamedFactory,

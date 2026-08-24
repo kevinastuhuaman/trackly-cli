@@ -656,6 +656,10 @@ function validateHandoff(receipt, expectedContext) {
     if (!['visible_tab_inventory', 'durable_handoff_receipt'].includes(receipt.handoffEvidenceType)) {
       errors.push('handoffEvidenceType must identify visible inventory or a durable handoff receipt');
     }
+    if (receipt.browserTabState === 'durable_handoff_proven'
+        && receipt.handoffEvidenceType !== 'durable_handoff_receipt') {
+      errors.push('durable_handoff_proven requires durable_handoff_receipt evidence');
+    }
     if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
       for (const field of evidenceFields) {
         if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);

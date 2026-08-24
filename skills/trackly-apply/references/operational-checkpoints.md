@@ -64,8 +64,12 @@ node "<skill-dir>/scripts/validate-phase-checkpoint.js" <phase>
 
 Pass `{"receipt": {...}, "expectedContext": {...}}` on standard input. The
 envelope permits only those two fields. `expectedContext` is required for every
-phase and must be built only from the current authoritative work receipt. For
-selection, include `workMode`, the authoritative `latestExplicitTarget`,
+phase. Build Trackly lineage, profile, lifecycle, and approval fields only from
+the current authoritative work receipt. Build browser-surface fields such as
+`formInventoryFingerprint`, `resumeControl`, and browser handoff evidence only
+from the independently captured, value-free current browser baseline; never
+present those fields as backend-returned facts. For selection, include
+`workMode`, the authoritative `latestExplicitTarget`,
 `batchId`, `queueExhausted`, and `selectableJobIds`: the access-proven job IDs
 for an accessible execution or exact frozen member job IDs for a fixed
 inspection. Include `executionId` only for an accessible execution. For access,

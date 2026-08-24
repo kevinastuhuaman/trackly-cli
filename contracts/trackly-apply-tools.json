@@ -1,5 +1,5 @@
 {
-  "contractVersion": "3.7.4",
+  "contractVersion": "3.7.5",
   "constants": {
     "applyExecutionMaxTarget": 20,
     "applyScenarioCodes": ["browser_reclaim", "resume_upload", "resume_parser_recheck", "semantic_boolean_commit", "custom_select_commit", "multi_step_navigation", "free_text_voice", "required_error_sweep", "final_consent", "handoff_reclaim", "critical_contact_integrity", "manual_submit_boundary", "job_identity_match"],
@@ -27,6 +27,10 @@
     "applyUploadFailureCodes": ["upload_capability_unavailable", "upload_stage_missing", "upload_stage_out_of_order", "upload_stage_duplicate", "control_ambiguous", "chooser_timeout", "chooser_open_without_commit", "file_missing", "file_expired", "set_files_failed", "filename_uncommitted", "unexpected_file_navigation", "parser_unsettled", "parser_field_regression"]
   },
   "toolInputInvariants": {
+    "trackly_checkpoint_apply_batch": {
+      "questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints": true,
+      "exactReplayOfPreviouslyAcceptedPayloadPreserved": true
+    },
     "trackly_get_apply_execution_snapshot": {
       "officeProjectionMemberIdsMustExistInMemberIds": true
     }
@@ -34,7 +38,7 @@
   "schemaDigests": {
     "applyCheckpointActionVariant": "db6b69924b791b3e50c4c7464519fa1a786c7b39ed86c3cc9482e18c211553d2",
     "applyCheckpointActionSchema": "99baf25b27ae4bd41183bf47f8e1eb7522e1d471156f6090a784362d5b248e95",
-    "applyCheckpointSchema": "4875190ed9d2d8dd2145f2d08c4bb6159a0ce9f751b1e41246c93f33d652c99c"
+    "applyCheckpointSchema": "3de67ab6d18d46d1b1065c2f8326fd138288eaaef3ca56b50134d1634adc847f"
   },
   "tools": {
     "trackly_get_apply_queue": "{limit:z.number().int().min(1).max(100).optional(),cursor:z.string().min(1).max(2048).optional()}",

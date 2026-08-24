@@ -4,7 +4,7 @@
   "source": {
     "path": "skills/trackly-apply",
     "skillVersion": "4.7.1",
-    "treeSha256": "8ae5db6cbdfe3fda1ddbcc5e9c227f3cbd023b309260028ef3fda9f6df2bd062"
+    "treeSha256": "dc2d6612267698693782019d4212e49a904724a49167aa3eb101803b88059875"
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
@@ -118,7 +118,8 @@
     "jobBriefServiceSha256": "e8dad5884d6647176c780bf7e87bdf53f24216a7580b0980bff1f1faad6ecb91",
     "backendUiRedirectSha256": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceModeSha256": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBindingSha256": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
+    "databaseBindingSha256": "510123c5846db1899960903ecab37c9cf446f7215451149e863f344b4672a93a",
+    "databasePoolPolicySha256": "17c716980598100cfd91aa0630f93ee967652daf256bfaeaffe4b37802e98928",
     "reviewIdentitySha256": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptionsSha256": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
     "authRateLimitSha256": "6929621038a85cc53da3fe239851de693148cb9fb917504ac04bb4cac44e5e17",

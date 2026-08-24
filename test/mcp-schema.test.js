@@ -155,6 +155,21 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
     }),
   });
   assert.notEqual(question.isError, true, 'valid question packet was rejected');
+  const mixedQuestionAndBlocker = await client.callTool({
+    name: 'trackly_checkpoint_apply_batch',
+    arguments: checkpointArguments('answer/unknown', true, sequence++, {
+      packetPhase: 'first_pass',
+      actions: [
+        {
+          actionCode: 'answer/unknown',
+          continuationAllowed: true,
+          fieldFingerprint: 'a'.repeat(64),
+        },
+        { actionCode: 'auth/sign_in', continuationAllowed: true },
+      ],
+    }),
+  });
+  assert.equal(mixedQuestionAndBlocker.isError, true, 'mixed question and non-question packet was accepted');
   const missingQuestionFingerprint = await client.callTool({
     name: 'trackly_checkpoint_apply_batch',
     arguments: checkpointArguments('answer/unknown', true, 3, {
