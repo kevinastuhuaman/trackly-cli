@@ -74,11 +74,22 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     name,
     activeFunctionDigest(helperSource, name, 'checkpoint helper fixture'),
   ]));
+  const hostedCheckpointContractSource = `
+    export const APPLY_BATCH_CHECKPOINT_ACTION_CODES = ${JSON.stringify(contract.constants.applyCheckpointActionCodes)} as const;
+    export const APPLY_BATCH_CHECKPOINT_ACTION_MAP = Object.freeze(${JSON.stringify(Object.fromEntries(
+    contract.constants.applyCheckpointActionCodes.map((actionCode) => [actionCode, {
+      continuationAllowed: contract.constants.applyCheckpointContinuationByAction[actionCode],
+      lifecycleState: contract.constants.applyCheckpointLifecycleByAction[actionCode],
+      questionPacket: contract.constants.applyCheckpointQuestionPacketByAction[actionCode],
+    }]),
+  ))});
+  `;
   const fixture = {
     localContract: { ...contract, schemaDigests: expectedDigests },
     localApplySource: helperSource,
     hostedApplySource: helperSource,
     hostedBatchServiceSource: replayAwareServiceSource,
+    hostedCheckpointContractSource,
     expectedHostedDigests: expectedDigests,
   };
 
@@ -107,6 +118,16 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       ...fixture,
       localContract: { ...fixture.localContract, schemaDigests: driftedLocalDigests },
       localApplySource: locallyDrifted,
+    }),
+    /language-neutral semantic contract/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
+        '"answer/unknown":{"continuationAllowed":true',
+        '"answer/unknown":{"continuationAllowed":false',
+      ),
     }),
     /language-neutral semantic contract/,
   );

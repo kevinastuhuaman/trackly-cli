@@ -3991,11 +3991,23 @@ function checkpointHelperSemanticDescriptor(
   contract,
   sourcePath,
   replayAwareServiceSource = null,
+  checkpointContractSource = null,
+  checkpointContractSourcePath = null,
 ) {
-  const actionCodes = contract.constants.applyCheckpointActionCodes;
-  const continuationByAction = contract.constants.applyCheckpointContinuationByAction;
-  const questionPacketByAction = contract.constants.applyCheckpointQuestionPacketByAction;
-  const lifecycleByAction = contract.constants.applyCheckpointLifecycleByAction;
+  const hostedMappings = checkpointContractSource === null
+    ? null
+    : hostedCheckpointActionMappings(
+      checkpointContractSource,
+      checkpointContractSourcePath || sourcePath,
+    );
+  const actionCodes = hostedMappings?.actionCodes
+    ?? contract.constants.applyCheckpointActionCodes;
+  const continuationByAction = hostedMappings?.continuationByAction
+    ?? contract.constants.applyCheckpointContinuationByAction;
+  const questionPacketByAction = hostedMappings?.questionPacketByAction
+    ?? contract.constants.applyCheckpointQuestionPacketByAction;
+  const lifecycleByAction = hostedMappings?.lifecycleByAction
+    ?? contract.constants.applyCheckpointLifecycleByAction;
   const variant = exactSchemaDefinition(source, 'applyCheckpointActionVariant', sourcePath);
   const actionSchema = exactSchemaDefinition(source, 'applyCheckpointActionSchema', sourcePath);
   const checkpointSchema = exactSchemaDefinition(source, 'applyCheckpointSchema', sourcePath);
@@ -4085,11 +4097,79 @@ function checkpointHelperSemanticDescriptor(
   };
 }
 
+function unwrapStaticExpression(node) {
+  let current = node;
+  while (
+    current?.type === 'TSAsExpression'
+    || current?.type === 'TSSatisfiesExpression'
+    || current?.type === 'TypeCastExpression'
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function staticPrimitive(node, label) {
+  const value = unwrapStaticExpression(node);
+  if (value?.type === 'StringLiteral' || value?.type === 'BooleanLiteral') return value.value;
+  assert.fail(`${label} must be a static string or boolean literal`);
+}
+
+function hostedCheckpointActionMappings(source, sourcePath) {
+  const actionCodesNode = unwrapStaticExpression(activeNamedDefinitionAst(
+    source,
+    'APPLY_BATCH_CHECKPOINT_ACTION_CODES',
+    sourcePath,
+  ));
+  assert.equal(
+    actionCodesNode?.type,
+    'ArrayExpression',
+    `APPLY_BATCH_CHECKPOINT_ACTION_CODES in ${sourcePath} must be a static array`,
+  );
+  const actionCodes = actionCodesNode.elements.map((element, index) => staticPrimitive(
+    element,
+    `APPLY_BATCH_CHECKPOINT_ACTION_CODES[${index}] in ${sourcePath}`,
+  ));
+
+  const frozenMap = unwrapStaticExpression(activeNamedDefinitionAst(
+    source,
+    'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+    sourcePath,
+  ));
+  assert.equal(frozenMap?.type, 'CallExpression', `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must be frozen`);
+  assert.deepEqual(
+    canonicalSchemaAst(frozenMap.callee),
+    canonicalSchemaAst(babelParser.parseExpression('Object.freeze', { plugins: ['typescript'] })),
+    `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must use Object.freeze`,
+  );
+  assert.equal(frozenMap.arguments.length, 1, `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must freeze one object`);
+  const mappings = staticBabelObjectProperties(
+    unwrapStaticExpression(frozenMap.arguments[0]),
+    `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath}`,
+  );
+  assert.deepEqual(Object.keys(mappings), actionCodes, `${sourcePath} checkpoint mappings must exactly match action-code order`);
+
+  const continuationByAction = {};
+  const lifecycleByAction = {};
+  const questionPacketByAction = {};
+  for (const actionCode of actionCodes) {
+    const fields = staticBabelObjectProperties(mappings[actionCode], `${actionCode} mapping in ${sourcePath}`);
+    assert.ok(fields.continuationAllowed, `${actionCode} mapping in ${sourcePath} is missing continuationAllowed`);
+    assert.ok(fields.lifecycleState, `${actionCode} mapping in ${sourcePath} is missing lifecycleState`);
+    assert.ok(fields.questionPacket, `${actionCode} mapping in ${sourcePath} is missing questionPacket`);
+    continuationByAction[actionCode] = staticPrimitive(fields.continuationAllowed, `${actionCode}.continuationAllowed`);
+    lifecycleByAction[actionCode] = staticPrimitive(fields.lifecycleState, `${actionCode}.lifecycleState`);
+    questionPacketByAction[actionCode] = staticPrimitive(fields.questionPacket, `${actionCode}.questionPacket`);
+  }
+  return { actionCodes, continuationByAction, lifecycleByAction, questionPacketByAction };
+}
+
 function assertCoordinatedCheckpointHelperSemantics({
   localContract,
   localApplySource,
   hostedApplySource,
   hostedBatchServiceSource = null,
+  hostedCheckpointContractSource = null,
   sourcePaths = {},
   expectedHostedDigests = HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256,
 }) {
@@ -4123,6 +4203,8 @@ function assertCoordinatedCheckpointHelperSemantics({
       localContract,
       hostedApplyPath,
       hostedBatchServiceSource,
+      hostedCheckpointContractSource,
+      sourcePaths.hostedCheckpointContract,
     ),
     'Local and hosted checkpoint helpers drifted from one language-neutral semantic contract',
   );
@@ -4777,6 +4859,7 @@ const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.joi
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
 const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
 const hostedBatchServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'batch-service.ts');
+const hostedCheckpointContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-checkpoint-contract.ts');
 const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
 const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
@@ -4829,6 +4912,7 @@ if (
   );
 }
 const hostedBatchServiceSource = fs.readFileSync(hostedBatchServicePath, 'utf8');
+const hostedCheckpointContractSource = fs.readFileSync(hostedCheckpointContractPath, 'utf8');
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
@@ -4902,12 +4986,14 @@ verifyCoordinatedBackendCore({
   localApplySource,
   hostedApplySource,
   hostedBatchServiceSource,
+  hostedCheckpointContractSource,
   hostedPluginContract,
   pluginLock,
   hostedPluginSource,
   sourcePaths: {
     localApply: localApplySourcePath,
     hostedApply: hostedApplySourcePath,
+    hostedCheckpointContract: hostedCheckpointContractPath,
     hostedPlugin: hostedPluginSourcePath,
   },
 });
@@ -4916,9 +5002,11 @@ assertCoordinatedCheckpointHelperSemantics({
   localApplySource,
   hostedApplySource,
   hostedBatchServiceSource,
+  hostedCheckpointContractSource,
   sourcePaths: {
     localApply: localApplySourcePath,
     hostedApply: hostedApplySourcePath,
+    hostedCheckpointContract: hostedCheckpointContractPath,
   },
 });
 
