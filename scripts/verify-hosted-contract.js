@@ -8,6 +8,7 @@ const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '3005166ba124e14060d7f0ff16b54cc9c4301fe32329ef2b477b3f830f156295';
@@ -4024,12 +4025,6 @@ function singleDirectStatement(node, label) {
   return node;
 }
 
-function terminalDirectStatement(node, label) {
-  if (node?.type !== 'BlockStatement') return node;
-  assert.ok(node.body.length > 0, `${label} must contain an executable statement`);
-  return node.body[node.body.length - 1];
-}
-
 function assertDirectThrowWithMessage(node, expectedMessage, label) {
   const statement = singleDirectStatement(node, label);
   assert.equal(statement?.type, 'ThrowStatement', `${label} must directly throw the locked rejection`);
@@ -4158,16 +4153,52 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     canonicalSchemaAst(babelParser.parseExpression('existing.length > 0', { plugins: ['typescript'] })),
     `${sourcePath} checkpoint replay branch must be guarded by stored checkpoint presence`,
   );
+  const replayStatements = statements[replayIndex].consequent?.type === 'BlockStatement'
+    ? statements[replayIndex].consequent.body
+    : [statements[replayIndex].consequent];
+  const replayReturn = parseExpectedStatement(
+    "return storedCheckpointResult(existing, 'replayed');",
+    `${sourcePath} checkpoint replay result`,
+  );
+  const replayConflictGuard = parseExpectedStatement(`
+    if (
+      existing.length !== checkpoint.actions.length
+      || existing.some((action, index) => (
+        action.idempotencyPayloadHash !== payloadHash
+        || action.actionVersion !== index + 1
+      ))
+    ) {
+      throw new ApplyBatchIdempotencyConflictError();
+    }
+  `, `${sourcePath} checkpoint replay conflict guard`);
+  const canonicalReplayStatements = canonicalSchemaAst(replayStatements);
+  const allowedReplayBranches = [
+    canonicalSchemaAst([replayReturn]),
+    canonicalSchemaAst([replayConflictGuard, replayReturn]),
+  ];
+  assert.ok(
+    allowedReplayBranches.some((allowed) => isDeepStrictEqual(allowed, canonicalReplayStatements)),
+    `${sourcePath} checkpoint replay branch must contain only its locked conflict guard and stored replay return`,
+  );
+
+  const expectedClassifiers = [
+    'const hasQuestions = checkpoint.actions.some((action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket);',
+    'const hasNonQuestions = checkpoint.actions.some((action) => !APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket);',
+  ];
+  const classifierDeclarations = statements.filter((statement) => (
+    statement.type === 'VariableDeclaration'
+    && statement.declarations.some((declaration) => (
+      declaration.id?.type === 'Identifier'
+      && ['hasQuestions', 'hasNonQuestions'].includes(declaration.id.name)
+    ))
+  ));
   assert.deepEqual(
-    canonicalSchemaAst(terminalDirectStatement(
-      statements[replayIndex].consequent,
-      `${sourcePath} checkpoint replay branch`,
-    )),
-    canonicalSchemaAst(parseExpectedStatement(
-      "return storedCheckpointResult(existing, 'replayed');",
-      `${sourcePath} checkpoint replay result`,
-    )),
-    `${sourcePath} checkpoint replay branch must directly return the stored replay result`,
+    canonicalSchemaAst(classifierDeclarations),
+    canonicalSchemaAst(expectedClassifiers.map((statement, index) => parseExpectedStatement(
+      statement,
+      `${sourcePath} mixed-packet classifier ${index + 1}`,
+    ))),
+    `${sourcePath} mixed-packet classifiers must use the locked action mappings`,
   );
   const mixedIndex = statements.findIndex((statement) => (
     statement.type === 'IfStatement'
@@ -4186,6 +4217,11 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     statements[mixedIndex].consequent,
     'Question checkpoints cannot mix question and non-question actions.',
     `${sourcePath} mixed-packet branch`,
+  );
+  const classifierIndexes = classifierDeclarations.map((declaration) => statements.indexOf(declaration));
+  assert.ok(
+    classifierIndexes.every((index) => index > replayIndex && index < mixedIndex),
+    `${sourcePath} must compute locked mixed-packet classifiers after replay lookup and before rejection`,
   );
   assert.ok(mixedIndex > replayIndex, `${sourcePath} must reject new mixed packets only after exact replay lookup`);
 }

@@ -60,8 +60,12 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     async function recordOneApplyBatchCheckpoint() {
       const existing = await loadStoredApplyBatchCheckpoint();
       if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');
-      const hasQuestions = true;
-      const hasNonQuestions = true;
+      const hasQuestions = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
+      const hasNonQuestions = checkpoint.actions.some(
+        (action) => !APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
       if (hasQuestions && hasNonQuestions) {
         throw new Error('Question checkpoints cannot mix question and non-question actions.');
       }
@@ -186,7 +190,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         }
       `,
     }),
-    /only after exact replay lookup/,
+    /mixed-packet classifiers must use the locked action mappings|only after exact replay lookup/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
@@ -196,8 +200,45 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         "void 'replayed';",
       ),
     }),
-    /must directly return the stored replay result/,
+    /must contain only its locked conflict guard and stored replay return/,
   );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        "if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');",
+        "if (existing.length > 0) { sideEffect(); return storedCheckpointResult(existing, 'replayed'); }",
+      ),
+    }),
+    /must contain only its locked conflict guard and stored replay return/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /const hasQuestions = checkpoint\.actions\.some\([\s\S]*?\n\s*\);/,
+        'const hasQuestions = true;',
+      ),
+    }),
+    /mixed-packet classifiers must use the locked action mappings/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /const hasNonQuestions = checkpoint\.actions\.some\([\s\S]*?\n\s*\);/,
+        'const hasNonQuestions = true;',
+      ),
+    }),
+    /mixed-packet classifiers must use the locked action mappings/,
+  );
+  assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics({
+    ...fixture,
+    hostedBatchServiceSource: replayAwareServiceSource.replace(
+      "throw new Error('Question checkpoints cannot mix question and non-question actions.');",
+      "throw new ApplyBatchValidationError('Question checkpoints cannot mix question and non-question actions.');",
+    ),
+  }));
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,

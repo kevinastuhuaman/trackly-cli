@@ -776,6 +776,16 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointLifecycle: visibleHandoff.checkpointLifecycle,
   };
   assert.deepEqual(validateCheckpoint('handoff', visibleHandoff, visibleHandoffContext), []);
+  for (const [field, value] of [
+    ['browserBindingHash', 'e'.repeat(64)],
+    ['handoffEvidenceFingerprint', '2'.repeat(64)],
+    ['handoffEvidenceType', 'user_visible_handoff_receipt'],
+  ]) {
+    assert.match(
+      validateCheckpoint('handoff', { ...visibleHandoff, [field]: value }, visibleHandoffContext).join('\n'),
+      new RegExp(`${field} must match expectedContext`),
+    );
+  }
   assert.deepEqual(validateCheckpoint('handoff', {
     ...visibleHandoff,
     handoffEvidenceType: 'user_visible_handoff_receipt',
