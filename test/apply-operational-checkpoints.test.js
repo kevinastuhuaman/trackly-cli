@@ -873,6 +873,15 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validateCheckpoint('handoff', {
       ...handoff,
       browserTabState: 'closed_verified',
+      handoffVisibility: 'unverified',
+      reviewReadyClaimed: false,
+    }, handoffContext).join('\n'),
+    /closed_verified is reserved for reconciliation receipts/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      browserTabState: 'closed_verified',
       handoffVisibility: 'verified',
       reviewReadyClaimed: true,
       browserBindingHash: '4'.repeat(64),

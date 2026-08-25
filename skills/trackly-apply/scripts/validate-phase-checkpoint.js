@@ -96,7 +96,6 @@ const BROWSER_HANDOFF_STATES = new Set([
   'durable_handoff_proven',
   'missing',
   'closure_unverified',
-  'closed_verified',
 ]);
 
 const PHASE_FIELDS = {
@@ -638,7 +637,9 @@ function validateHandoff(receipt, expectedContext) {
       if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
     }
   }
-  if (!BROWSER_HANDOFF_STATES.has(receipt.browserTabState)) {
+  if (receipt.browserTabState === 'closed_verified') {
+    errors.push('closed_verified is reserved for reconciliation receipts');
+  } else if (!BROWSER_HANDOFF_STATES.has(receipt.browserTabState)) {
     errors.push('browserTabState is invalid');
   }
   if (!['verified', 'unverified'].includes(receipt.handoffVisibility)) {

@@ -121,7 +121,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       localContract: { ...fixture.localContract, schemaDigests: driftedLocalDigests },
       localApplySource: locallyDrifted,
     }),
-    /language-neutral semantic contract/,
+    /locked executable classifications|language-neutral semantic contract/,
   );
   const invertedEpoch = helperSource.replace(
     'checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch',
@@ -139,6 +139,38 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     }),
     /locked executable condition/,
   );
+  const weakenedBound = helperSource.replace(
+    'inspectionEpoch: z.number().int().min(0)',
+    'inspectionEpoch: z.number().int().min(-1)',
+  );
+  const weakenedBoundDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(weakenedBound, name, 'weakened bound checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: weakenedBoundDigests },
+      localApplySource: weakenedBound,
+    }),
+    /language-neutral semantic contract/,
+  );
+  const extraRefinement = helperSource.replace(
+    'const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);',
+    "if (checkpoint.actions.length === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['actions'], message: 'Actions required' });\n  const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);",
+  );
+  const extraRefinementDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(extraRefinement, name, 'extra refinement checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: extraRefinementDigests },
+      localApplySource: extraRefinement,
+    }),
+    /must not contain unmodeled executable statements/,
+  );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
@@ -155,6 +187,26 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       `,
     }),
     /only after exact replay lookup/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        "return storedCheckpointResult(existing, 'replayed');",
+        "void 'replayed';",
+      ),
+    }),
+    /must directly return the stored replay result/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        "throw new Error('Question checkpoints cannot mix question and non-question actions.');",
+        "void 'Question checkpoints cannot mix question and non-question actions.';",
+      ),
+    }),
+    /must directly throw the locked rejection/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({

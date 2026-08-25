@@ -4006,6 +4006,46 @@ function statementContainsString(node, expected) {
   return found;
 }
 
+function parseExpectedStatement(statement, label) {
+  const parsed = babelParser.parse(statement, {
+    sourceType: 'module',
+    plugins: ['typescript'],
+    allowReturnOutsideFunction: true,
+  });
+  assert.equal(parsed.program.body.length, 1, `${label} must contain one complete statement`);
+  return parsed.program.body[0];
+}
+
+function singleDirectStatement(node, label) {
+  if (node?.type === 'BlockStatement') {
+    assert.equal(node.body.length, 1, `${label} must contain exactly one direct statement`);
+    return node.body[0];
+  }
+  return node;
+}
+
+function terminalDirectStatement(node, label) {
+  if (node?.type !== 'BlockStatement') return node;
+  assert.ok(node.body.length > 0, `${label} must contain an executable statement`);
+  return node.body[node.body.length - 1];
+}
+
+function assertDirectThrowWithMessage(node, expectedMessage, label) {
+  const statement = singleDirectStatement(node, label);
+  assert.equal(statement?.type, 'ThrowStatement', `${label} must directly throw the locked rejection`);
+  assert.equal(statement.argument?.type, 'NewExpression', `${label} must throw a constructed error`);
+  assert.ok(
+    statement.argument.callee?.type === 'Identifier'
+      && ['Error', 'ApplyBatchValidationError'].includes(statement.argument.callee.name),
+    `${label} must throw Error or ApplyBatchValidationError`,
+  );
+  assert.deepEqual(
+    statement.argument.arguments?.map(canonicalSchemaAst),
+    [{ type: 'StringLiteral', value: expectedMessage }],
+    `${label} must throw the locked rejection message`,
+  );
+}
+
 function checkpointRefinementCallback(source, sourcePath) {
   const schema = activeNamedDefinitionAst(source, 'applyCheckpointSchema', sourcePath);
   assert.equal(schema?.type, 'CallExpression', `applyCheckpointSchema in ${sourcePath} must call superRefine`);
@@ -4039,6 +4079,16 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
       ? 'new Set(mappings.map(({ lifecycleState }) => lifecycleState)).size !== 1'
       : 'new Set(actionCodes.map((code) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION[code])).size !== 1',
   };
+  const paths = {
+    'inspectionEpoch must equal expectedInspectionEpoch': 'inspectionEpoch',
+    'resolvedActionIds must be unique': 'resolvedActionIds',
+    'Actions in one inspection checkpoint must share one lifecycle': 'actions',
+    'Question checkpoints require a packet phase': 'packetPhase',
+    'Question checkpoints require committed known fields': 'knownFieldsCommitted',
+    'packetPhase is only valid for grouped questions': 'packetPhase',
+    'Access-blocking checkpoints cannot report private-field commits or other actions': 'actions',
+    'Review checkpoints require all known fields to be committed': 'knownFieldsCommitted',
+  };
   for (const [message, expression] of Object.entries(expected)) {
     const matches = callback.body.body.filter((statement) => (
       statement.type === 'IfStatement' && statementContainsString(statement.consequent, message)
@@ -4049,7 +4099,48 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
       canonicalSchemaAst(babelParser.parseExpression(expression, { plugins: ['typescript'] })),
       `${sourcePath} must enforce ${message} with its locked executable condition`,
     );
+    assert.deepEqual(
+      canonicalSchemaAst(singleDirectStatement(matches[0].consequent, `${sourcePath} ${message} branch`)),
+      canonicalSchemaAst(parseExpectedStatement(
+        `context.addIssue({ code: z.ZodIssueCode.custom, path: ['${paths[message]}'], message: '${message}' });`,
+        `${sourcePath} ${message} issue`,
+      )),
+      `${sourcePath} must enforce ${message} with exactly its locked issue effect`,
+    );
   }
+
+  const expectedDeclarations = shape === 'hosted-map' ? [
+    'const mappings = checkpoint.actions.map(({ actionCode }) => (APPLY_BATCH_CHECKPOINT_ACTION_MAP[actionCode]));',
+    'const hasQuestions = mappings.some(({ questionPacket }) => questionPacket);',
+    'const actionCodes = new Set(checkpoint.actions.map(({ actionCode }) => actionCode));',
+    "const accessBlocked = actionCodes.has('captcha/before_form') || actionCodes.has('trust/origin_mismatch');",
+    "const reviewReady = actionCodes.has('captcha/at_submit') || actionCodes.has('review/manual_submit');",
+  ] : [
+    'const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);',
+    'const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);',
+    "const accessBlocked = actionCodes.includes('captcha/before_form') || actionCodes.includes('trust/origin_mismatch');",
+    "const reviewReady = actionCodes.includes('captcha/at_submit') || actionCodes.includes('review/manual_submit');",
+  ];
+  const declarations = callback.body.body.filter((statement) => statement.type === 'VariableDeclaration');
+  assert.deepEqual(
+    canonicalSchemaAst(declarations),
+    canonicalSchemaAst(expectedDeclarations.map((statement, index) => parseExpectedStatement(
+      statement,
+      `${sourcePath} refinement declaration ${index + 1}`,
+    ))),
+    `${sourcePath} checkpoint refinement must use only its locked executable classifications`,
+  );
+  assert.equal(
+    callback.body.body.length,
+    Object.keys(expected).length + expectedDeclarations.length,
+    `${sourcePath} checkpoint refinement must not contain unmodeled executable statements`,
+  );
+  assert.ok(
+    callback.body.body.every((statement) => (
+      statement.type === 'IfStatement' || statement.type === 'VariableDeclaration'
+    )),
+    `${sourcePath} checkpoint refinement must contain only locked declarations and issue branches`,
+  );
   return Object.keys(expected);
 }
 
@@ -4067,6 +4158,17 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     canonicalSchemaAst(babelParser.parseExpression('existing.length > 0', { plugins: ['typescript'] })),
     `${sourcePath} checkpoint replay branch must be guarded by stored checkpoint presence`,
   );
+  assert.deepEqual(
+    canonicalSchemaAst(terminalDirectStatement(
+      statements[replayIndex].consequent,
+      `${sourcePath} checkpoint replay branch`,
+    )),
+    canonicalSchemaAst(parseExpectedStatement(
+      "return storedCheckpointResult(existing, 'replayed');",
+      `${sourcePath} checkpoint replay result`,
+    )),
+    `${sourcePath} checkpoint replay branch must directly return the stored replay result`,
+  );
   const mixedIndex = statements.findIndex((statement) => (
     statement.type === 'IfStatement'
     && statementContainsString(
@@ -4079,6 +4181,11 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     canonicalSchemaAst(statements[mixedIndex].test),
     canonicalSchemaAst(babelParser.parseExpression('hasQuestions && hasNonQuestions', { plugins: ['typescript'] })),
     `${sourcePath} mixed-packet branch must use both executable classifications`,
+  );
+  assertDirectThrowWithMessage(
+    statements[mixedIndex].consequent,
+    'Question checkpoints cannot mix question and non-question actions.',
+    `${sourcePath} mixed-packet branch`,
   );
   assert.ok(mixedIndex > replayIndex, `${sourcePath} must reject new mixed packets only after exact replay lookup`);
 }
@@ -4108,6 +4215,8 @@ function checkpointHelperSemanticDescriptor(
   const variant = exactSchemaDefinition(source, 'applyCheckpointActionVariant', sourcePath);
   const actionSchema = exactSchemaDefinition(source, 'applyCheckpointActionSchema', sourcePath);
   const checkpointSchema = exactSchemaDefinition(source, 'applyCheckpointSchema', sourcePath);
+  const checkpointSchemaAst = activeNamedDefinitionAst(source, 'applyCheckpointSchema', sourcePath);
+  const checkpointBaseSchema = checkpointSchemaAst.callee.object;
 
   if (variant.includes('APPLY_CHECKPOINT_CONTINUATION_BY_ACTION[actionCode]')) {
     assert.match(variant, /z\.literal\(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION\[actionCode\]\)/);
@@ -4160,6 +4269,7 @@ function checkpointHelperSemanticDescriptor(
     continuationByAction,
     lifecycleByAction,
     questionPacketByAction,
+    checkpointBaseSchema: canonicalSchemaAst(checkpointBaseSchema),
     mixedPacketEnforcement: checkpointSchema.includes('hasQuestions && hasNonQuestions')
       ? 'local-preflight'
       : 'replay-aware-backend',
