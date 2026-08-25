@@ -105,15 +105,19 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     name,
     activeFunctionDigest(helperSource, name, 'checkpoint helper fixture'),
   ]));
-  const hostedCheckpointContractSource = `
-    export const APPLY_BATCH_CHECKPOINT_ACTION_CODES = ${JSON.stringify(contract.constants.applyCheckpointActionCodes)} as const;
-    export const APPLY_BATCH_CHECKPOINT_ACTION_MAP = Object.freeze(${JSON.stringify(Object.fromEntries(
+  const checkpointMappings = Object.fromEntries(
     contract.constants.applyCheckpointActionCodes.map((actionCode) => [actionCode, {
       continuationAllowed: contract.constants.applyCheckpointContinuationByAction[actionCode],
       lifecycleState: contract.constants.applyCheckpointLifecycleByAction[actionCode],
       questionPacket: contract.constants.applyCheckpointQuestionPacketByAction[actionCode],
     }]),
-  ))});
+  );
+  const frozenCheckpointMappings = Object.entries(checkpointMappings)
+    .map(([actionCode, mapping]) => `${JSON.stringify(actionCode)}: Object.freeze(${JSON.stringify(mapping)})`)
+    .join(',');
+  const hostedCheckpointContractSource = `
+    export const APPLY_BATCH_CHECKPOINT_ACTION_CODES = ${JSON.stringify(contract.constants.applyCheckpointActionCodes)} as const;
+    export const APPLY_BATCH_CHECKPOINT_ACTION_MAP = Object.freeze({${frozenCheckpointMappings}});
   `;
   const fixture = {
     localContract: { ...contract, schemaDigests: expectedDigests },
@@ -125,6 +129,16 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   };
 
   assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: `
+        export const APPLY_BATCH_CHECKPOINT_ACTION_CODES = ${JSON.stringify(contract.constants.applyCheckpointActionCodes)} as const;
+        export const APPLY_BATCH_CHECKPOINT_ACTION_MAP = Object.freeze(${JSON.stringify(checkpointMappings)});
+      `,
+    }),
+    /mapping in .* must be frozen/,
+  );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
@@ -318,8 +332,8 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
       hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
-        '"answer/unknown":{"continuationAllowed":true',
-        '"answer/unknown":{"continuationAllowed":false',
+        '"answer/unknown": Object.freeze({"continuationAllowed":true',
+        '"answer/unknown": Object.freeze({"continuationAllowed":false',
       ),
     }),
     /language-neutral semantic contract/,

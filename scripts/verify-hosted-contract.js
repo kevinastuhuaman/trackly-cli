@@ -11,7 +11,7 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '3005166ba124e14060d7f0ff16b54cc9c4301fe32329ef2b477b3f830f156295';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '40fbd224e881d346e9199effd8b8c1969e11b4c5df8f8b677daa64340b4d10b0';
 const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
   applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
   applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
@@ -4418,7 +4418,26 @@ function hostedCheckpointActionMappings(source, sourcePath) {
   const lifecycleByAction = {};
   const questionPacketByAction = {};
   for (const actionCode of actionCodes) {
-    const fields = staticBabelObjectProperties(mappings[actionCode], `${actionCode} mapping in ${sourcePath}`);
+    const frozenMapping = unwrapStaticExpression(mappings[actionCode]);
+    assert.equal(
+      frozenMapping?.type,
+      'CallExpression',
+      `${actionCode} mapping in ${sourcePath} must be frozen`,
+    );
+    assert.deepEqual(
+      canonicalSchemaAst(frozenMapping.callee),
+      canonicalSchemaAst(babelParser.parseExpression('Object.freeze', { plugins: ['typescript'] })),
+      `${actionCode} mapping in ${sourcePath} must use Object.freeze`,
+    );
+    assert.equal(
+      frozenMapping.arguments.length,
+      1,
+      `${actionCode} mapping in ${sourcePath} must freeze one object`,
+    );
+    const fields = staticBabelObjectProperties(
+      unwrapStaticExpression(frozenMapping.arguments[0]),
+      `${actionCode} mapping in ${sourcePath}`,
+    );
     assert.ok(fields.continuationAllowed, `${actionCode} mapping in ${sourcePath} is missing continuationAllowed`);
     assert.ok(fields.lifecycleState, `${actionCode} mapping in ${sourcePath} is missing lifecycleState`);
     assert.ok(fields.questionPacket, `${actionCode} mapping in ${sourcePath} is missing questionPacket`);
