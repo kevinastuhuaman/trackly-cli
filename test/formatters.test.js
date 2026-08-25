@@ -61,6 +61,20 @@ test('outputJobs prefers the server display date and labels reposts explicitly',
   assert.match(out, /2026-02-04/);
 });
 
+test('jobDateDetailLines preserves a legacy posted date for a projected repost', () => {
+  assert.deepEqual(fmt.jobDateDetailLines({
+    postedAt: '2026-01-02T00:00:00.000Z',
+    firstSeenAt: '2026-01-03T00:00:00.000Z',
+    repostedAt: '2026-02-04T00:00:00.000Z',
+    displayDate: '2026-02-04T00:00:00.000Z',
+    displayDateKind: 'reposted',
+  }), [
+    'Posted: 2026-01-02',
+    'Found: 2026-01-03',
+    'Reposted: 2026-02-04',
+  ]);
+});
+
 test('outputJobs renders collision-only requirement IDs', () => {
   const out = capture(() => fmt.outputJobs([{
     id: 81,
