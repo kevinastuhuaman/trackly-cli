@@ -4094,6 +4094,11 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
       canonicalSchemaAst(babelParser.parseExpression(expression, { plugins: ['typescript'] })),
       `${sourcePath} must enforce ${message} with its locked executable condition`,
     );
+    assert.equal(
+      matches[0].alternate,
+      null,
+      `${sourcePath} must enforce ${message} without an alternate branch`,
+    );
     assert.deepEqual(
       canonicalSchemaAst(singleDirectStatement(matches[0].consequent, `${sourcePath} ${message} branch`)),
       canonicalSchemaAst(parseExpectedStatement(
@@ -4292,11 +4297,23 @@ function checkpointHelperSemanticDescriptor(
   const checkpointSchema = exactSchemaDefinition(source, 'applyCheckpointSchema', sourcePath);
   const checkpointSchemaAst = activeNamedDefinitionAst(source, 'applyCheckpointSchema', sourcePath);
   const checkpointBaseSchema = checkpointSchemaAst.callee.object;
+  const compactVariant = variant.replace(/\s+/g, '');
+  const fingerprintSemantics = {
+    pattern: '^[a-f0-9]{64}$',
+    requiredWhenQuestionPacket: true,
+    optionalOtherwise: true,
+  };
 
   if (variant.includes('APPLY_CHECKPOINT_CONTINUATION_BY_ACTION[actionCode]')) {
     assert.match(variant, /z\.literal\(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION\[actionCode\]\)/);
     assert.match(variant, /APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[actionCode\]/);
     assert.match(actionSchema, /APPLY_CHECKPOINT_ACTION_CODES\.map\(applyCheckpointActionVariant\)/);
+    assert.ok(
+      compactVariant.includes(
+        'fieldFingerprint:APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[actionCode]?z.string().regex(/^[a-f0-9]{64}$/):z.string().regex(/^[a-f0-9]{64}$/).optional()',
+      ),
+      `${sourcePath} must preserve the canonical question-packet fingerprint semantics`,
+    );
     assert.match(checkpointSchema, /actionCodes\.map\(\(code\) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION\[code\]\)/);
     assert.match(checkpointSchema, /actionCodes\.some\(\(code\) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[code\]\)/);
     if (checkpointSchema.includes('hasNonQuestions')) {
@@ -4308,6 +4325,22 @@ function checkpointHelperSemanticDescriptor(
   } else if (variant.includes('mapping.continuationAllowed')) {
     assert.match(variant, /z\.literal\(mapping\.continuationAllowed\)/);
     assert.match(variant, /mapping\.questionPacket/);
+    const fingerprintSchema = exactSchemaDefinition(
+      source,
+      'applyCheckpointFingerprintSchema',
+      sourcePath,
+    ).replace(/\s+/g, '');
+    assert.equal(
+      fingerprintSchema,
+      'constapplyCheckpointFingerprintSchema=z.string().regex(/^[a-f0-9]{64}$/);',
+      `${sourcePath} must preserve the canonical checkpoint fingerprint schema`,
+    );
+    assert.ok(
+      compactVariant.includes(
+        'fieldFingerprint:mapping.questionPacket?applyCheckpointFingerprintSchema:applyCheckpointFingerprintSchema.optional()',
+      ),
+      `${sourcePath} must preserve the canonical question-packet fingerprint semantics`,
+    );
     const declaredActionCodes = [...actionSchema.matchAll(
       /applyCheckpointActionVariant\('([^']+)'\)/g,
     )].map((match) => match[1]);
@@ -4344,6 +4377,7 @@ function checkpointHelperSemanticDescriptor(
     continuationByAction,
     lifecycleByAction,
     questionPacketByAction,
+    fingerprintSemantics,
     checkpointBaseSchema: canonicalSchemaAst(checkpointBaseSchema),
     mixedPacketEnforcement: checkpointSchema.includes('hasQuestions && hasNonQuestions')
       ? 'local-preflight'

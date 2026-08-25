@@ -4,7 +4,7 @@
   "source": {
     "path": "skills/trackly-apply",
     "skillVersion": "4.7.1",
-    "treeSha256": "fda2d1ba99f33cd454bc6dda9eb3749bf1b407ef94fffc18809c31db71259709"
+    "treeSha256": "025f4170860ce6ebc3b0405c92df641657d705ca9b33942fdf81cb9cc84a60ac"
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",

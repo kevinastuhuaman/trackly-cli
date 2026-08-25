@@ -592,6 +592,9 @@ function validateReview(receipt, expectedContext) {
     errors.push('checkpointLifecycle must be review_ready');
   }
   requireCount(errors, receipt, 'checkpointActionCount');
+  if (receipt.checkpointActionCount !== 1) {
+    errors.push('review/manual_submit checkpoint must contain exactly one action');
+  }
   requireFingerprint(errors, receipt.checkpointActionIdsFingerprint, 'checkpointActionIdsFingerprint');
   if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
     for (const field of [...resolutionFields, ...checkpointFields]) {

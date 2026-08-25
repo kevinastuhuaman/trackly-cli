@@ -129,6 +129,40 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   };
 
   assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
+  const weakenedFingerprintSource = helperSource.replace(
+    "z.string().regex(/^[a-f0-9]{64}$/)",
+    "z.string().regex(/^[a-f0-9]{32}$/)",
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(weakenedFingerprintSource, name, 'weakened fingerprint fixture'),
+        ])),
+      },
+      localApplySource: weakenedFingerprintSource,
+    }),
+    /canonical question-packet fingerprint semantics/,
+  );
+  const alternateRefinementSource = helperSource.replace(
+    "  if (checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch) {\n    context.addIssue({\n      code: z.ZodIssueCode.custom,\n      path: ['inspectionEpoch'],\n      message: 'inspectionEpoch must equal expectedInspectionEpoch',\n    });\n  }",
+    "  if (checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch) {\n    context.addIssue({\n      code: z.ZodIssueCode.custom,\n      path: ['inspectionEpoch'],\n      message: 'inspectionEpoch must equal expectedInspectionEpoch',\n    });\n  } else {\n    sideEffect();\n  }",
+  );
+  assert.notEqual(alternateRefinementSource, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: alternateRefinementSource,
+      expectedHostedDigests: Object.fromEntries(helperNames.map((name) => [
+        name,
+        activeFunctionDigest(alternateRefinementSource, name, 'alternate refinement fixture'),
+      ])),
+    }),
+    /without an alternate branch/,
+  );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,

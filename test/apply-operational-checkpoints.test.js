@@ -595,7 +595,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointMemberVersion: 8,
     checkpointInspectionEpoch: 2,
     checkpointLifecycle: 'review_ready',
-    checkpointActionCount: 2,
+    checkpointActionCount: 1,
     checkpointActionIdsFingerprint: 'e'.repeat(64),
   };
   const reviewContext = {
@@ -608,7 +608,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointMemberVersion: 8,
     checkpointInspectionEpoch: 2,
     checkpointLifecycle: 'review_ready',
-    checkpointActionCount: 2,
+    checkpointActionCount: 1,
     checkpointActionIdsFingerprint: 'e'.repeat(64),
   };
   assert.deepEqual(validateCheckpoint('review', review, reviewContext), []);
@@ -661,6 +661,16 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointActionCount: 1,
     checkpointActionIdsFingerprint: 'f'.repeat(64),
   }), []);
+  assert.match(
+    validateCheckpoint('review', {
+      ...review,
+      checkpointActionCount: 2,
+    }, {
+      ...reviewContext,
+      checkpointActionCount: 2,
+    }).join('\n'),
+    /must contain exactly one action/,
+  );
   assert.match(
     validateCheckpoint('review', review, {
       ...reviewContext,
