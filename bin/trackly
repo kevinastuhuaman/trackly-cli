@@ -15,7 +15,7 @@ const {
   removeCredentials,
   saveConfig,
 } = require('../lib/client');
-const { color, isJSON, outputJobs, outputCompanies, outputStats, outputContacts, outputReferralCampaign, outputNetworkBrief, outputCompanyBrief, outputCompanyWorkspace, outputError } = require('../lib/formatters');
+const { color, isJSON, jobDateDetailLines, outputJobs, outputCompanies, outputStats, outputContacts, outputReferralCampaign, outputNetworkBrief, outputCompanyBrief, outputCompanyWorkspace, outputError } = require('../lib/formatters');
 const http = require('http');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
@@ -665,7 +665,7 @@ async function cmdJob(args) {
     console.log(`Company: ${color('blue', job.companyName || (job.company && job.company.name) || '')}`);
     if (job.location) console.log(`Location: ${job.location}`);
     if (job.jobUrl) console.log(`URL: ${color('dim', job.jobUrl)}`);
-    if (job.postedAt) console.log(`Posted: ${job.postedAt}`);
+    for (const line of jobDateDetailLines(job)) console.log(line);
     // Field presence, not truthiness: a returned null/'unknown' status is a real
     // "Not mentioned" answer from the backend. Only an older backend that omits
     // the key entirely should render no Sponsorship line at all.
