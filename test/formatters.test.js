@@ -110,6 +110,29 @@ test('job date presentation preserves source calendar days and rejects malformed
   }), { label: 'Posted', value: '2026-06-16' });
 });
 
+test('malformed or missing projected dates use one coherent legacy fallback', () => {
+  for (const projected of [
+    { displayDateKind: 'reposted', displayDate: 'not-a-date' },
+    { displayDateKind: 'reposted' },
+    { displayDateKind: 'found', displayDate: 'not-a-date' },
+    { displayDateKind: 'found' },
+  ]) {
+    const job = {
+      postedAt: '2026-01-02T00:00:00.000Z',
+      firstSeenAt: '2026-01-03T00:00:00.000Z',
+      ...projected,
+    };
+    assert.deepEqual(fmt.jobDatePresentation(job), {
+      label: 'Posted',
+      value: '2026-01-02',
+    });
+    assert.deepEqual(fmt.jobDateDetailLines(job), [
+      'Posted: 2026-01-02',
+      'Found: 2026-01-03',
+    ]);
+  }
+});
+
 test('job detail date lines include original and repost timeline plus collision-only requisition', () => {
   assert.deepEqual(fmt.jobDateDetailLines({
     originalPostedAt: '2026-05-20T00:58:19.519Z',
