@@ -4143,11 +4143,36 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
   const definition = activeNamedDefinitionAst(source, 'recordOneApplyBatchCheckpoint', sourcePath);
   assert.equal(definition?.type, 'FunctionDeclaration', `recordOneApplyBatchCheckpoint in ${sourcePath} must be a function`);
   const statements = definition.body.body;
+  const expectedPrefix = [
+    `const checkpointMapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[
+      checkpoint.actions[0]!.actionCode
+    ];`,
+    'const payloadHash = checkpointPayloadHash(input.batchId, checkpoint);',
+    `const actionKeyHashes = checkpoint.actions.map((_action, index) => (
+      hashApplyBatchValue(
+        'checkpoint-action-key',
+        \`\${checkpoint.idempotencyKey}:\${index + 1}\`,
+      )
+    ));`,
+    `const existing = await loadStoredApplyBatchCheckpoint(
+      queryable,
+      input.userId,
+      actionKeyHashes,
+    );`,
+  ].map((statement, index) => parseExpectedStatement(
+    statement,
+    `${sourcePath} checkpoint pre-replay statement ${index + 1}`,
+  ));
   const replayIndex = statements.findIndex((statement) => (
     statement.type === 'IfStatement'
     && statementContainsString(statement.consequent, 'replayed')
   ));
   assert.ok(replayIndex >= 0, `${sourcePath} checkpoint execution must preserve exact stored replays`);
+  assert.deepEqual(
+    canonicalSchemaAst(statements.slice(0, replayIndex)),
+    canonicalSchemaAst(expectedPrefix),
+    `${sourcePath} checkpoint execution must use only its locked pre-replay computations`,
+  );
   assert.deepEqual(
     canonicalSchemaAst(statements[replayIndex].test),
     canonicalSchemaAst(babelParser.parseExpression('existing.length > 0', { plugins: ['typescript'] })),
@@ -4172,13 +4197,12 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     }
   `, `${sourcePath} checkpoint replay conflict guard`);
   const canonicalReplayStatements = canonicalSchemaAst(replayStatements);
-  const allowedReplayBranches = [
-    canonicalSchemaAst([replayReturn]),
-    canonicalSchemaAst([replayConflictGuard, replayReturn]),
-  ];
   assert.ok(
-    allowedReplayBranches.some((allowed) => isDeepStrictEqual(allowed, canonicalReplayStatements)),
-    `${sourcePath} checkpoint replay branch must contain only its locked conflict guard and stored replay return`,
+    isDeepStrictEqual(
+      canonicalSchemaAst([replayConflictGuard, replayReturn]),
+      canonicalReplayStatements,
+    ),
+    `${sourcePath} checkpoint replay branch must contain its locked conflict guard and stored replay return`,
   );
 
   const expectedClassifiers = [
@@ -4208,6 +4232,11 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     )
   ));
   assert.ok(mixedIndex >= 0, `${sourcePath} checkpoint execution must reject new mixed packets`);
+  assert.deepEqual(
+    canonicalSchemaAst(statements.slice(replayIndex + 1, mixedIndex)),
+    canonicalSchemaAst(classifierDeclarations),
+    `${sourcePath} must contain only locked classifiers between replay lookup and mixed-packet rejection`,
+  );
   assert.deepEqual(
     canonicalSchemaAst(statements[mixedIndex].test),
     canonicalSchemaAst(babelParser.parseExpression('hasQuestions && hasNonQuestions', { plugins: ['typescript'] })),

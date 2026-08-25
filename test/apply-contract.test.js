@@ -58,8 +58,33 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   const helperSource = source;
   const replayAwareServiceSource = `
     async function recordOneApplyBatchCheckpoint() {
-      const existing = await loadStoredApplyBatchCheckpoint();
-      if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');
+      const checkpointMapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[
+        checkpoint.actions[0]!.actionCode
+      ];
+      const payloadHash = checkpointPayloadHash(input.batchId, checkpoint);
+      const actionKeyHashes = checkpoint.actions.map((_action, index) => (
+        hashApplyBatchValue(
+          'checkpoint-action-key',
+          \`\${checkpoint.idempotencyKey}:\${index + 1}\`,
+        )
+      ));
+      const existing = await loadStoredApplyBatchCheckpoint(
+        queryable,
+        input.userId,
+        actionKeyHashes,
+      );
+      if (existing.length > 0) {
+        if (
+          existing.length !== checkpoint.actions.length
+          || existing.some((action, index) => (
+            action.idempotencyPayloadHash !== payloadHash
+            || action.actionVersion !== index + 1
+          ))
+        ) {
+          throw new ApplyBatchIdempotencyConflictError();
+        }
+        return storedCheckpointResult(existing, 'replayed');
+      }
       const hasQuestions = checkpoint.actions.some(
         (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
       );
@@ -190,7 +215,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         }
       `,
     }),
-    /mixed-packet classifiers must use the locked action mappings|only after exact replay lookup/,
+    /checkpoint execution must use only its locked pre-replay computations|mixed-packet classifiers must use the locked action mappings|only after exact replay lookup/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
@@ -200,17 +225,37 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         "void 'replayed';",
       ),
     }),
-    /must contain only its locked conflict guard and stored replay return/,
+    /must contain its locked conflict guard and stored replay return/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
       hostedBatchServiceSource: replayAwareServiceSource.replace(
-        "if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');",
-        "if (existing.length > 0) { sideEffect(); return storedCheckpointResult(existing, 'replayed'); }",
+        "return storedCheckpointResult(existing, 'replayed');",
+        "sideEffect(); return storedCheckpointResult(existing, 'replayed');",
       ),
     }),
-    /must contain only its locked conflict guard and stored replay return/,
+    /must contain its locked conflict guard and stored replay return/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'throw new ApplyBatchIdempotencyConflictError();',
+        'void 0;',
+      ),
+    }),
+    /must contain its locked conflict guard and stored replay return/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'const hasQuestions = checkpoint.actions.some(',
+        'sideEffect();\n      const hasQuestions = checkpoint.actions.some(',
+      ),
+    }),
+    /must contain only locked classifiers between replay lookup and mixed-packet rejection/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
