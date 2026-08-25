@@ -105,19 +105,43 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     name,
     activeFunctionDigest(helperSource, name, 'checkpoint helper fixture'),
   ]));
+  const reviewedRoutingByAction = {
+    'answer/unknown': ['complete_field', 'application', 'unknown_answer'],
+    'auth/sign_in': ['sign_in', 'authentication', 'sign_in'],
+    'auth/account_creation': ['sign_in', 'authentication', 'account_creation'],
+    'auth/otp': ['otp', 'authentication', 'otp'],
+    'captcha/before_form': ['captcha', 'navigation', 'before_form'],
+    'captcha/at_submit': ['captcha', 'review', 'at_submit'],
+    'artifact/upload_required': ['upload_document', 'application', 'upload_required'],
+    'legal/decision_required': ['complete_field', 'application', 'legal_decision_required'],
+    'consent/decision_required': ['complete_field', 'application', 'consent_decision_required'],
+    'review/manual_submit': ['review', 'review', 'manual_submit'],
+    'trust/origin_mismatch': ['review', 'navigation', 'origin_mismatch'],
+    'observability/unverifiable_state': ['review', 'application', 'unverifiable_state'],
+  };
   const checkpointMappings = Object.fromEntries(
-    contract.constants.applyCheckpointActionCodes.map((actionCode) => [actionCode, {
+    contract.constants.applyCheckpointActionCodes.map((actionCode) => {
+      const [actionType, stage, continuationCode] = reviewedRoutingByAction[actionCode];
+      return [actionCode, {
+        actionType,
+        stage,
+        continuationCode,
       continuationAllowed: contract.constants.applyCheckpointContinuationByAction[actionCode],
       lifecycleState: contract.constants.applyCheckpointLifecycleByAction[actionCode],
       questionPacket: contract.constants.applyCheckpointQuestionPacketByAction[actionCode],
-    }]),
+      }];
+    }),
   );
   const frozenCheckpointMappings = Object.entries(checkpointMappings)
     .map(([actionCode, mapping]) => `${JSON.stringify(actionCode)}: Object.freeze(${JSON.stringify(mapping)})`)
     .join(',');
   const hostedCheckpointContractSource = `
     export const APPLY_BATCH_CHECKPOINT_ACTION_CODES = ${JSON.stringify(contract.constants.applyCheckpointActionCodes)} as const;
+    export const APPLY_BATCH_CHECKPOINT_PACKET_PHASES = ['first_pass', 'delta'] as const;
     export const APPLY_BATCH_CHECKPOINT_ACTION_MAP = Object.freeze({${frozenCheckpointMappings}});
+    export const APPLY_BATCH_MIN_LEASE_DURATION_MS = 15_000;
+    export const APPLY_BATCH_MAX_LEASE_DURATION_MS = 5 * 60_000;
+    export const APPLY_BATCH_LEASE_RENEW_BY_FRACTION = 0.8;
   `;
   const fixture = {
     localContract: { ...contract, schemaDigests: expectedDigests },
@@ -129,6 +153,89 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   };
 
   assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: `
+        const Object = { freeze: (value) => value };
+        ${hostedCheckpointContractSource}
+      `,
+    }),
+    /only reviewed exported declarations|unshadowed intrinsic|must not be mutated, aliased, escaped/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: `
+        ${hostedCheckpointContractSource}
+        APPLY_BATCH_CHECKPOINT_ACTION_MAP['review/manual_submit'].continuationAllowed = true;
+      `,
+    }),
+    /only reviewed exported declarations|must not be mutated, aliased, escaped/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: `
+        ${hostedCheckpointContractSource}
+        globalThis.Object.freeze = (value) => value;
+        eval("APPLY_BATCH_CHECKPOINT_ACTION_MAP['review/manual_submit'].continuationAllowed = true");
+      `,
+    }),
+    /only reviewed exported declarations|must not mutate globals|must not execute dynamic code/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
+        'export const APPLY_BATCH_MIN_LEASE_DURATION_MS = 15_000;',
+        'export const APPLY_BATCH_MIN_LEASE_DURATION_MS = (delete globalThis.Object.freeze, 15_000);',
+      ),
+    }),
+    /must match its reviewed static value|must not mutate globals|must not execute dynamic code/,
+  );
+  for (const [from, to, expectedError] of [
+    ["['first_pass', 'delta']", "['bypass']", /must match the reviewed packet phases/],
+    ['APPLY_BATCH_MIN_LEASE_DURATION_MS = 15_000', 'APPLY_BATCH_MIN_LEASE_DURATION_MS = 0', /must match its reviewed static value/],
+    ['APPLY_BATCH_MAX_LEASE_DURATION_MS = 5 * 60_000', 'APPLY_BATCH_MAX_LEASE_DURATION_MS = 999 * 999', /must match its reviewed static value/],
+    ['APPLY_BATCH_LEASE_RENEW_BY_FRACTION = 0.8', 'APPLY_BATCH_LEASE_RENEW_BY_FRACTION = 2', /must match its reviewed static value/],
+    ['"stage":"authentication"', '"stage":"application"', /must match its reviewed routing semantics/],
+  ]) {
+    const driftedSource = hostedCheckpointContractSource.replace(from, to);
+    assert.notEqual(driftedSource, hostedCheckpointContractSource);
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        hostedCheckpointContractSource: driftedSource,
+      }),
+      expectedError,
+    );
+  }
+  const commentOnlyMixedPacketSource = helperSource.replace(
+    'const applyCheckpointSchema',
+    '// hasQuestions && hasNonQuestions: Question checkpoints cannot mix question and non-question actions\nconst applyCheckpointSchema',
+  );
+  const missingMixedPacketServiceSource = replayAwareServiceSource.replace(
+    `      const hasQuestions = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
+      const hasNonQuestions = checkpoint.actions.some(
+        (action) => !APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
+      if (hasQuestions && hasNonQuestions) {
+        throw new Error('Question checkpoints cannot mix question and non-question actions.');
+      }
+`,
+    '',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: commentOnlyMixedPacketSource,
+      hostedBatchServiceSource: missingMixedPacketServiceSource,
+    }),
+    /mixed-packet classifiers|reject new mixed packets/,
+  );
   const weakenedFingerprintSource = helperSource.replace(
     "z.string().regex(/^[a-f0-9]{64}$/)",
     "z.string().regex(/^[a-f0-9]{32}$/)",
@@ -144,6 +251,24 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         ])),
       },
       localApplySource: weakenedFingerprintSource,
+    }),
+    /canonical question-packet fingerprint semantics/,
+  );
+  const commentBypassFingerprintSource = weakenedFingerprintSource.replace(
+    'const applyCheckpointActionVariant',
+    '// fieldFingerprint: APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[actionCode] ? z.string().regex(/^[a-f0-9]{64}$/) : z.string().regex(/^[a-f0-9]{64}$/).optional()\nconst applyCheckpointActionVariant',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(commentBypassFingerprintSource, name, 'comment bypass fingerprint fixture'),
+        ])),
+      },
+      localApplySource: commentBypassFingerprintSource,
     }),
     /canonical question-packet fingerprint semantics/,
   );
@@ -166,10 +291,10 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
-      hostedCheckpointContractSource: `
-        export const APPLY_BATCH_CHECKPOINT_ACTION_CODES = ${JSON.stringify(contract.constants.applyCheckpointActionCodes)} as const;
-        export const APPLY_BATCH_CHECKPOINT_ACTION_MAP = Object.freeze(${JSON.stringify(checkpointMappings)});
-      `,
+      hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
+        `Object.freeze({${frozenCheckpointMappings}})`,
+        `Object.freeze(${JSON.stringify(checkpointMappings)})`,
+      ),
     }),
     /mapping in .* must be frozen/,
   );
@@ -366,8 +491,8 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
       hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
-        '"answer/unknown": Object.freeze({"continuationAllowed":true',
-        '"answer/unknown": Object.freeze({"continuationAllowed":false',
+        '"continuationAllowed":true',
+        '"continuationAllowed":false',
       ),
     }),
     /language-neutral semantic contract/,

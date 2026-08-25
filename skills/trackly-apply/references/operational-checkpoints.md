@@ -63,7 +63,7 @@ node "<skill-dir>/scripts/validate-phase-checkpoint.js" <phase>
 ```
 
 Pass `{"receipt": {...}, "expectedContext": {...}}` on standard input. The
-envelope permits only those two fields. `expectedContext` is required for every
+envelope permits those fields plus `priorFill` only for Review. `expectedContext` is required for every
 phase. Build Trackly lineage, profile, lifecycle, and approval fields only from
 the current authoritative work receipt. Build browser-surface fields such as
 `formInventoryFingerprint`, `resumeControl`, and browser handoff evidence only
@@ -202,6 +202,15 @@ Required fields:
   `jobId`, `runId`, and non-negative `inspectionEpoch`, plus `executionId` only
   for `accessible_execution`; every value must match the current
   `expectedContext`, and `jobId` must remain in its approved set;
+- the same positive `profileRevision` for `accessible_execution`, or non-negative
+  `profileRevision` for `fixed_inspection`, and lowercase SHA-256
+  `formInventoryFingerprint` from the final validated Fill receipt; both must
+  match the current `expectedContext`, so a profile change or form rerender
+  requires Fill to be validated again before review;
+- a `priorFill` object containing only the complete value-free Fill `receipt`
+  and its `expectedContext`; Review reruns Fill validation and derives its
+  lineage, profile revision, and form inventory baseline from that receipt, so
+  matching caller-authored Review values alone cannot satisfy the gate;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
   `reviewTabPreserved`, and `userVisibleHandoffProven` all true; and
 - bind `checkpointAction: review/manual_submit` and

@@ -162,6 +162,8 @@ const PHASE_FIELDS = {
     'jobId',
     'runId',
     'inspectionEpoch',
+    'profileRevision',
+    'formInventoryFingerprint',
     'finalIntegrityPassed',
     'truthConfirmationRecorded',
     'submitActivated',
@@ -542,8 +544,12 @@ function validateFill(receipt, expectedContext) {
   return errors;
 }
 
-function validateReview(receipt, expectedContext) {
+function validateReview(receipt, expectedContext, priorFill) {
   const errors = [];
+  const fillBaselineFields = [
+    'profileRevision',
+    'formInventoryFingerprint',
+  ];
   const resolutionFields = [
     'resolvedActionCount',
     'resolvedActionIdsFingerprint',
@@ -563,8 +569,40 @@ function validateReview(receipt, expectedContext) {
     receipt,
     expectedContext,
     'approvedJobIds',
-    [...resolutionFields, ...checkpointFields],
+    [...fillBaselineFields, ...resolutionFields, ...checkpointFields],
   );
+  if (receipt.workMode === 'accessible_execution') {
+    requireTracklyId(errors, receipt, 'profileRevision');
+  } else {
+    requireCount(errors, receipt, 'profileRevision');
+  }
+  requireFingerprint(errors, receipt.formInventoryFingerprint, 'formInventoryFingerprint');
+  if (!priorFill || typeof priorFill !== 'object' || Array.isArray(priorFill)) {
+    errors.push('priorFill is required for review');
+  } else {
+    const priorFillFields = Object.keys(priorFill);
+    if (priorFillFields.length !== 2
+        || !priorFillFields.includes('receipt')
+        || !priorFillFields.includes('expectedContext')) {
+      errors.push('priorFill must contain only receipt and expectedContext');
+    } else {
+      const priorFillErrors = validateCheckpoint(
+        'fill',
+        priorFill.receipt,
+        priorFill.expectedContext,
+      );
+      errors.push(...priorFillErrors.map((error) => `priorFill: ${error}`));
+      if (priorFill.receipt && typeof priorFill.receipt === 'object' && !Array.isArray(priorFill.receipt)) {
+        const lineageFields = [...COMMON_LINEAGE_FIELDS];
+        if (receipt.workMode === 'accessible_execution') lineageFields.push('executionId');
+        for (const field of [...lineageFields, ...fillBaselineFields]) {
+          if (receipt[field] !== priorFill.receipt[field]) {
+            errors.push(`${field} must match the validated priorFill receipt`);
+          }
+        }
+      }
+    }
+  }
   requireTrue(errors, receipt, 'finalIntegrityPassed');
   requireTrue(errors, receipt, 'truthConfirmationRecorded');
   requireFalse(errors, receipt, 'submitActivated');
@@ -597,7 +635,7 @@ function validateReview(receipt, expectedContext) {
   }
   requireFingerprint(errors, receipt.checkpointActionIdsFingerprint, 'checkpointActionIdsFingerprint');
   if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
-    for (const field of [...resolutionFields, ...checkpointFields]) {
+    for (const field of [...fillBaselineFields, ...resolutionFields, ...checkpointFields]) {
       if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
     }
   }
@@ -772,13 +810,14 @@ const VALIDATORS = {
   reconciliation: validateReconciliation,
 };
 
-function validateCheckpoint(phase, receipt, expectedContext) {
+function validateCheckpoint(phase, receipt, expectedContext, priorFill) {
   if (!Object.hasOwn(VALIDATORS, phase)) return [`unknown phase: ${phase}`];
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return ['receipt must be a JSON object'];
+  if (phase !== 'review' && priorFill !== undefined) return ['priorFill is permitted only for review'];
   const unexpectedFields = Object.keys(receipt)
     .filter((field) => !PHASE_FIELDS[phase].has(field))
     .map(() => 'receipt contains an unexpected field');
-  return [...unexpectedFields, ...VALIDATORS[phase](receipt, expectedContext)];
+  return [...unexpectedFields, ...VALIDATORS[phase](receipt, expectedContext, priorFill)];
 }
 
 async function readReceiptInput(stream) {
@@ -820,18 +859,18 @@ async function main() {
   }
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)
       || !Object.hasOwn(envelope, 'receipt')) {
-    process.stderr.write('input must be an envelope with receipt and optional expectedContext\n');
+    process.stderr.write('input must be an envelope with receipt, expectedContext, and priorFill for review\n');
     process.exitCode = 1;
     return;
   }
   const unexpectedEnvelopeFields = Object.keys(envelope)
-    .filter((field) => !['receipt', 'expectedContext'].includes(field));
+    .filter((field) => !['receipt', 'expectedContext', 'priorFill'].includes(field));
   if (unexpectedEnvelopeFields.length > 0) {
     process.stderr.write(`${unexpectedEnvelopeFields.map((field) => `unexpected envelope field: ${field}`).join('\n')}\n`);
     process.exitCode = 1;
     return;
   }
-  const errors = validateCheckpoint(phase, envelope.receipt, envelope.expectedContext);
+  const errors = validateCheckpoint(phase, envelope.receipt, envelope.expectedContext, envelope.priorFill);
   if (errors.length > 0) {
     process.stderr.write(`${errors.join('\n')}\n`);
     process.exitCode = 1;

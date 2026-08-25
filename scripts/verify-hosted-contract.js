@@ -4295,23 +4295,67 @@ function checkpointHelperSemanticDescriptor(
   const variant = exactSchemaDefinition(source, 'applyCheckpointActionVariant', sourcePath);
   const actionSchema = exactSchemaDefinition(source, 'applyCheckpointActionSchema', sourcePath);
   const checkpointSchema = exactSchemaDefinition(source, 'applyCheckpointSchema', sourcePath);
-  const checkpointSchemaAst = activeNamedDefinitionAst(source, 'applyCheckpointSchema', sourcePath);
+  const declarationStatements = contractDeclarationStatements(source, sourcePath);
+  const checkpointSchemaAst = activeNamedDefinitionAst(
+    source,
+    'applyCheckpointSchema',
+    sourcePath,
+    declarationStatements,
+  );
   const checkpointBaseSchema = checkpointSchemaAst.callee.object;
-  const compactVariant = variant.replace(/\s+/g, '');
+  const variantAst = activeNamedDefinitionAst(
+    source,
+    'applyCheckpointActionVariant',
+    sourcePath,
+    declarationStatements,
+  );
+  const variantBody = variantAst.body?.type === 'BlockStatement'
+    ? variantAst.body.body.filter((statement) => statement.type === 'ReturnStatement')
+    : [{ argument: variantAst.body }];
+  assert.equal(
+    variantBody.length,
+    1,
+    `applyCheckpointActionVariant in ${sourcePath} must have exactly one top-level return`,
+  );
+  const variantReturn = unwrapStaticExpression(variantBody[0].argument);
+  assert.equal(variantReturn?.type, 'CallExpression', `${sourcePath} action variant must return z.object(...)`);
+  assert.equal(variantReturn.callee?.type, 'MemberExpression', `${sourcePath} action variant must return z.object(...)`);
+  assert.equal(variantReturn.callee.object?.name, 'z', `${sourcePath} action variant must return z.object(...)`);
+  assert.equal(variantReturn.callee.property?.name, 'object', `${sourcePath} action variant must return z.object(...)`);
+  const variantProperties = staticBabelObjectProperties(
+    variantReturn.arguments[0],
+    `applyCheckpointActionVariant in ${sourcePath}`,
+  );
   const fingerprintSemantics = {
     pattern: '^[a-f0-9]{64}$',
     requiredWhenQuestionPacket: true,
     optionalOtherwise: true,
   };
+  const continuationAllowedAst = canonicalSchemaAst(variantProperties.continuationAllowed);
+  const localContinuationAllowedAst = canonicalSchemaAst(babelParser.parseExpression(
+    'z.literal(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION[actionCode])',
+    { plugins: ['typescript'] },
+  ));
+  const hostedContinuationAllowedAst = canonicalSchemaAst(babelParser.parseExpression(
+    'z.literal(mapping.continuationAllowed)',
+    { plugins: ['typescript'] },
+  ));
+  const usesLocalActionMap = isDeepStrictEqual(continuationAllowedAst, localContinuationAllowedAst);
+  const usesHostedActionMap = isDeepStrictEqual(continuationAllowedAst, hostedContinuationAllowedAst);
+  assert.notEqual(
+    usesLocalActionMap,
+    usesHostedActionMap,
+    `${sourcePath} action variant must use exactly one supported executable action mapping`,
+  );
 
-  if (variant.includes('APPLY_CHECKPOINT_CONTINUATION_BY_ACTION[actionCode]')) {
+  if (usesLocalActionMap) {
     assert.match(variant, /z\.literal\(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION\[actionCode\]\)/);
     assert.match(variant, /APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[actionCode\]/);
     assert.match(actionSchema, /APPLY_CHECKPOINT_ACTION_CODES\.map\(applyCheckpointActionVariant\)/);
-    assert.ok(
-      compactVariant.includes(
-        'fieldFingerprint:APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[actionCode]?z.string().regex(/^[a-f0-9]{64}$/):z.string().regex(/^[a-f0-9]{64}$/).optional()',
-      ),
+    assertBabelPropertyExpression(
+      variantProperties,
+      'fieldFingerprint',
+      'APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[actionCode] ? z.string().regex(/^[a-f0-9]{64}$/) : z.string().regex(/^[a-f0-9]{64}$/).optional()',
       `${sourcePath} must preserve the canonical question-packet fingerprint semantics`,
     );
     assert.match(checkpointSchema, /actionCodes\.map\(\(code\) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION\[code\]\)/);
@@ -4322,7 +4366,7 @@ function checkpointHelperSemanticDescriptor(
     assert.match(checkpointSchema, /actionCodes\.includes\('captcha\/before_form'\)/);
     assert.match(checkpointSchema, /actionCodes\.includes\('review\/manual_submit'\)/);
     assertCheckpointRefinementConditions(source, sourcePath, 'local-map');
-  } else if (variant.includes('mapping.continuationAllowed')) {
+  } else if (usesHostedActionMap) {
     assert.match(variant, /z\.literal\(mapping\.continuationAllowed\)/);
     assert.match(variant, /mapping\.questionPacket/);
     const fingerprintSchema = exactSchemaDefinition(
@@ -4335,10 +4379,10 @@ function checkpointHelperSemanticDescriptor(
       'constapplyCheckpointFingerprintSchema=z.string().regex(/^[a-f0-9]{64}$/);',
       `${sourcePath} must preserve the canonical checkpoint fingerprint schema`,
     );
-    assert.ok(
-      compactVariant.includes(
-        'fieldFingerprint:mapping.questionPacket?applyCheckpointFingerprintSchema:applyCheckpointFingerprintSchema.optional()',
-      ),
+    assertBabelPropertyExpression(
+      variantProperties,
+      'fieldFingerprint',
+      'mapping.questionPacket ? applyCheckpointFingerprintSchema : applyCheckpointFingerprintSchema.optional()',
       `${sourcePath} must preserve the canonical question-packet fingerprint semantics`,
     );
     const declaredActionCodes = [...actionSchema.matchAll(
@@ -4362,14 +4406,24 @@ function checkpointHelperSemanticDescriptor(
     questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
     exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
   });
-  if (checkpointSchema.includes('hasQuestions && hasNonQuestions')) {
-    assert.ok(
-      checkpointSchema.includes('Question checkpoints cannot mix question and non-question actions'),
-      `${sourcePath} must reject mixed question packets when it enforces the invariant locally`,
-    );
-  } else {
+  const localMixedPacketCondition = canonicalSchemaAst(babelParser.parseExpression(
+    'hasQuestions && hasNonQuestions',
+    { plugins: ['typescript'] },
+  ));
+  const hasLocalMixedPacketPreflight = checkpointRefinementCallback(source, sourcePath)
+    .body.body.some((statement) => (
+      statement.type === 'IfStatement'
+      && isDeepStrictEqual(canonicalSchemaAst(statement.test), localMixedPacketCondition)
+      && statementContainsString(
+        statement.consequent,
+        'Question checkpoints cannot mix question and non-question actions',
+      )
+    ));
+  if (!hasLocalMixedPacketPreflight) {
     assert.equal(typeof replayAwareServiceSource, 'string', `${sourcePath} must delegate mixed-packet enforcement to a replay-aware service`);
     assertReplayAwareMixedPacketOrdering(replayAwareServiceSource, `${sourcePath} replay-aware service`);
+  } else {
+    assert.fail(`${sourcePath} contains an unmodeled local mixed-packet preflight`);
   }
 
   return {
@@ -4379,7 +4433,7 @@ function checkpointHelperSemanticDescriptor(
     questionPacketByAction,
     fingerprintSemantics,
     checkpointBaseSchema: canonicalSchemaAst(checkpointBaseSchema),
-    mixedPacketEnforcement: checkpointSchema.includes('hasQuestions && hasNonQuestions')
+    mixedPacketEnforcement: hasLocalMixedPacketPreflight
       ? 'local-preflight'
       : 'replay-aware-backend',
     invariants: [
@@ -4415,11 +4469,90 @@ function staticPrimitive(node, label) {
 }
 
 function hostedCheckpointActionMappings(source, sourcePath) {
-  const actionCodesNode = unwrapStaticExpression(activeNamedDefinitionAst(
+  const contractAst = parseFullSource(source, sourcePath);
+  const reviewedRoutingByAction = {
+    'answer/unknown': ['complete_field', 'application', 'unknown_answer'],
+    'auth/sign_in': ['sign_in', 'authentication', 'sign_in'],
+    'auth/account_creation': ['sign_in', 'authentication', 'account_creation'],
+    'auth/otp': ['otp', 'authentication', 'otp'],
+    'captcha/before_form': ['captcha', 'navigation', 'before_form'],
+    'captcha/at_submit': ['captcha', 'review', 'at_submit'],
+    'artifact/upload_required': ['upload_document', 'application', 'upload_required'],
+    'legal/decision_required': ['complete_field', 'application', 'legal_decision_required'],
+    'consent/decision_required': ['complete_field', 'application', 'consent_decision_required'],
+    'review/manual_submit': ['review', 'review', 'manual_submit'],
+    'trust/origin_mismatch': ['review', 'navigation', 'origin_mismatch'],
+    'observability/unverifiable_state': ['review', 'application', 'unverifiable_state'],
+  };
+  const allowedRuntimeBindings = new Set([
+    'APPLY_BATCH_CHECKPOINT_ACTION_CODES',
+    'APPLY_BATCH_CHECKPOINT_PACKET_PHASES',
+    'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+    'APPLY_BATCH_MIN_LEASE_DURATION_MS',
+    'APPLY_BATCH_MAX_LEASE_DURATION_MS',
+    'APPLY_BATCH_LEASE_RENEW_BY_FRACTION',
+  ]);
+  const runtimeInitializers = new Map();
+  for (const statement of contractAst.program.body) {
+    assert.equal(
+      statement.type,
+      'ExportNamedDeclaration',
+      `${sourcePath} checkpoint contract may contain only reviewed exported declarations`,
+    );
+    const declaration = statement.declaration;
+    assert.ok(
+      ['VariableDeclaration', 'TSTypeAliasDeclaration', 'TSInterfaceDeclaration'].includes(declaration?.type),
+      `${sourcePath} checkpoint contract contains an unreviewed executable declaration`,
+    );
+    if (declaration.type === 'VariableDeclaration') {
+      assert.equal(declaration.kind, 'const', `${sourcePath} checkpoint runtime declarations must be const`);
+      for (const declarator of declaration.declarations) {
+        assert.ok(
+          declarator.id?.type === 'Identifier' && allowedRuntimeBindings.has(declarator.id.name),
+          `${sourcePath} checkpoint contract contains an unreviewed runtime binding`,
+        );
+        assert.ok(
+          !runtimeInitializers.has(declarator.id.name),
+          `${sourcePath} checkpoint contract contains a duplicate runtime binding`,
+        );
+        runtimeInitializers.set(declarator.id.name, unwrapStaticExpression(declarator.init));
+      }
+    }
+  }
+  assert.deepEqual(
+    new Set(runtimeInitializers.keys()),
+    allowedRuntimeBindings,
+    `${sourcePath} checkpoint contract must declare exactly the reviewed runtime bindings`,
+  );
+  const packetPhases = runtimeInitializers.get('APPLY_BATCH_CHECKPOINT_PACKET_PHASES');
+  assert.deepEqual(
+    canonicalSchemaAst(packetPhases),
+    canonicalSchemaAst(babelParser.parseExpression("['first_pass', 'delta']", { plugins: ['typescript'] })),
+    `APPLY_BATCH_CHECKPOINT_PACKET_PHASES in ${sourcePath} must match the reviewed packet phases`,
+  );
+  const reviewedLeaseInitializers = {
+    APPLY_BATCH_MIN_LEASE_DURATION_MS: '15000',
+    APPLY_BATCH_MAX_LEASE_DURATION_MS: '5 * 60000',
+    APPLY_BATCH_LEASE_RENEW_BY_FRACTION: '0.8',
+  };
+  for (const [name, expression] of Object.entries(reviewedLeaseInitializers)) {
+    assert.deepEqual(
+      canonicalSchemaAst(runtimeInitializers.get(name)),
+      canonicalSchemaAst(babelParser.parseExpression(expression, { plugins: ['typescript'] })),
+      `${name} in ${sourcePath} must match its reviewed static value`,
+    );
+  }
+  const actionCodesDeclaration = activeVariableDeclarator(
     source,
     'APPLY_BATCH_CHECKPOINT_ACTION_CODES',
     sourcePath,
-  ));
+  ).declarator;
+  const actionMapDeclaration = activeVariableDeclarator(
+    source,
+    'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+    sourcePath,
+  ).declarator;
+  const actionCodesNode = unwrapStaticExpression(actionCodesDeclaration.init);
   assert.equal(
     actionCodesNode?.type,
     'ArrayExpression',
@@ -4430,11 +4563,46 @@ function hostedCheckpointActionMappings(source, sourcePath) {
     `APPLY_BATCH_CHECKPOINT_ACTION_CODES[${index}] in ${sourcePath}`,
   ));
 
-  const frozenMap = unwrapStaticExpression(activeNamedDefinitionAst(
-    source,
+  const actionCodeReferences = collectBindingReferences(
+    contractAst,
+    'APPLY_BATCH_CHECKPOINT_ACTION_CODES',
+    () => false,
+  );
+  const lockedActionCodeReferences = [actionCodesDeclaration.id];
+  function collectLockedTypeReferences(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) collectLockedTypeReferences(child);
+      return;
+    }
+    if (node.type === 'TSTypeQuery'
+        && node.exprName?.type === 'Identifier'
+        && node.exprName.name === 'APPLY_BATCH_CHECKPOINT_ACTION_CODES') {
+      lockedActionCodeReferences.push(node.exprName);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      collectLockedTypeReferences(child);
+    }
+  }
+  collectLockedTypeReferences(contractAst);
+  assert.deepEqual(
+    actionCodeReferences,
+    lockedActionCodeReferences,
+    `APPLY_BATCH_CHECKPOINT_ACTION_CODES in ${sourcePath} must not be mutated, aliased, escaped, or used outside its locked type`,
+  );
+  const actionMapReferences = collectBindingReferences(
+    contractAst,
     'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
-    sourcePath,
-  ));
+    () => false,
+  );
+  assert.deepEqual(
+    actionMapReferences,
+    [actionMapDeclaration.id],
+    `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must not be mutated, aliased, escaped, or used outside its immutable declaration`,
+  );
+
+  const frozenMap = unwrapStaticExpression(actionMapDeclaration.init);
   assert.equal(frozenMap?.type, 'CallExpression', `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must be frozen`);
   assert.deepEqual(
     canonicalSchemaAst(frozenMap.callee),
@@ -4451,6 +4619,8 @@ function hostedCheckpointActionMappings(source, sourcePath) {
   const continuationByAction = {};
   const lifecycleByAction = {};
   const questionPacketByAction = {};
+  const lockedObjectReferences = [frozenMap.callee.object];
+  const lockedFreezeCalls = [frozenMap];
   for (const actionCode of actionCodes) {
     const frozenMapping = unwrapStaticExpression(mappings[actionCode]);
     assert.equal(
@@ -4468,17 +4638,64 @@ function hostedCheckpointActionMappings(source, sourcePath) {
       1,
       `${actionCode} mapping in ${sourcePath} must freeze one object`,
     );
+    lockedObjectReferences.push(frozenMapping.callee.object);
+    lockedFreezeCalls.push(frozenMapping);
     const fields = staticBabelObjectProperties(
       unwrapStaticExpression(frozenMapping.arguments[0]),
       `${actionCode} mapping in ${sourcePath}`,
     );
-    assert.ok(fields.continuationAllowed, `${actionCode} mapping in ${sourcePath} is missing continuationAllowed`);
-    assert.ok(fields.lifecycleState, `${actionCode} mapping in ${sourcePath} is missing lifecycleState`);
-    assert.ok(fields.questionPacket, `${actionCode} mapping in ${sourcePath} is missing questionPacket`);
+    assert.deepEqual(
+      new Set(Object.keys(fields)),
+      new Set(['actionType', 'stage', 'continuationCode', 'lifecycleState', 'continuationAllowed', 'questionPacket']),
+      `${actionCode} mapping in ${sourcePath} must contain the complete reviewed field set`,
+    );
+    assert.deepEqual(
+      [
+        staticPrimitive(fields.actionType, `${actionCode}.actionType`),
+        staticPrimitive(fields.stage, `${actionCode}.stage`),
+        staticPrimitive(fields.continuationCode, `${actionCode}.continuationCode`),
+      ],
+      reviewedRoutingByAction[actionCode],
+      `${actionCode} mapping in ${sourcePath} must match its reviewed routing semantics`,
+    );
     continuationByAction[actionCode] = staticPrimitive(fields.continuationAllowed, `${actionCode}.continuationAllowed`);
     lifecycleByAction[actionCode] = staticPrimitive(fields.lifecycleState, `${actionCode}.lifecycleState`);
     questionPacketByAction[actionCode] = staticPrimitive(fields.questionPacket, `${actionCode}.questionPacket`);
   }
+  assert.deepEqual(
+    collectBindingReferences(contractAst, 'Object', () => false),
+    lockedObjectReferences,
+    `Object in ${sourcePath} must be the unshadowed intrinsic used only by the locked freeze calls`,
+  );
+  const executableCalls = [];
+  const forbiddenDynamicNodes = [];
+  function auditExecutableContract(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditExecutableContract(child);
+      return;
+    }
+    if (node.type === 'CallExpression') executableCalls.push(node);
+    if (['AssignmentExpression', 'UpdateExpression', 'AwaitExpression', 'YieldExpression', 'NewExpression', 'TaggedTemplateExpression', 'SequenceExpression'].includes(node.type)
+        || (node.type === 'UnaryExpression' && node.operator === 'delete')) {
+      forbiddenDynamicNodes.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      auditExecutableContract(child);
+    }
+  }
+  auditExecutableContract(contractAst);
+  assert.deepEqual(
+    executableCalls,
+    lockedFreezeCalls,
+    `${sourcePath} checkpoint contract must not execute dynamic code outside its locked Object.freeze calls`,
+  );
+  assert.equal(
+    forbiddenDynamicNodes.length,
+    0,
+    `${sourcePath} checkpoint contract must not mutate globals or execute dynamic expressions`,
+  );
   return { actionCodes, continuationByAction, lifecycleByAction, questionPacketByAction };
 }
 
@@ -4673,8 +4890,8 @@ function classifyFreeIdentifiers(identifiers, categories, label) {
   return Object.fromEntries(identifiers.map((name) => [name, classifications[name]]));
 }
 
-function activeNamedDefinitionAst(source, name, sourcePath) {
-  const matches = contractDeclarationStatements(source, sourcePath).flatMap((statement) => {
+function activeNamedDefinitionAst(source, name, sourcePath, declarationStatements = null) {
+  const matches = (declarationStatements ?? contractDeclarationStatements(source, sourcePath)).flatMap((statement) => {
     const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
     if (declaration?.type === 'FunctionDeclaration' && declaration.id?.name === name) return [declaration];
     if (declaration?.type !== 'VariableDeclaration') return [];

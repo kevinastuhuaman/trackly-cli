@@ -582,6 +582,8 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     jobId: 101,
     runId: 401,
     inspectionEpoch: 2,
+    profileRevision: fill.profileRevision,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
     finalIntegrityPassed: true,
     truthConfirmationRecorded: true,
     submitActivated: false,
@@ -600,6 +602,8 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   };
   const reviewContext = {
     ...expectedContext,
+    profileRevision: fill.profileRevision,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
     checkpointAction: 'review/manual_submit',
     continuationAllowed: false,
     resolvedActionCount: 2,
@@ -611,39 +615,103 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointActionCount: 1,
     checkpointActionIdsFingerprint: 'e'.repeat(64),
   };
-  assert.deepEqual(validateCheckpoint('review', review, reviewContext), []);
+  const priorFill = { receipt: fill, expectedContext: fillContext };
+  const validateReviewCheckpoint = (
+    receiptCandidate,
+    contextCandidate,
+    fillEvidence = priorFill,
+  ) => validateCheckpoint('review', receiptCandidate, contextCandidate, fillEvidence);
+  assert.deepEqual(validateReviewCheckpoint(review, reviewContext), []);
+  assert.match(
+    validateReviewCheckpoint(review, reviewContext, null).join('\n'),
+    /priorFill is required for review/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      profileRevision: 999,
+      formInventoryFingerprint: 'f'.repeat(64),
+    }, {
+      ...reviewContext,
+      profileRevision: 999,
+      formInventoryFingerprint: 'f'.repeat(64),
+    }).join('\n'),
+    /must match the validated priorFill receipt/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      formInventoryFingerprint: 'f'.repeat(64),
+    }, reviewContext).join('\n'),
+    /formInventoryFingerprint must match expectedContext/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      profileRevision: review.profileRevision + 1,
+    }, reviewContext).join('\n'),
+    /profileRevision must match expectedContext/,
+  );
+  const reviewExpectedFields = [
+    'checkpointAction',
+    'continuationAllowed',
+    'resolvedActionCount',
+    'resolvedActionIdsFingerprint',
+    'checkpointStatus',
+    'checkpointMemberVersion',
+    'checkpointInspectionEpoch',
+    'checkpointLifecycle',
+    'checkpointActionCount',
+    'checkpointActionIdsFingerprint',
+    'profileRevision',
+    'formInventoryFingerprint',
+  ];
   const { executionId: omittedReviewExecutionId, ...fixedReview } = review;
+  const fixedFillReceipt = {
+    ...fixedFill,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+    profileRevision: 0,
+  };
+  const fixedFillContext = {
+    ...fixedExpectedContext,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+    profileRevision: 0,
+    canonicalEducationRecordCount: 2,
+    canonicalEmploymentPositionCount: 6,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
+    resumeControl: 'required',
+  };
   assert.equal(omittedReviewExecutionId, 301);
-  assert.deepEqual(validateCheckpoint('review', {
+  assert.deepEqual(validateReviewCheckpoint({
     ...fixedReview,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
+    profileRevision: 0,
     checkpointInspectionEpoch: 0,
   }, {
     ...fixedExpectedContext,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
-    ...Object.fromEntries(Object.entries(reviewContext).filter(([field]) => (
-      field.startsWith('checkpoint')
-      || field.startsWith('resolvedAction')
-      || field === 'continuationAllowed'
-    ))),
+    ...Object.fromEntries(reviewExpectedFields.map((field) => [field, reviewContext[field]])),
+    profileRevision: 0,
     checkpointInspectionEpoch: 0,
-  }), []);
+  }, { receipt: fixedFillReceipt, expectedContext: fixedFillContext }), []);
   assert.match(
-    validateCheckpoint('review', { ...review, submitActivated: true }, reviewContext).join('\n'),
+    validateReviewCheckpoint({ ...review, submitActivated: true }, reviewContext).join('\n'),
     /submitActivated/
   );
   assert.match(
-    validateCheckpoint('review', { ...review, inspectionEpoch: 3 }, reviewContext).join('\n'),
+    validateReviewCheckpoint({ ...review, inspectionEpoch: 3 }, reviewContext).join('\n'),
     /inspectionEpoch must match expectedContext/
   );
   assert.match(
-    validateCheckpoint('review', { ...review, checkpointStatus: 'fabricated' }, reviewContext).join('\n'),
+    validateReviewCheckpoint({ ...review, checkpointStatus: 'fabricated' }, reviewContext).join('\n'),
     /checkpointStatus/
   );
   assert.match(
-    validateCheckpoint('review', {
+    validateReviewCheckpoint({
       ...review,
       checkpointInspectionEpoch: 3,
     }, {
@@ -652,7 +720,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     }).join('\n'),
     /checkpointInspectionEpoch must equal inspectionEpoch/
   );
-  assert.deepEqual(validateCheckpoint('review', {
+  assert.deepEqual(validateReviewCheckpoint({
     ...review,
     checkpointActionCount: 1,
     checkpointActionIdsFingerprint: 'f'.repeat(64),
@@ -662,7 +730,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointActionIdsFingerprint: 'f'.repeat(64),
   }), []);
   assert.match(
-    validateCheckpoint('review', {
+    validateReviewCheckpoint({
       ...review,
       checkpointActionCount: 2,
     }, {
@@ -672,32 +740,32 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     /must contain exactly one action/,
   );
   assert.match(
-    validateCheckpoint('review', review, {
+    validateReviewCheckpoint(review, {
       ...reviewContext,
       resolvedActionCount: 1,
     }).join('\n'),
     /resolvedActionCount must match expectedContext/
   );
   assert.match(
-    validateCheckpoint('review', { ...review, continuationAllowed: true }, reviewContext).join('\n'),
+    validateReviewCheckpoint({ ...review, continuationAllowed: true }, reviewContext).join('\n'),
     /continuationAllowed must be false for review\/manual_submit/
   );
   assert.match(
-    validateCheckpoint('review', review, {
+    validateReviewCheckpoint(review, {
       ...reviewContext,
       checkpointAction: 'captcha/at_submit',
     }).join('\n'),
     /checkpointAction must match expectedContext/
   );
   assert.match(
-    validateCheckpoint('review', review, {
+    validateReviewCheckpoint(review, {
       ...reviewContext,
       continuationAllowed: true,
     }).join('\n'),
     /continuationAllowed must match expectedContext/
   );
   assert.match(
-    validateCheckpoint('review', {
+    validateReviewCheckpoint({
       ...review,
       resolvedActionIds: ['private-action-id'],
     }, reviewContext).join('\n'),
