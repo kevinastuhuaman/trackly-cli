@@ -4178,6 +4178,11 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     canonicalSchemaAst(babelParser.parseExpression('existing.length > 0', { plugins: ['typescript'] })),
     `${sourcePath} checkpoint replay branch must be guarded by stored checkpoint presence`,
   );
+  assert.equal(
+    statements[replayIndex].alternate,
+    null,
+    `${sourcePath} checkpoint replay branch must not define an alternate path`,
+  );
   const replayStatements = statements[replayIndex].consequent?.type === 'BlockStatement'
     ? statements[replayIndex].consequent.body
     : [statements[replayIndex].consequent];
@@ -4241,6 +4246,11 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     canonicalSchemaAst(statements[mixedIndex].test),
     canonicalSchemaAst(babelParser.parseExpression('hasQuestions && hasNonQuestions', { plugins: ['typescript'] })),
     `${sourcePath} mixed-packet branch must use both executable classifications`,
+  );
+  assert.equal(
+    statements[mixedIndex].alternate,
+    null,
+    `${sourcePath} mixed-packet branch must not define an alternate path`,
   );
   assertDirectThrowWithMessage(
     statements[mixedIndex].consequent,

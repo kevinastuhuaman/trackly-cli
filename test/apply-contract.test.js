@@ -277,6 +277,26 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     }),
     /mixed-packet classifiers must use the locked action mappings/,
   );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /return storedCheckpointResult\(existing, 'replayed'\);\n(\s*)}/,
+        "return storedCheckpointResult(existing, 'replayed');\n$1} else {\n$1  sideEffect();\n$1}",
+      ),
+    }),
+    /checkpoint replay branch must not define an alternate path/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /throw new Error\('Question checkpoints cannot mix question and non-question actions\.'\);\n(\s*)}/,
+        "throw new Error('Question checkpoints cannot mix question and non-question actions.');\n$1} else {\n$1  sideEffect();\n$1}",
+      ),
+    }),
+    /mixed-packet branch must not define an alternate path/,
+  );
   assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics({
     ...fixture,
     hostedBatchServiceSource: replayAwareServiceSource.replace(
