@@ -61,6 +61,18 @@ test('outputJobs prefers the server display date and labels reposts explicitly',
   assert.match(out, /2026-02-04/);
 });
 
+test('outputJobs renders collision-only requirement IDs', () => {
+  const out = capture(() => fmt.outputJobs([{
+    id: 81,
+    title: 'Product Manager',
+    companyName: 'Apple',
+    firstSeenAt: '2026-02-04T00:00:00.000Z',
+    sourceReference: { label: 'Req', value: ' 200664582-3956 ', disambiguatesTitle: true },
+  }]), { tty: true });
+  assert.match(out, /Req:/);
+  assert.match(out, /200664582-3956/);
+});
+
 test('job date presentation preserves source calendar days and rejects malformed new fields', () => {
   assert.deepEqual(fmt.jobDatePresentation({
     displayDate: '2026-05-20T00:58:19.519Z',
@@ -75,6 +87,13 @@ test('job date presentation preserves source calendar days and rejects malformed
     displayDateKind: 'reposted',
     firstSeenAt: '2026-06-17T01:00:00.000Z',
   }), { label: 'Found', value: '2026-06-17' });
+  assert.deepEqual(fmt.jobDatePresentation({
+    postedAt: '2026-02-30T00:00:00.000Z',
+    firstSeenAt: '2026-03-03T00:00:00.000Z',
+  }), { label: 'Found', value: '2026-03-03' });
+  assert.deepEqual(fmt.jobDatePresentation({
+    postedAt: '2026-06-16T23:30:00-07:00',
+  }), { label: 'Posted', value: '2026-06-16' });
 });
 
 test('job detail date lines include original and repost timeline plus collision-only requisition', () => {
@@ -127,6 +146,10 @@ test('job detail date lines include original and repost timeline plus collision-
     'Posted: 2026-06-16',
     'Found: 2026-06-17',
   ]);
+  assert.deepEqual(fmt.jobDateDetailLines({
+    displayDate: '2026-06-16T16:32:42.248Z',
+    displayDateKind: 'posted',
+  }), ['Posted: 2026-06-16']);
 });
 
 test('outputJobs formats funding valuation as $M and $B', () => {
