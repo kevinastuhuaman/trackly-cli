@@ -176,6 +176,9 @@ const PHASE_FIELDS = {
     'submitActivated',
     'reviewTabPreserved',
     'userVisibleHandoffProven',
+    'browserBindingHash',
+    'handoffEvidenceFingerprint',
+    'handoffEvidenceType',
     'checkpointAction',
     'continuationAllowed',
     'resolvedActionCount',
@@ -286,9 +289,10 @@ function canonicalJson(value) {
     .join(',')}}`;
 }
 
-function validateTruthCertificationMemberRuns(errors, memberRuns, receipt) {
+function validateTruthCertificationMemberRuns(errors, memberRuns, receipt, side) {
+  const push = (message) => errors.push(`${side}: ${message}`);
   if (!Array.isArray(memberRuns) || memberRuns.length < 1 || memberRuns.length > 100) {
-    errors.push('truthCertificationMemberRuns must contain 1 to 100 member bindings');
+    push('truthCertificationMemberRuns must contain 1 to 100 member bindings');
     return;
   }
   const allowedFields = ['memberId', 'runId', 'memberVersion', 'inspectionEpoch'];
@@ -297,14 +301,14 @@ function validateTruthCertificationMemberRuns(errors, memberRuns, receipt) {
     if (!member || typeof member !== 'object' || Array.isArray(member)
         || Object.keys(member).length !== allowedFields.length
         || Object.keys(member).some((field) => !allowedFields.includes(field))) {
-      errors.push('truthCertificationMemberRuns entries must contain only memberId, runId, memberVersion, and inspectionEpoch');
+      push('truthCertificationMemberRuns entries must contain only memberId, runId, memberVersion, and inspectionEpoch');
       return;
     }
     if (!Number.isSafeInteger(member.memberId) || member.memberId < 1
         || !Number.isSafeInteger(member.runId) || member.runId < 1
         || !Number.isSafeInteger(member.memberVersion) || member.memberVersion < 1
         || !Number.isSafeInteger(member.inspectionEpoch) || member.inspectionEpoch < 0) {
-      errors.push('truthCertificationMemberRuns entries contain an invalid identifier, version, or epoch');
+      push('truthCertificationMemberRuns entries contain an invalid identifier, version, or epoch');
       return;
     }
     normalized.push({
@@ -316,11 +320,11 @@ function validateTruthCertificationMemberRuns(errors, memberRuns, receipt) {
   }
   normalized.sort((left, right) => left.memberId - right.memberId || left.runId - right.runId);
   if (new Set(normalized.map((member) => member.memberId)).size !== normalized.length) {
-    errors.push('truthCertificationMemberRuns memberId values must be unique');
+    push('truthCertificationMemberRuns memberId values must be unique');
   }
   const runSetHash = createHash('sha256').update(canonicalJson(normalized)).digest('hex');
   if (runSetHash !== receipt.truthCertificationRunSetHash) {
-    errors.push('truthCertificationMemberRuns must match truthCertificationRunSetHash');
+    push('truthCertificationMemberRuns must match truthCertificationRunSetHash');
   }
   const currentMemberMatches = normalized.filter((member) => (
     member.memberId === receipt.memberId
@@ -329,7 +333,7 @@ function validateTruthCertificationMemberRuns(errors, memberRuns, receipt) {
     && member.inspectionEpoch === receipt.inspectionEpoch
   ));
   if (currentMemberMatches.length !== 1) {
-    errors.push('truth certification must cover the current member, run, checkpoint version, and inspection epoch');
+    push('truth certification must cover the current member, run, checkpoint version, and inspection epoch');
   }
 }
 
@@ -658,6 +662,11 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
     'truthCertificationRunSetHash',
     'truthCertificationStatus',
   ];
+  const visibilityFields = [
+    'browserBindingHash',
+    'handoffEvidenceFingerprint',
+    'handoffEvidenceType',
+  ];
   validateCurrentLineage(
     errors,
     receipt,
@@ -668,6 +677,7 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
       ...resolutionFields,
       ...checkpointFields,
       ...truthCertificationFields,
+      ...visibilityFields,
     ],
   );
   if (receipt.workMode === 'accessible_execution') {
@@ -725,11 +735,12 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
     receipt.truthCertificationRunSetHash,
     'truthCertificationRunSetHash',
   );
-  validateTruthCertificationMemberRuns(errors, receipt.truthCertificationMemberRuns, receipt);
+  validateTruthCertificationMemberRuns(errors, receipt.truthCertificationMemberRuns, receipt, 'receipt');
   validateTruthCertificationMemberRuns(
     errors,
     expectedContext?.truthCertificationMemberRuns,
     expectedContext || {},
+    'expectedContext',
   );
   if (Array.isArray(receipt.truthCertificationMemberRuns)
       && Array.isArray(expectedContext?.truthCertificationMemberRuns)
@@ -743,6 +754,11 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
   requireFalse(errors, receipt, 'submitActivated');
   requireTrue(errors, receipt, 'reviewTabPreserved');
   requireTrue(errors, receipt, 'userVisibleHandoffProven');
+  requireFingerprint(errors, receipt.browserBindingHash, 'browserBindingHash');
+  requireFingerprint(errors, receipt.handoffEvidenceFingerprint, 'handoffEvidenceFingerprint');
+  if (!['visible_presentation_receipt', 'user_visible_handoff_receipt'].includes(receipt.handoffEvidenceType)) {
+    errors.push('handoffEvidenceType must identify visible presentation or an exact tab-bound user-visible handoff receipt');
+  }
   if (receipt.checkpointAction !== 'review/manual_submit') {
     errors.push('checkpointAction must be review/manual_submit');
   }
@@ -775,6 +791,7 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
       ...resolutionFields,
       ...checkpointFields,
       ...truthCertificationFields.filter((field) => field !== 'truthCertificationMemberRuns'),
+      ...visibilityFields,
     ]) {
       if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
     }

@@ -616,6 +616,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     submitActivated: false,
     reviewTabPreserved: true,
     userVisibleHandoffProven: true,
+    browserBindingHash: '4'.repeat(64),
+    handoffEvidenceFingerprint: '5'.repeat(64),
+    handoffEvidenceType: 'visible_presentation_receipt',
     checkpointAction: 'review/manual_submit',
     continuationAllowed: false,
     resolvedActionCount: 2,
@@ -638,6 +641,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     truthCertificationMemberRuns: review.truthCertificationMemberRuns,
     truthCertificationRunSetHash: review.truthCertificationRunSetHash,
     truthCertificationStatus: 'recorded',
+    browserBindingHash: '4'.repeat(64),
+    handoffEvidenceFingerprint: '5'.repeat(64),
+    handoffEvidenceType: 'visible_presentation_receipt',
     checkpointAction: 'review/manual_submit',
     continuationAllowed: false,
     resolvedActionCount: 2,
@@ -664,6 +670,37 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validationTimeMs,
   );
   assert.deepEqual(validateReviewCheckpoint(review, reviewContext), []);
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: [],
+    }, reviewContext).join('\n'),
+    /receipt: truthCertificationMemberRuns must contain/,
+  );
+  assert.match(
+    validateReviewCheckpoint(review, {
+      ...reviewContext,
+      truthCertificationMemberRuns: [],
+    }).join('\n'),
+    /expectedContext: truthCertificationMemberRuns must contain/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      handoffEvidenceFingerprint: '6'.repeat(64),
+    }, reviewContext).join('\n'),
+    /handoffEvidenceFingerprint must match expectedContext/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      handoffEvidenceType: 'durable_handoff_receipt',
+    }, {
+      ...reviewContext,
+      handoffEvidenceType: 'durable_handoff_receipt',
+    }).join('\n'),
+    /handoffEvidenceType must identify visible presentation/,
+  );
   assert.deepEqual(
     validateReviewCheckpoint(
       JSON.parse(JSON.stringify(review)),
@@ -839,6 +876,9 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     'truthCertificationExpiresAt',
     'truthCertificationRunSetHash',
     'truthCertificationStatus',
+    'browserBindingHash',
+    'handoffEvidenceFingerprint',
+    'handoffEvidenceType',
   ];
   const { executionId: omittedReviewExecutionId, ...fixedReview } = review;
   const fixedFillReceipt = {

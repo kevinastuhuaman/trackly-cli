@@ -60,7 +60,22 @@ test('coordinated hosted bindings resolve to unshadowed reviewed imports', () =>
     'z',
     'zod',
     'shadowed import fixture',
-  ), /must not shadow or reassign z/);
+  ), /must not shadow, reassign, alias, or mutate z/);
+  for (const mutation of [
+    "Object.assign(z, { object: () => ({ parse: () => ({}) }) });",
+    "Object.defineProperty(z, 'object', { value: () => ({}) });",
+    'z.object = () => ({});',
+    'delete z.object;',
+    'const schemaLibrary = z; schemaLibrary.object = () => ({});',
+  ]) {
+    assert.throws(() => assertUnshadowedImportBinding(
+      `${reviewedSource}\n${mutation}`,
+      'z',
+      'z',
+      'zod',
+      'mutated import fixture',
+    ), /must not shadow, reassign, alias, or mutate z/);
+  }
 });
 
 const assertPluginRoutePrecedence = (...args) => assertPluginRoutePrecedenceProduction(
@@ -315,6 +330,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     'Object.assign(globalThis, { Set: class FakeSet {} });',
     'delete globalThis.Set;',
     "const runtimeGlobal = globalThis; Object.defineProperty(runtimeGlobal, 'Set', { value: class FakeSet {} });",
+    'let runtimeGlobal; runtimeGlobal = globalThis; runtimeGlobal.Set = class FakeSet {};',
   ]) {
     assert.throws(
       () => assertCoordinatedCheckpointHelperSemantics({
@@ -1697,6 +1713,9 @@ test('checkpoint route lock binds the live endpoint to the reviewed bulk writer'
     "router.route('/jobscout/apply/batches/:id/checkpoints').post((_req, res) => res.json({ success: true }));",
     "router.route('/jobscout/apply/batches/:id/checkpoints').get((_req, res) => res.end()).post((_req, res) => res.json({ success: true }));",
     "const shadowRoute = router.route('/jobscout/apply/batches/:id/checkpoints');",
+    "const alternateRouter = router; alternateRouter.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "let alternateRouter; alternateRouter = router; alternateRouter.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "router[method]('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
   ]) {
     assert.throws(
       () => assertCheckpointRouteCallChain(

@@ -3034,6 +3034,32 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
   ));
   assert.ok(canonicalRouteIndex >= 0, `${sourcePath} must expose the locked checkpoint route at top level`);
   const checkpointPath = '/jobscout/apply/batches/:id/checkpoints';
+  const earlierStatements = program.body.slice(0, canonicalRouteIndex);
+  const routerAliases = new Set(['router']);
+  const routerAliasStatements = new Set();
+  let discoveredRouterAlias = true;
+  while (discoveredRouterAlias) {
+    discoveredRouterAlias = false;
+    for (const statement of earlierStatements) {
+      const bindings = statement.type === 'VariableDeclaration'
+        ? statement.declarations.map((declaration) => [declaration.id, declaration.init])
+        : statement.type === 'ExpressionStatement'
+          && statement.expression?.type === 'AssignmentExpression'
+          ? [[statement.expression.left, statement.expression.right]]
+          : [];
+      for (const [target, value] of bindings) {
+        const initializer = unwrapTransparentExpression(value);
+        if (target?.type === 'Identifier'
+            && initializer?.type === 'Identifier'
+            && routerAliases.has(initializer.name)
+            && !routerAliases.has(target.name)) {
+          routerAliases.add(target.name);
+          routerAliasStatements.add(statement);
+          discoveredRouterAlias = true;
+        }
+      }
+    }
+  }
   function routeRegistration(statement) {
     const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
     const callee = call?.type === 'CallExpression' ? unwrapTransparentExpression(call.callee) : null;
@@ -3041,9 +3067,9 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
       ? unwrapTransparentExpression(callee.object)
       : null;
     const method = staticMemberName(callee);
-    if (receiver?.type === 'Identifier' && receiver.name === 'router') {
-      if (!['post', 'all', 'use'].includes(method)) return null;
-      return { method, pathArgument: call.arguments[0] };
+    if (receiver?.type === 'Identifier' && routerAliases.has(receiver.name)) {
+      if (method !== null && !['post', 'all', 'use'].includes(method)) return null;
+      return { method: method ?? 'use', pathArgument: call.arguments[0] };
     }
     const chainedMethods = [];
     let chainedCall = call;
@@ -3061,7 +3087,7 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
         : null;
       if (
         routeOwner?.type === 'Identifier'
-        && routeOwner.name === 'router'
+        && routerAliases.has(routeOwner.name)
         && staticMemberName(routeCallee) === 'route'
       ) {
         if (!chainedMethods.some((candidate) => candidate === 'post' || candidate === 'all')) return null;
@@ -3093,7 +3119,8 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
     `${sourcePath} reviewed Apply middleware`,
   );
   const reviewedApplyMiddlewareAst = JSON.stringify(canonicalSchemaAst(reviewedApplyMiddleware));
-  const earlierShadowingRoutes = program.body.slice(0, canonicalRouteIndex).filter((statement) => {
+  const earlierShadowingRoutes = earlierStatements.filter((statement) => {
+    if (routerAliasStatements.has(statement)) return true;
     if (statement.type === 'VariableDeclaration') {
       return statement.declarations.some((declaration) => {
         const initializer = unwrapTransparentExpression(declaration.init);
@@ -3103,7 +3130,7 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
         const receiver = callee?.type === 'MemberExpression'
           ? unwrapTransparentExpression(callee.object)
           : null;
-        if (receiver?.type !== 'Identifier' || receiver.name !== 'router' || staticMemberName(callee) !== 'route') {
+        if (receiver?.type !== 'Identifier' || !routerAliases.has(receiver.name) || staticMemberName(callee) !== 'route') {
           return false;
         }
         const routePath = initializer.arguments[0];
@@ -3345,6 +3372,7 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
   const ast = parseFullSource(source, sourcePath);
   const importedBinding = assertImportBinding(source, importedName, localName, moduleName, sourcePath);
   const forbiddenBindings = [];
+  const bindingAliases = new Set([localName]);
   function patternContainsName(pattern) {
     if (!pattern) return false;
     if (pattern.type === 'Identifier') return pattern.name === localName;
@@ -3357,6 +3385,53 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
         : patternContainsName(property.value)
     ));
     return false;
+  }
+  let discoveredAlias = true;
+  while (discoveredAlias) {
+    discoveredAlias = false;
+    function discoverAliases(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) discoverAliases(child);
+        return;
+      }
+      const binding = node.type === 'VariableDeclarator'
+        ? [node.id, node.init]
+        : node.type === 'AssignmentExpression'
+          ? [node.left, node.right]
+          : null;
+      const target = binding?.[0];
+      const value = unwrapTransparentExpression(binding?.[1]);
+      if (target?.type === 'Identifier'
+          && value?.type === 'Identifier'
+          && bindingAliases.has(value.name)
+          && !bindingAliases.has(target.name)) {
+        bindingAliases.add(target.name);
+        forbiddenBindings.push(node);
+        discoveredAlias = true;
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        discoverAliases(child);
+      }
+    }
+    discoverAliases(ast);
+  }
+  function isImportedObjectReference(node) {
+    const value = unwrapTransparentExpression(node);
+    return value?.type === 'Identifier' && bindingAliases.has(value.name);
+  }
+  function isImportedMember(node) {
+    const value = unwrapTransparentExpression(node);
+    return value?.type === 'MemberExpression' && isImportedObjectReference(value.object);
+  }
+  function mutationCallName(node) {
+    const callee = unwrapTransparentExpression(node?.callee);
+    const receiver = callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(callee.object)
+      : null;
+    const member = staticMemberName(callee);
+    return receiver?.type === 'Identifier' && member ? `${receiver.name}.${member}` : null;
   }
   function visit(node) {
     if (node === null || typeof node !== 'object') return;
@@ -3379,6 +3454,25 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
         && node.local !== importedBinding.local) forbiddenBindings.push(node);
     if (node.type === 'AssignmentExpression' && patternContainsName(node.left)) forbiddenBindings.push(node);
     if (node.type === 'UpdateExpression' && patternContainsName(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'AssignmentExpression' && isImportedMember(node.left)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression' && isImportedMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && isImportedMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      const mutationCall = mutationCallName(node);
+      if ([
+        'Object.assign',
+        'Object.defineProperty',
+        'Object.defineProperties',
+        'Object.setPrototypeOf',
+        'Reflect.defineProperty',
+        'Reflect.set',
+        'Reflect.setPrototypeOf',
+      ].includes(mutationCall) && isImportedObjectReference(node.arguments[0])) {
+        forbiddenBindings.push(node);
+      }
+    }
     for (const [key, child] of Object.entries(node)) {
       if (AST_METADATA_FIELDS.has(key)) continue;
       visit(child);
@@ -3388,7 +3482,7 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
   assert.equal(
     forbiddenBindings.length,
     0,
-    `${sourcePath} must not shadow or reassign ${localName} imported from ${moduleName}`,
+    `${sourcePath} must not shadow, reassign, alias, or mutate ${localName} imported from ${moduleName}`,
   );
   return importedBinding;
 }
@@ -3450,6 +3544,14 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
           && globalAliases.has(unwrapStaticExpression(node.init)?.name)
           && !globalAliases.has(node.id.name)) {
         globalAliases.add(node.id.name);
+        discoveredAlias = true;
+      }
+      if (node.type === 'AssignmentExpression'
+          && node.operator === '='
+          && node.left?.type === 'Identifier'
+          && globalAliases.has(unwrapStaticExpression(node.right)?.name)
+          && !globalAliases.has(node.left.name)) {
+        globalAliases.add(node.left.name);
         discoveredAlias = true;
       }
       for (const [key, child] of Object.entries(node)) {

@@ -212,7 +212,12 @@ Required fields:
   lineage, profile revision, and form inventory baseline from that receipt, so
   matching caller-authored Review values alone cannot satisfy the gate;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
-  `reviewTabPreserved`, and `userVisibleHandoffProven` all true. A bare truth
+  `reviewTabPreserved`, and `userVisibleHandoffProven` all true. Bind the
+  receipt and authoritative `expectedContext` to the exact visible tab with
+  lowercase SHA-256 `browserBindingHash` and `handoffEvidenceFingerprint`, plus
+  `handoffEvidenceType` set to `visible_presentation_receipt` or
+  `user_visible_handoff_receipt`. Durable or inventory-only evidence is not
+  sufficient for the manual-submit Review gate. A bare truth
   boolean is insufficient: bind `truthCertificationAttestationId`,
   `truthCertificationDependencyHash`, `truthCertificationExpiresAt`, and
   `truthCertificationRunSetHash`, and `truthCertificationStatus` (`recorded` or
@@ -233,11 +238,12 @@ Required fields:
 - bind the receipt and `expectedContext` to the exact backend result:
   `checkpointStatus` (`recorded` or `replayed`), positive
   `checkpointMemberVersion`, non-negative `checkpointInspectionEpoch`,
-  `checkpointLifecycle: review_ready`, `checkpointActionCount`, and
+  `checkpointLifecycle: review_ready`, `checkpointActionCount: 1`, and
   `checkpointActionIdsFingerprint`. Newly recorded checkpoint actions and
   previously open actions resolved by the review are separate sets, so each
   summary binds independently to `expectedContext` rather than being forced to
-  equal the other. `checkpointInspectionEpoch` must equal the receipt's current
+  equal the other. The single checkpoint action must be
+  `checkpointAction: review/manual_submit`. `checkpointInspectionEpoch` must equal the receipt's current
   `inspectionEpoch`. A rejected or malformed checkpoint
   fails closed: refetch the current contract once, correct the payload only when
   the current schema proves how, and never claim durable review readiness until
@@ -251,13 +257,15 @@ review tab cannot be proven visible. Report `employerApplicationState`,
 `tracklyMemberState`, `tracklyJobState`, and `browserTabState` independently.
 Set `handoffVisibility` to `verified` only for a visibly proven or exact
 durably handed-off tab. Otherwise use `unverified` and
-`reviewReadyClaimed: false`. A state in one system never implies a state in
+`reviewReadyClaimed: false`. When readiness is false, omit all checkpoint
+authority fields. A state in one system never implies a state in
 another, and a valid unverified handoff receipt never authorizes telling the
 user to submit. `browserTabState: durable_handoff_proven` is invalid with
 unverified visibility and requires a `durable_handoff_receipt`. A true
 `reviewReadyClaimed` requires `checkpointStatus`,
 `checkpointMemberVersion`, `checkpointInspectionEpoch`, and
-`checkpointLifecycle`; the checkpoint epoch must equal the receipt's current
+`checkpointLifecycle`, plus `checkpointAction: review/manual_submit` and
+`checkpointActionCount: 1`; the checkpoint epoch must equal the receipt's current
 `inspectionEpoch`. The reported `employerApplicationState`,
 `tracklyMemberState`, and `tracklyJobState` must match the current authoritative
 `expectedContext` for every handoff, even when readiness is not claimed. The
