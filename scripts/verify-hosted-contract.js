@@ -4106,11 +4106,13 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
     'Access-blocking checkpoints cannot report private-field commits or other actions': 'actions',
     'Review checkpoints require all known fields to be committed': 'knownFieldsCommitted',
   };
+  const branchesByMessage = new Map();
   for (const [message, expression] of Object.entries(expected)) {
     const matches = callback.body.body.filter((statement) => (
       statement.type === 'IfStatement' && statementContainsString(statement.consequent, message)
     ));
     assert.equal(matches.length, 1, `${sourcePath} must enforce ${message} in exactly one executable branch`);
+    branchesByMessage.set(message, matches[0]);
     assert.deepEqual(
       canonicalSchemaAst(matches[0].test),
       canonicalSchemaAst(babelParser.parseExpression(expression, { plugins: ['typescript'] })),
@@ -4163,6 +4165,31 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
     )),
     `${sourcePath} checkpoint refinement must contain only locked declarations and issue branches`,
   );
+  const declarationsByName = new Map(declarations.flatMap((statement) => (
+    statement.declarations
+      .filter((declaration) => declaration.id?.type === 'Identifier')
+      .map((declaration) => [declaration.id.name, statement])
+  )));
+  const dependenciesByMessage = {
+    'Actions in one inspection checkpoint must share one lifecycle': [
+      shape === 'hosted-map' ? 'mappings' : 'actionCodes',
+    ],
+    'Question checkpoints require a packet phase': ['hasQuestions'],
+    'Question checkpoints require committed known fields': ['hasQuestions'],
+    'packetPhase is only valid for grouped questions': ['hasQuestions'],
+    'Access-blocking checkpoints cannot report private-field commits or other actions': ['accessBlocked'],
+    'Review checkpoints require all known fields to be committed': ['reviewReady'],
+  };
+  for (const [message, dependencies] of Object.entries(dependenciesByMessage)) {
+    const branchIndex = callback.body.body.indexOf(branchesByMessage.get(message));
+    for (const dependency of dependencies) {
+      const declarationIndex = callback.body.body.indexOf(declarationsByName.get(dependency));
+      assert.ok(
+        declarationIndex >= 0 && declarationIndex < branchIndex,
+        `${sourcePath} checkpoint refinement must declare ${dependency} before evaluating ${message}`,
+      );
+    }
+  }
   return Object.keys(expected);
 }
 
@@ -4437,6 +4464,11 @@ function assertCheckpointWriterCallChain(source, sourcePath) {
     'checkpoint',
   );
   assert.equal(callback.body?.type, 'BlockStatement', `${sourcePath} checkpoint writer map callback must use a block`);
+  assert.equal(
+    callback.body.body.length,
+    1,
+    `${sourcePath} checkpoint writer map callback must contain only its guarded write`,
+  );
   const tryStatements = callback.body.body.filter((statement) => statement.type === 'TryStatement');
   assert.equal(tryStatements.length, 1, `${sourcePath} checkpoint writer map callback must contain one guarded write`);
   const expectedWrite = parseExpectedStatement(`
@@ -4451,6 +4483,70 @@ function assertCheckpointWriterCallChain(source, sourcePath) {
     canonicalSchemaAst(tryStatements[0].block.body),
     canonicalSchemaAst([expectedWrite]),
     `${sourcePath} checkpoint writer must directly await the locked recordOneApplyBatchCheckpoint call`,
+  );
+  assert.equal(tryStatements[0].finalizer, null, `${sourcePath} checkpoint writer guarded write must not use a finalizer`);
+  assert.ok(tryStatements[0].handler, `${sourcePath} checkpoint writer guarded write must preserve its catch handler`);
+  assertExactParameters(
+    [tryStatements[0].handler.param],
+    '(error) => {}',
+    `${sourcePath} checkpoint writer catch handler`,
+    'error',
+  );
+  const fixtureCatchBody = [
+    parseExpectedStatement('throw error;', `${sourcePath} fixture writer catch`),
+  ];
+  const productionCatchBody = [
+    parseExpectedStatement(`
+      if (error instanceof ApplyBatchIdempotencyConflictError) {
+        return {
+          memberId: checkpoint.memberId,
+          status: 'conflict' as const,
+          errorCode: 'idempotency_payload_mismatch' as const,
+        };
+      }
+    `, `${sourcePath} production idempotency catch`),
+    parseExpectedStatement(`
+      if (error instanceof ApplyBatchConflictError) {
+        return {
+          memberId: checkpoint.memberId,
+          status: 'conflict' as const,
+          errorCode: 'stale_member_state' as const,
+        };
+      }
+    `, `${sourcePath} production stale-state catch`),
+    parseExpectedStatement('throw error;', `${sourcePath} production writer catch`),
+  ];
+  assert.ok(
+    [fixtureCatchBody, productionCatchBody].some((expectedCatchBody) => (
+      JSON.stringify(canonicalSchemaAst(tryStatements[0].handler.body.body))
+        === JSON.stringify(canonicalSchemaAst(expectedCatchBody))
+    )),
+    `${sourcePath} checkpoint writer catch handler must preserve only its locked conflict mapping`,
+  );
+
+  const resultIndex = definition.body.body.indexOf(resultDeclarations[0]);
+  const tailStatements = definition.body.body.slice(resultIndex + 1);
+  const fixtureTail = [parseExpectedStatement('return { results };', `${sourcePath} fixture writer return`)];
+  const productionTail = [
+    parseExpectedStatement(`
+      await completeApplyBatchIfTerminal(queryable, {
+        userId: input.userId,
+        batchId: input.batchId,
+        now: input.now,
+      });
+    `, `${sourcePath} production writer completion`),
+    parseExpectedStatement(`
+      return {
+        results,
+        questionPacket: buildApplyBatchQuestionPacket(results),
+      };
+    `, `${sourcePath} production writer return`),
+  ];
+  assert.ok(
+    [fixtureTail, productionTail].some((expectedTail) => (
+      JSON.stringify(canonicalSchemaAst(tailStatements)) === JSON.stringify(canonicalSchemaAst(expectedTail))
+    )),
+    `${sourcePath} checkpoint writer must return only its locked results and question packet`,
   );
 }
 

@@ -763,6 +763,63 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'try {\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+        'return { memberId: checkpoint.memberId, status: \'recorded\' };\n        try {\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+      ),
+    }),
+    /must contain only its guarded write/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'return { results };',
+        'return { results: [] };',
+      ),
+    }),
+    /must return only its locked results and question packet/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'throw error;',
+        "return { memberId: checkpoint.memberId, status: 'recorded' };",
+      ),
+    }),
+    /catch handler must preserve only its locked conflict mapping/,
+  );
+  const hasQuestionsDeclaration = 'const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);';
+  const packetPhaseBranch = `if (hasQuestions && checkpoint.packetPhase === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['packetPhase'],
+      message: 'Question checkpoints require a packet phase',
+    });
+  }`;
+  const refinementBranchBeforeDeclarations = helperSource.replace(
+    `${hasQuestionsDeclaration}\n  ${packetPhaseBranch}`,
+    `${packetPhaseBranch}\n  ${hasQuestionsDeclaration}`,
+  );
+  assert.notEqual(refinementBranchBeforeDeclarations, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(refinementBranchBeforeDeclarations, name, 'reordered refinement fixture'),
+        ])),
+      },
+      localApplySource: refinementBranchBeforeDeclarations,
+    }),
+    /must declare hasQuestions before evaluating Question checkpoints require a packet phase/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
       hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
         '"continuationAllowed":true',
         '"continuationAllowed":false',
