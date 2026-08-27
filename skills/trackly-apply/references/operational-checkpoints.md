@@ -215,10 +215,14 @@ Required fields:
   `reviewTabPreserved`, and `userVisibleHandoffProven` all true. A bare truth
   boolean is insufficient: bind `truthCertificationAttestationId`,
   `truthCertificationDependencyHash`, `truthCertificationExpiresAt`, and
-  `truthCertificationStatus` (`recorded` or `replayed`) in both the receipt and
+  `truthCertificationRunSetHash`, and `truthCertificationStatus` (`recorded` or
+  `replayed`) in both the receipt and
   authoritative `expectedContext` to the value-free backend certification
   result. The certification expiry must still be later than local validation
-  time; and
+  time. Preserve the accepted value-free `truthCertificationMemberRuns`,
+  recompute the backend's canonical run-set hash, and prove the current member,
+  run, checkpoint version, and inspection epoch occur exactly once in that
+  certified subset; and
 - bind `checkpointAction: review/manual_submit` and
   `continuationAllowed: false` in both the receipt and `expectedContext` to the
   exact backend-accepted action result; a
@@ -256,10 +260,11 @@ unverified visibility and requires a `durable_handoff_receipt`. A true
 `inspectionEpoch`. The reported `employerApplicationState`,
 `tracklyMemberState`, and `tracklyJobState` must match the current authoritative
 `expectedContext` for every handoff, even when readiness is not claimed. The
-checkpoint fields must also match when readiness is claimed. The member may be
-in the durable `review_ready` checkpoint state or the subsequent
-`awaiting_manual_submit` state produced after the certified review-ready outcome
-is recorded, but the current job state must still be `check_later`; a revoked,
+checkpoint fields must also match when readiness is claimed. A true handoff is
+valid only in the `awaiting_manual_submit` member state produced after the
+certified review-ready outcome is recorded; the earlier durable `review_ready`
+checkpoint state is not yet a user handoff. The current job state must still
+be `check_later`; a revoked,
 already-applied, or unknown job cannot be handed off as review-ready. A verified
 handoff must bind the receipt and `expectedContext` to
 the exact `browserBindingHash`, a value-free `handoffEvidenceFingerprint`, and

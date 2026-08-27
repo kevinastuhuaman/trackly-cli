@@ -3,11 +3,29 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
+
+function canonicalJson(value) {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+    .join(',')}}`;
+}
+
+function memberRunsHash(memberRuns) {
+  const normalized = memberRuns
+    .map((member) => ({ ...member }))
+    .sort((left, right) => left.memberId - right.memberId || left.runId - right.runId);
+  return createHash('sha256').update(canonicalJson(normalized)).digest('hex');
+}
 
 const skill = read('skills/trackly-apply/SKILL.md');
 
@@ -589,6 +607,11 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     truthCertificationAttestationId: '901',
     truthCertificationDependencyHash: 'a'.repeat(64),
     truthCertificationExpiresAt: '2026-08-28T03:00:00.000Z',
+    truthCertificationMemberRuns: [
+      { memberId: 202, runId: 402, memberVersion: 4, inspectionEpoch: 2 },
+      { memberId: 201, runId: 401, memberVersion: 8, inspectionEpoch: 2 },
+    ],
+    truthCertificationRunSetHash: '',
     truthCertificationStatus: 'recorded',
     submitActivated: false,
     reviewTabPreserved: true,
@@ -604,6 +627,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointActionCount: 1,
     checkpointActionIdsFingerprint: 'e'.repeat(64),
   };
+  review.truthCertificationRunSetHash = memberRunsHash(review.truthCertificationMemberRuns);
   const reviewContext = {
     ...expectedContext,
     profileRevision: fill.profileRevision,
@@ -611,6 +635,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     truthCertificationAttestationId: '901',
     truthCertificationDependencyHash: 'a'.repeat(64),
     truthCertificationExpiresAt: '2026-08-28T03:00:00.000Z',
+    truthCertificationRunSetHash: review.truthCertificationRunSetHash,
     truthCertificationStatus: 'recorded',
     checkpointAction: 'review/manual_submit',
     continuationAllowed: false,
@@ -654,6 +679,87 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       truthCertificationDependencyHash: 'b'.repeat(64),
     }, reviewContext).join('\n'),
     /truthCertificationDependencyHash must match expectedContext/,
+  );
+  for (const nonCanonicalExpiry of ['9999', '2026-08-28 03:00:00Z', '2026-02-30T03:00:00.000Z']) {
+    assert.match(
+      validateReviewCheckpoint({
+        ...review,
+        truthCertificationExpiresAt: nonCanonicalExpiry,
+      }, {
+        ...reviewContext,
+        truthCertificationExpiresAt: nonCanonicalExpiry,
+      }).join('\n'),
+      /truthCertificationExpiresAt must be an ISO-8601 date-time/,
+    );
+  }
+  const siblingOnlyMemberRuns = [
+    { memberId: 202, runId: 402, memberVersion: 4, inspectionEpoch: 2 },
+  ];
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: siblingOnlyMemberRuns,
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }, {
+      ...reviewContext,
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }).join('\n'),
+    /truth certification must cover the current member/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: [
+        ...siblingOnlyMemberRuns,
+        { memberId: 201, runId: 401, memberVersion: 8, inspectionEpoch: 2 },
+      ],
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }, {
+      ...reviewContext,
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }).join('\n'),
+    /truthCertificationMemberRuns must match truthCertificationRunSetHash/,
+  );
+  for (const memberOverride of [{ memberVersion: 7 }, { inspectionEpoch: 1 }]) {
+    const staleMemberRuns = review.truthCertificationMemberRuns.map((member) => (
+      member.memberId === review.memberId ? { ...member, ...memberOverride } : member
+    ));
+    assert.match(
+      validateReviewCheckpoint({
+        ...review,
+        truthCertificationMemberRuns: staleMemberRuns,
+        truthCertificationRunSetHash: memberRunsHash(staleMemberRuns),
+      }, {
+        ...reviewContext,
+        truthCertificationRunSetHash: memberRunsHash(staleMemberRuns),
+      }).join('\n'),
+      /truth certification must cover the current member/,
+    );
+  }
+  const duplicateMemberRuns = [
+    ...review.truthCertificationMemberRuns,
+    { memberId: 201, runId: 499, memberVersion: 2, inspectionEpoch: 2 },
+  ];
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: duplicateMemberRuns,
+      truthCertificationRunSetHash: memberRunsHash(duplicateMemberRuns),
+    }, {
+      ...reviewContext,
+      truthCertificationRunSetHash: memberRunsHash(duplicateMemberRuns),
+    }).join('\n'),
+    /memberId values must be unique/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: [{
+        ...review.truthCertificationMemberRuns[1],
+        answerSnapshotHash: 'private',
+      }],
+    }, reviewContext).join('\n'),
+    /entries must contain only/,
   );
   assert.match(
     validateReviewCheckpoint({
@@ -721,6 +827,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     'truthCertificationAttestationId',
     'truthCertificationDependencyHash',
     'truthCertificationExpiresAt',
+    'truthCertificationRunSetHash',
     'truthCertificationStatus',
   ];
   const { executionId: omittedReviewExecutionId, ...fixedReview } = review;
@@ -740,6 +847,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     formInventoryFingerprint: fill.formInventoryFingerprint,
     resumeControl: 'required',
   };
+  const fixedTruthCertificationMemberRuns = review.truthCertificationMemberRuns.map((member) => (
+    member.memberId === review.memberId ? { ...member, inspectionEpoch: 0 } : member
+  ));
+  const fixedTruthCertificationRunSetHash = memberRunsHash(fixedTruthCertificationMemberRuns);
   assert.equal(omittedReviewExecutionId, 301);
   assert.deepEqual(validateReviewCheckpoint({
     ...fixedReview,
@@ -747,6 +858,8 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     inspectionEpoch: 0,
     profileRevision: 0,
     checkpointInspectionEpoch: 0,
+    truthCertificationMemberRuns: fixedTruthCertificationMemberRuns,
+    truthCertificationRunSetHash: fixedTruthCertificationRunSetHash,
   }, {
     ...fixedExpectedContext,
     workMode: 'fixed_inspection',
@@ -754,6 +867,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...Object.fromEntries(reviewExpectedFields.map((field) => [field, reviewContext[field]])),
     profileRevision: 0,
     checkpointInspectionEpoch: 0,
+    truthCertificationRunSetHash: fixedTruthCertificationRunSetHash,
   }, { receipt: fixedFillReceipt, expectedContext: fixedFillContext }), []);
   assert.match(
     validateReviewCheckpoint({ ...review, submitActivated: true }, reviewContext).join('\n'),

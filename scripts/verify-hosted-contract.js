@@ -4022,6 +4022,17 @@ function parseExpectedStatement(statement, label) {
   return parsed.program.body[0];
 }
 
+function assertExactParameters(actualParams, fixtureExpression, label, expectedDescription) {
+  const expectedParams = babelParser.parseExpression(fixtureExpression, {
+    plugins: ['typescript'],
+  }).params;
+  assert.deepEqual(
+    canonicalSchemaAst(actualParams),
+    canonicalSchemaAst(expectedParams),
+    `${label} must use the exact ${expectedDescription} parameters`,
+  );
+}
+
 function singleDirectStatement(node, label) {
   if (node?.type === 'BlockStatement') {
     assert.equal(node.body.length, 1, `${label} must contain exactly one direct statement`);
@@ -4057,6 +4068,12 @@ function checkpointRefinementCallback(source, sourcePath) {
   assert.ok(
     callback?.type === 'ArrowFunctionExpression' || callback?.type === 'FunctionExpression',
     `applyCheckpointSchema in ${sourcePath} must use an executable refinement callback`,
+  );
+  assertExactParameters(
+    callback.params,
+    '(checkpoint, context) => {}',
+    `applyCheckpointSchema in ${sourcePath} refinement`,
+    'checkpoint and context',
   );
   assert.equal(callback.body?.type, 'BlockStatement', `applyCheckpointSchema in ${sourcePath} refinement must use a block`);
   return callback;
@@ -4164,6 +4181,29 @@ function assertReplayAwareMixedPacketOrdering(
   }
   const definition = activeNamedDefinitionAst(source, 'recordOneApplyBatchCheckpoint', sourcePath);
   assert.equal(definition?.type, 'FunctionDeclaration', `recordOneApplyBatchCheckpoint in ${sourcePath} must be a function`);
+  assertExactParameters(
+    definition.params,
+    '(queryable, input, checkpoint) => {}',
+    `recordOneApplyBatchCheckpoint in ${sourcePath}`,
+    'queryable, input, and checkpoint',
+  );
+  const forbiddenHelperBindings = new Set(['loadStoredApplyBatchCheckpoint', 'storedCheckpointResult']);
+  const shadowedHelperBindings = definition.body.body.flatMap((statement) => {
+    if (statement.type === 'FunctionDeclaration' && forbiddenHelperBindings.has(statement.id?.name)) {
+      return [statement.id.name];
+    }
+    if (statement.type !== 'VariableDeclaration') return [];
+    return statement.declarations.flatMap((declaration) => (
+      declaration.id?.type === 'Identifier' && forbiddenHelperBindings.has(declaration.id.name)
+        ? [declaration.id.name]
+        : []
+    ));
+  });
+  assert.deepEqual(
+    shadowedHelperBindings,
+    [],
+    `${sourcePath} checkpoint execution must not shadow its locked replay helper bindings`,
+  );
   const statements = definition.body.body;
   const expectedPrefix = [
     `const checkpointMapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[
@@ -4318,6 +4358,102 @@ function assertReplayAwareMixedPacketOrdering(
   assert.ok(mixedIndex > replayIndex, `${sourcePath} must reject new mixed packets only after exact replay lookup`);
 }
 
+function assertCheckpointWriterCallChain(source, sourcePath) {
+  const definition = activeNamedDefinitionAst(source, 'recordApplyBatchCheckpoints', sourcePath);
+  assert.equal(definition?.type, 'FunctionDeclaration', `recordApplyBatchCheckpoints in ${sourcePath} must be a function`);
+  assertExactParameters(
+    definition.params,
+    '(queryable, input) => {}',
+    `recordApplyBatchCheckpoints in ${sourcePath}`,
+    'queryable and input',
+  );
+
+  const shadowBindings = [];
+  function bindingContainsRecordOne(pattern) {
+    if (!pattern) return false;
+    if (pattern.type === 'Identifier') return pattern.name === 'recordOneApplyBatchCheckpoint';
+    if (pattern.type === 'AssignmentPattern') return bindingContainsRecordOne(pattern.left);
+    if (pattern.type === 'RestElement') return bindingContainsRecordOne(pattern.argument);
+    if (pattern.type === 'ArrayPattern') return pattern.elements.some(bindingContainsRecordOne);
+    if (pattern.type === 'ObjectPattern') return pattern.properties.some((property) => (
+      property.type === 'RestElement'
+        ? bindingContainsRecordOne(property.argument)
+        : bindingContainsRecordOne(property.value)
+    ));
+    return false;
+  }
+  function findShadowBindings(node, isRoot = false) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) findShadowBindings(child);
+      return;
+    }
+    if (!isRoot && (
+      node.type === 'FunctionDeclaration'
+      || node.type === 'FunctionExpression'
+      || node.type === 'ArrowFunctionExpression'
+    )) {
+      if (node.type === 'FunctionDeclaration' && node.id?.name === 'recordOneApplyBatchCheckpoint') {
+        shadowBindings.push(node);
+      }
+      if (node.params?.some(bindingContainsRecordOne)) shadowBindings.push(node);
+    }
+    if (node.type === 'VariableDeclarator' && bindingContainsRecordOne(node.id)) shadowBindings.push(node);
+    if (node.type === 'CatchClause' && bindingContainsRecordOne(node.param)) shadowBindings.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      findShadowBindings(child);
+    }
+  }
+  findShadowBindings(definition, true);
+  assert.equal(
+    shadowBindings.length,
+    0,
+    `${sourcePath} checkpoint writer must not shadow the locked recordOneApplyBatchCheckpoint binding`,
+  );
+
+  const resultDeclarations = definition.body.body.filter((statement) => (
+    statement.type === 'VariableDeclaration'
+    && statement.declarations.some((declaration) => declaration.id?.type === 'Identifier' && declaration.id.name === 'results')
+  ));
+  assert.equal(resultDeclarations.length, 1, `${sourcePath} checkpoint writer must declare one results binding`);
+  const resultsDeclarator = resultDeclarations[0].declarations.find((declaration) => declaration.id.name === 'results');
+  const resultsInitializer = unwrapStaticExpression(resultsDeclarator.init);
+  assert.equal(resultsInitializer?.type, 'AwaitExpression', `${sourcePath} checkpoint writer results must await Promise.all`);
+  const promiseAllCall = unwrapStaticExpression(resultsInitializer.argument);
+  assert.equal(babelCalleeName(promiseAllCall?.callee), 'Promise.all', `${sourcePath} checkpoint writer results must await Promise.all`);
+  assert.equal(promiseAllCall.arguments.length, 1, `${sourcePath} checkpoint writer Promise.all must receive one checkpoint map`);
+  const mapCall = unwrapStaticExpression(promiseAllCall.arguments[0]);
+  assert.equal(mapCall?.type, 'CallExpression', `${sourcePath} checkpoint writer must map input.checkpoints`);
+  assert.equal(babelCalleeName(mapCall.callee), 'input.checkpoints.map', `${sourcePath} checkpoint writer must map input.checkpoints`);
+  assert.equal(mapCall.arguments.length, 1, `${sourcePath} checkpoint writer map must receive one callback`);
+  const callback = unwrapStaticExpression(mapCall.arguments[0]);
+  assert.equal(callback?.type, 'ArrowFunctionExpression', `${sourcePath} checkpoint writer map must use an arrow callback`);
+  assert.equal(callback.async, true, `${sourcePath} checkpoint writer map callback must be async`);
+  assertExactParameters(
+    callback.params,
+    'async (checkpoint) => {}',
+    `${sourcePath} checkpoint writer map`,
+    'checkpoint',
+  );
+  assert.equal(callback.body?.type, 'BlockStatement', `${sourcePath} checkpoint writer map callback must use a block`);
+  const tryStatements = callback.body.body.filter((statement) => statement.type === 'TryStatement');
+  assert.equal(tryStatements.length, 1, `${sourcePath} checkpoint writer map callback must contain one guarded write`);
+  const expectedWrite = parseExpectedStatement(`
+    return await recordOneApplyBatchCheckpoint(queryable, {
+      userId: input.userId,
+      batchId: input.batchId,
+      leaseToken: input.leaseToken,
+      now: input.now,
+    }, checkpoint);
+  `, `${sourcePath} checkpoint writer call`);
+  assert.deepEqual(
+    canonicalSchemaAst(tryStatements[0].block.body),
+    canonicalSchemaAst([expectedWrite]),
+    `${sourcePath} checkpoint writer must directly await the locked recordOneApplyBatchCheckpoint call`,
+  );
+}
+
 function checkpointHelperSemanticDescriptor(
   source,
   contract,
@@ -4364,15 +4500,22 @@ function checkpointHelperSemanticDescriptor(
     sourcePath,
     declarationStatements,
   );
+  assertExactParameters(
+    variantAst.params,
+    '(actionCode) => null',
+    `applyCheckpointActionVariant in ${sourcePath}`,
+    'actionCode',
+  );
   const variantBody = variantAst.body?.type === 'BlockStatement'
-    ? variantAst.body.body.filter((statement) => statement.type === 'ReturnStatement')
-    : [{ argument: variantAst.body }];
+    ? variantAst.body.body
+    : [{ type: 'ReturnStatement', argument: variantAst.body }];
+  const variantReturns = variantBody.filter((statement) => statement.type === 'ReturnStatement');
   assert.equal(
-    variantBody.length,
+    variantReturns.length,
     1,
     `applyCheckpointActionVariant in ${sourcePath} must have exactly one top-level return`,
   );
-  const variantReturn = unwrapStaticExpression(variantBody[0].argument);
+  const variantReturn = unwrapStaticExpression(variantReturns[0].argument);
   assert.equal(variantReturn?.type, 'CallExpression', `${sourcePath} action variant must return z.object(...)`);
   assert.equal(variantReturn.callee?.type, 'MemberExpression', `${sourcePath} action variant must return z.object(...)`);
   assert.equal(variantReturn.callee.object?.name, 'z', `${sourcePath} action variant must return z.object(...)`);
@@ -4414,6 +4557,7 @@ function checkpointHelperSemanticDescriptor(
   );
 
   if (usesLocalActionMap) {
+    assert.equal(variantBody.length, 1, `${sourcePath} local action variant must contain only its locked return`);
     assert.match(variant, /z\.literal\(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION\[actionCode\]\)/);
     assert.match(variant, /APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[actionCode\]/);
     assert.match(actionSchema, /APPLY_CHECKPOINT_ACTION_CODES\.map\(applyCheckpointActionVariant\)/);
@@ -4440,6 +4584,24 @@ function checkpointHelperSemanticDescriptor(
     assert.match(checkpointSchema, /actionCodes\.includes\('review\/manual_submit'\)/);
     assertCheckpointRefinementConditions(source, sourcePath, 'local-map');
   } else if (usesHostedActionMap) {
+    assert.equal(
+      variantBody.length,
+      2,
+      `${sourcePath} hosted action variant must contain only its locked mapping initializer and return`,
+    );
+    assert.deepEqual(
+      canonicalSchemaAst(variantBody[0]),
+      canonicalSchemaAst(parseExpectedStatement(
+        'const mapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[actionCode];',
+        `${sourcePath} hosted action mapping initializer`,
+      )),
+      `${sourcePath} hosted action variant must use its locked action mapping initializer`,
+    );
+    assert.equal(
+      variantBody[1],
+      variantReturns[0],
+      `${sourcePath} hosted action variant must return immediately after its locked mapping initializer`,
+    );
     assert.match(variant, /z\.literal\(mapping\.continuationAllowed\)/);
     assert.match(variant, /mapping\.questionPacket/);
     const fingerprintSchema = exactSchemaDefinition(
@@ -4507,6 +4669,10 @@ function checkpointHelperSemanticDescriptor(
       replayAwareServiceSource,
       `${sourcePath} replay-aware service`,
       expectedReplayHelperDigests,
+    );
+    assertCheckpointWriterCallChain(
+      replayAwareServiceSource,
+      `${sourcePath} replay-aware service`,
     );
   } else {
     assert.fail(`${sourcePath} contains an unmodeled local mixed-packet preflight`);

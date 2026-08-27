@@ -133,7 +133,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       };
     }
 
-    async function recordOneApplyBatchCheckpoint() {
+    async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {
       const checkpointMapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[
         checkpoint.actions[0]!.actionCode
       ];
@@ -181,6 +181,22 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       if (hasQuestions && hasNonQuestions) {
         throw new Error('Question checkpoints cannot mix question and non-question actions.');
       }
+    }
+
+    async function recordApplyBatchCheckpoints(queryable, input) {
+      const results = await Promise.all(input.checkpoints.map(async (checkpoint) => {
+        try {
+          return await recordOneApplyBatchCheckpoint(queryable, {
+            userId: input.userId,
+            batchId: input.batchId,
+            leaseToken: input.leaseToken,
+            now: input.now,
+          }, checkpoint);
+        } catch (error) {
+          throw error;
+        }
+      }));
+      return { results };
     }
   `;
   const helperNames = [
@@ -529,6 +545,44 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     }),
     /must not contain unmodeled executable statements/,
   );
+  const swappedRefinementParameters = helperSource.replace(
+    '.superRefine((checkpoint, context) => {',
+    '.superRefine((context, checkpoint) => {',
+  );
+  assert.notEqual(swappedRefinementParameters, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: swappedRefinementParameters,
+      expectedHostedDigests: Object.fromEntries(helperNames.map((name) => [
+        name,
+        activeFunctionDigest(swappedRefinementParameters, name, 'swapped refinement parameter fixture'),
+      ])),
+    }),
+    /exact checkpoint and context parameters/,
+  );
+  const actionVariantWithInitializer = helperSource.replace(
+    'const applyCheckpointActionVariant = (actionCode) => z.object({',
+    'const applyCheckpointActionVariant = (actionCode) => {\n  const mapping = { continuationAllowed: true };\n  return z.object({',
+  ).replace(
+    '});\nconst applyCheckpointActionSchema',
+    '});\n};\nconst applyCheckpointActionSchema',
+  );
+  assert.notEqual(actionVariantWithInitializer, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(actionVariantWithInitializer, name, 'action variant initializer fixture'),
+        ])),
+      },
+      localApplySource: actionVariantWithInitializer,
+    }),
+    /local action variant must contain only its locked return/,
+  );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
@@ -545,6 +599,26 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       `,
     }),
     /must have exactly one active top-level variable or function definition|checkpoint execution must use only its locked pre-replay computations|mixed-packet classifiers must use the locked action mappings|only after exact replay lookup/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {',
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint, loadStoredApplyBatchCheckpoint = bypassReplayLookup) {',
+      ),
+    }),
+    /exact queryable, input, and checkpoint parameters/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {',
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {\n      function loadStoredApplyBatchCheckpoint() { return []; }',
+      ),
+    }),
+    /must not shadow its locked replay helper bindings/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
@@ -665,6 +739,26 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       ),
     }),
     /must directly throw the locked rejection/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'return await recordOneApplyBatchCheckpoint(queryable, {',
+        'return await recordAlternateApplyBatchCheckpoint(queryable, {',
+      ),
+    }),
+    /directly await the locked recordOneApplyBatchCheckpoint call/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'try {\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+        'try {\n          const recordOneApplyBatchCheckpoint = recordAlternateApplyBatchCheckpoint;\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+      ),
+    }),
+    /must not shadow the locked recordOneApplyBatchCheckpoint binding/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({

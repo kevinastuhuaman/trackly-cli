@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const { createHash } = require('node:crypto');
 const { StringDecoder } = require('node:string_decoder');
 
 const ACCESS_STATES = new Set([
@@ -169,6 +170,8 @@ const PHASE_FIELDS = {
     'truthCertificationAttestationId',
     'truthCertificationDependencyHash',
     'truthCertificationExpiresAt',
+    'truthCertificationMemberRuns',
+    'truthCertificationRunSetHash',
     'truthCertificationStatus',
     'submitActivated',
     'reviewTabPreserved',
@@ -260,11 +263,73 @@ function requirePositiveDecimalId(errors, value, field) {
 }
 
 function requireFutureIsoDateTime(errors, value, field, validationTimeMs) {
-  const parsedTime = typeof value === 'string' ? Date.parse(value) : Number.NaN;
-  if (Number.isNaN(parsedTime)) {
+  const canonicalPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const parsedTime = typeof value === 'string' && canonicalPattern.test(value)
+    ? Date.parse(value)
+    : Number.NaN;
+  if (Number.isNaN(parsedTime) || new Date(parsedTime).toISOString() !== value) {
     errors.push(`${field} must be an ISO-8601 date-time`);
   } else if (parsedTime <= validationTimeMs) {
     errors.push(`${field} must be later than validation time`);
+  }
+}
+
+function canonicalJson(value) {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+    .join(',')}}`;
+}
+
+function validateTruthCertificationMemberRuns(errors, memberRuns, receipt) {
+  if (!Array.isArray(memberRuns) || memberRuns.length < 1 || memberRuns.length > 100) {
+    errors.push('truthCertificationMemberRuns must contain 1 to 100 member bindings');
+    return;
+  }
+  const allowedFields = ['memberId', 'runId', 'memberVersion', 'inspectionEpoch'];
+  const normalized = [];
+  for (const member of memberRuns) {
+    if (!member || typeof member !== 'object' || Array.isArray(member)
+        || Object.keys(member).length !== allowedFields.length
+        || Object.keys(member).some((field) => !allowedFields.includes(field))) {
+      errors.push('truthCertificationMemberRuns entries must contain only memberId, runId, memberVersion, and inspectionEpoch');
+      return;
+    }
+    if (!Number.isSafeInteger(member.memberId) || member.memberId < 1
+        || !Number.isSafeInteger(member.runId) || member.runId < 1
+        || !Number.isSafeInteger(member.memberVersion) || member.memberVersion < 1
+        || !Number.isSafeInteger(member.inspectionEpoch) || member.inspectionEpoch < 0) {
+      errors.push('truthCertificationMemberRuns entries contain an invalid identifier, version, or epoch');
+      return;
+    }
+    normalized.push({
+      memberId: member.memberId,
+      runId: member.runId,
+      memberVersion: member.memberVersion,
+      inspectionEpoch: member.inspectionEpoch,
+    });
+  }
+  normalized.sort((left, right) => left.memberId - right.memberId || left.runId - right.runId);
+  if (new Set(normalized.map((member) => member.memberId)).size !== normalized.length) {
+    errors.push('truthCertificationMemberRuns memberId values must be unique');
+  }
+  const runSetHash = createHash('sha256').update(canonicalJson(normalized)).digest('hex');
+  if (runSetHash !== receipt.truthCertificationRunSetHash) {
+    errors.push('truthCertificationMemberRuns must match truthCertificationRunSetHash');
+  }
+  const currentMemberMatches = normalized.filter((member) => (
+    member.memberId === receipt.memberId
+    && member.runId === receipt.runId
+    && member.memberVersion === receipt.checkpointMemberVersion
+    && member.inspectionEpoch === receipt.inspectionEpoch
+  ));
+  if (currentMemberMatches.length !== 1) {
+    errors.push('truth certification must cover the current member, run, checkpoint version, and inspection epoch');
   }
 }
 
@@ -589,6 +654,7 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
     'truthCertificationAttestationId',
     'truthCertificationDependencyHash',
     'truthCertificationExpiresAt',
+    'truthCertificationRunSetHash',
     'truthCertificationStatus',
   ];
   validateCurrentLineage(
@@ -653,6 +719,12 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
     'truthCertificationExpiresAt',
     validationTimeMs,
   );
+  requireFingerprint(
+    errors,
+    receipt.truthCertificationRunSetHash,
+    'truthCertificationRunSetHash',
+  );
+  validateTruthCertificationMemberRuns(errors, receipt.truthCertificationMemberRuns, receipt);
   if (!['recorded', 'replayed'].includes(receipt.truthCertificationStatus)) {
     errors.push('truthCertificationStatus must be recorded or replayed');
   }
