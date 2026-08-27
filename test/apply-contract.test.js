@@ -67,6 +67,8 @@ test('coordinated hosted bindings resolve to unshadowed reviewed imports', () =>
     'z.object = () => ({});',
     'delete z.object;',
     'const schemaLibrary = z; schemaLibrary.object = () => ({});',
+    'const mutate = Object.assign; mutate(z, { object: () => ({}) });',
+    'const readSchema = () => z; readSchema().object = () => ({});',
   ]) {
     assert.throws(() => assertUnshadowedImportBinding(
       `${reviewedSource}\n${mutation}`,
@@ -1716,6 +1718,10 @@ test('checkpoint route lock binds the live endpoint to the reviewed bulk writer'
     "const alternateRouter = router; alternateRouter.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
     "let alternateRouter; alternateRouter = router; alternateRouter.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
     "router[method]('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "const holder = { router }; holder.router.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "const holder = [router]; holder[0].post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "installCheckpointRoutes(router);",
+    "const getRouter = () => router; getRouter().post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
   ]) {
     assert.throws(
       () => assertCheckpointRouteCallChain(

@@ -3037,6 +3037,14 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
   const earlierStatements = program.body.slice(0, canonicalRouteIndex);
   const routerAliases = new Set(['router']);
   const routerAliasStatements = new Set();
+  function containsRouterAlias(node) {
+    const value = unwrapTransparentExpression(node);
+    if (value?.type === 'Identifier') return routerAliases.has(value.name);
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, child]) => (
+      !AST_METADATA_FIELDS.has(key) && containsRouterAlias(child)
+    ));
+  }
   let discoveredRouterAlias = true;
   while (discoveredRouterAlias) {
     discoveredRouterAlias = false;
@@ -3056,9 +3064,29 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
           routerAliases.add(target.name);
           routerAliasStatements.add(statement);
           discoveredRouterAlias = true;
+        } else if (containsRouterAlias(initializer)) {
+          routerAliasStatements.add(statement);
         }
       }
     }
+  }
+  for (const statement of earlierStatements) {
+    function findRouterEscape(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) findRouterEscape(child);
+        return;
+      }
+      if ((node.type === 'CallExpression' || node.type === 'OptionalCallExpression')
+          && node.arguments.some(containsRouterAlias)) {
+        routerAliasStatements.add(statement);
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        findRouterEscape(child);
+      }
+    }
+    findRouterEscape(statement);
   }
   function routeRegistration(statement) {
     const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
@@ -3423,7 +3451,8 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
   }
   function isImportedMember(node) {
     const value = unwrapTransparentExpression(node);
-    return value?.type === 'MemberExpression' && isImportedObjectReference(value.object);
+    return (value?.type === 'MemberExpression' || value?.type === 'OptionalMemberExpression')
+      && (isImportedObjectReference(value.object) || isImportedMember(value.object));
   }
   function mutationCallName(node) {
     const callee = unwrapTransparentExpression(node?.callee);
@@ -3472,6 +3501,7 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
       ].includes(mutationCall) && isImportedObjectReference(node.arguments[0])) {
         forbiddenBindings.push(node);
       }
+      if (node.arguments.some(isImportedObjectReference)) forbiddenBindings.push(node);
     }
     for (const [key, child] of Object.entries(node)) {
       if (AST_METADATA_FIELDS.has(key)) continue;
@@ -3479,6 +3509,27 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
     }
   }
   visit(ast);
+  function auditImportedBindingEscapes(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditImportedBindingEscapes(child, parent, parentKey);
+      return;
+    }
+    if (node.type === 'Identifier' && bindingAliases.has(node.name)) {
+      const importBinding = parent?.type === 'ImportSpecifier'
+        || parent?.type === 'ImportDefaultSpecifier'
+        || parent?.type === 'ImportNamespaceSpecifier';
+      const reviewedMemberRead = (parent?.type === 'MemberExpression'
+          || parent?.type === 'OptionalMemberExpression')
+        && parentKey === 'object';
+      if (!importBinding && !reviewedMemberRead) forbiddenBindings.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      auditImportedBindingEscapes(child, node, key);
+    }
+  }
+  auditImportedBindingEscapes(ast);
   assert.equal(
     forbiddenBindings.length,
     0,
