@@ -3096,8 +3096,21 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
       : null;
     const method = staticMemberName(callee);
     if (receiver?.type === 'Identifier' && routerAliases.has(receiver.name)) {
+      if (method === 'param') return { method, pathArgument: call.arguments[0] };
       if (method !== null && !['post', 'all', 'use'].includes(method)) return null;
       return { method: method ?? 'use', pathArgument: call.arguments[0] };
+    }
+    if (method === 'call' && receiver?.type === 'MemberExpression') {
+      const indirectOwner = unwrapTransparentExpression(receiver.object);
+      const indirectMethod = staticMemberName(receiver);
+      const thisArgument = unwrapTransparentExpression(call.arguments[0]);
+      if (indirectOwner?.type === 'Identifier'
+          && routerAliases.has(indirectOwner.name)
+          && ['post', 'all', 'use'].includes(indirectMethod)
+          && thisArgument?.type === 'Identifier'
+          && routerAliases.has(thisArgument.name)) {
+        return { method: indirectMethod, pathArgument: call.arguments[1] };
+      }
     }
     const chainedMethods = [];
     let chainedCall = call;
@@ -3168,6 +3181,10 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
     const registration = routeRegistration(statement);
     if (!registration) return false;
     if (JSON.stringify(canonicalSchemaAst(statement)) === reviewedApplyMiddlewareAst) return false;
+    if (registration.method === 'param') {
+      return registration.pathArgument?.type !== 'StringLiteral'
+        || registration.pathArgument.value === 'id';
+    }
     if (registration.pathArgument?.type !== 'StringLiteral') return true;
     return staticRouteCovers(registration.pathArgument.value, registration.method);
   });
@@ -3631,6 +3648,13 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
       && isGlobalReference(member.object)
       && (propertyName === intrinsicName || (member.computed && propertyName === null));
   }
+  function isIntrinsicObjectPath(node) {
+    const value = unwrapStaticExpression(node);
+    if (value?.type === 'Identifier' && value.name === intrinsicName) return true;
+    if (isGlobalIntrinsicMember(value)) return true;
+    return (value?.type === 'MemberExpression' || value?.type === 'OptionalMemberExpression')
+      && isIntrinsicObjectPath(value.object);
+  }
   function callName(node) {
     const callee = unwrapStaticExpression(node?.callee);
     if (callee?.type !== 'MemberExpression' && callee?.type !== 'OptionalMemberExpression') return null;
@@ -3658,9 +3682,19 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
     }
     if (node.type === 'AssignmentExpression' && isGlobalIntrinsicMember(node.left)) forbiddenBindings.push(node);
     if (node.type === 'UpdateExpression' && isGlobalIntrinsicMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'AssignmentExpression'
+        && (node.left?.type === 'MemberExpression' || node.left?.type === 'OptionalMemberExpression')
+        && isIntrinsicObjectPath(node.left.object)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && isIntrinsicObjectPath(node.argument.object)) forbiddenBindings.push(node);
     if (node.type === 'UnaryExpression'
         && node.operator === 'delete'
         && isGlobalIntrinsicMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && isIntrinsicObjectPath(node.argument.object)) forbiddenBindings.push(node);
     if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
       const mutationCall = callName(node);
       if (['Object.defineProperty', 'Reflect.defineProperty', 'Reflect.set'].includes(mutationCall)
@@ -3674,6 +3708,17 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
       if (mutationCall === 'Object.assign'
           && isGlobalReference(node.arguments[0])
           && node.arguments.slice(1).some(objectDefinesIntrinsic)) forbiddenBindings.push(node);
+      if ([
+        'Object.assign',
+        'Object.defineProperty',
+        'Object.defineProperties',
+        'Object.setPrototypeOf',
+        'Reflect.defineProperty',
+        'Reflect.set',
+        'Reflect.setPrototypeOf',
+      ].includes(mutationCall) && isIntrinsicObjectPath(node.arguments[0])) {
+        forbiddenBindings.push(node);
+      }
     }
     for (const [key, child] of Object.entries(node)) {
       if (AST_METADATA_FIELDS.has(key)) continue;
@@ -5150,6 +5195,13 @@ function checkpointHelperSemanticDescriptor(
     sourcePath,
     declarationStatements,
   );
+  for (const protectedDefinition of [
+    'applyCheckpointActionVariant',
+    'applyCheckpointActionSchema',
+    'applyCheckpointSchema',
+  ]) {
+    assertNamedDefinitionNotMutatedOrAliased(source, protectedDefinition, sourcePath);
+  }
   assertExactParameters(
     variantAst.params,
     '(actionCode) => null',
@@ -5865,6 +5917,100 @@ function activeNamedDefinitionAst(source, name, sourcePath, declarationStatement
     `${name} in ${sourcePath} must never be assigned or updated after its locked definition`,
   );
   return matches[0];
+}
+
+function assertNamedDefinitionNotMutatedOrAliased(source, name, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const violations = [];
+  function rootedAtBinding(node) {
+    const value = unwrapTransparentExpression(node);
+    if (value?.type === 'Identifier') return value.name === name;
+    return (value?.type === 'MemberExpression' || value?.type === 'OptionalMemberExpression')
+      && rootedAtBinding(value.object);
+  }
+  function staticCallName(node) {
+    const callee = unwrapTransparentExpression(node?.callee);
+    const receiver = callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(callee.object)
+      : null;
+    const member = staticMemberName(callee);
+    return receiver?.type === 'Identifier' && member ? `${receiver.name}.${member}` : null;
+  }
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'VariableDeclarator'
+        && node.id?.type === 'Identifier'
+        && node.id.name !== name
+        && rootedAtBinding(node.init)) violations.push(node);
+    if (node.type === 'AssignmentExpression'
+        && node.left?.type === 'Identifier'
+        && node.left.name !== name
+        && rootedAtBinding(node.right)) violations.push(node);
+    if (node.type === 'AssignmentExpression'
+        && (node.left?.type === 'MemberExpression' || node.left?.type === 'OptionalMemberExpression')
+        && rootedAtBinding(node.left.object)) violations.push(node);
+    if (node.type === 'UpdateExpression'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && rootedAtBinding(node.argument.object)) violations.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && rootedAtBinding(node.argument.object)) violations.push(node);
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      if ([
+        'Object.assign',
+        'Object.defineProperty',
+        'Object.defineProperties',
+        'Object.setPrototypeOf',
+        'Reflect.defineProperty',
+        'Reflect.set',
+        'Reflect.setPrototypeOf',
+      ].includes(staticCallName(node)) && rootedAtBinding(node.arguments[0])) {
+        violations.push(node);
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      visit(child);
+    }
+  }
+  visit(ast);
+  function auditReferences(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditReferences(child, parent, parentKey);
+      return;
+    }
+    if (node.type === 'Identifier' && node.name === name) {
+      const declarationId = parent?.type === 'VariableDeclarator' && parentKey === 'id';
+      const directVariantCall = name === 'applyCheckpointActionVariant'
+        && parent?.type === 'CallExpression'
+        && parentKey === 'callee';
+      const reviewedArgument = parent?.type === 'CallExpression'
+        && parent.arguments.includes(node)
+        && (
+          ((name === 'applyCheckpointActionSchema' || name === 'applyCheckpointSchema')
+            && babelCalleeName(parent.callee) === 'z.array')
+          || (name === 'applyCheckpointActionVariant'
+            && babelCalleeName(parent.callee)?.endsWith('.map'))
+        );
+      if (!declarationId && !directVariantCall && !reviewedArgument) violations.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      auditReferences(child, node, key);
+    }
+  }
+  auditReferences(ast);
+  assert.equal(
+    violations.length,
+    0,
+    `${name} in ${sourcePath} must not be mutated, aliased, or escaped after its locked definition`,
+  );
 }
 
 function typescriptConstArrayValues(source, name, sourcePath) {

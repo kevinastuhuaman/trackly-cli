@@ -313,6 +313,13 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   };
 
   assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: `${fixture.hostedApplySource}\n(applyCheckpointSchema as any)._def.effect.refinement = () => {};`,
+    }),
+    /applyCheckpointSchema .* must not be mutated, aliased, or escaped/,
+  );
   for (const sourceKey of ['localApplySource', 'hostedApplySource', 'hostedBatchServiceSource']) {
     assert.throws(
       () => assertCoordinatedCheckpointHelperSemantics({
@@ -333,6 +340,8 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     'delete globalThis.Set;',
     "const runtimeGlobal = globalThis; Object.defineProperty(runtimeGlobal, 'Set', { value: class FakeSet {} });",
     'let runtimeGlobal; runtimeGlobal = globalThis; runtimeGlobal.Set = class FakeSet {};',
+    'Set.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
+    "Object.defineProperty(Set.prototype, 'add', { value(value) { this[value] = true; return this; } });",
   ]) {
     assert.throws(
       () => assertCoordinatedCheckpointHelperSemantics({
@@ -1722,6 +1731,8 @@ test('checkpoint route lock binds the live endpoint to the reviewed bulk writer'
     "const holder = [router]; holder[0].post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
     "installCheckpointRoutes(router);",
     "const getRouter = () => router; getRouter().post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "router.post.call(router, '/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "router.param('id', (_req, res) => res.sendStatus(403));",
   ]) {
     assert.throws(
       () => assertCheckpointRouteCallChain(
