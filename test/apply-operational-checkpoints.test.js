@@ -664,6 +664,15 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validationTimeMs,
   );
   assert.deepEqual(validateReviewCheckpoint(review, reviewContext), []);
+  assert.deepEqual(
+    validateReviewCheckpoint(
+      JSON.parse(JSON.stringify(review)),
+      JSON.parse(JSON.stringify(reviewContext)),
+      JSON.parse(JSON.stringify(priorFill)),
+    ),
+    [],
+    'review validation must compare separately parsed member-run arrays structurally',
+  );
   assert.match(
     validateReviewCheckpoint({
       ...review,

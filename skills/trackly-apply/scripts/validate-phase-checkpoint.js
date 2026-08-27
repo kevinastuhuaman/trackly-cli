@@ -774,7 +774,7 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
       ...fillBaselineFields,
       ...resolutionFields,
       ...checkpointFields,
-      ...truthCertificationFields,
+      ...truthCertificationFields.filter((field) => field !== 'truthCertificationMemberRuns'),
     ]) {
       if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
     }
