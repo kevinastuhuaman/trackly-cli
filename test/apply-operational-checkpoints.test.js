@@ -624,11 +624,19 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointActionIdsFingerprint: 'e'.repeat(64),
   };
   const priorFill = { receipt: fill, expectedContext: fillContext };
+  const reviewValidationTimeMs = Date.parse('2026-08-27T02:00:00.000Z');
   const validateReviewCheckpoint = (
     receiptCandidate,
     contextCandidate,
     fillEvidence = priorFill,
-  ) => validateCheckpoint('review', receiptCandidate, contextCandidate, fillEvidence);
+    validationTimeMs = reviewValidationTimeMs,
+  ) => validateCheckpoint(
+    'review',
+    receiptCandidate,
+    contextCandidate,
+    fillEvidence,
+    validationTimeMs,
+  );
   assert.deepEqual(validateReviewCheckpoint(review, reviewContext), []);
   assert.match(
     validateReviewCheckpoint({
@@ -646,6 +654,26 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       truthCertificationDependencyHash: 'b'.repeat(64),
     }, reviewContext).join('\n'),
     /truthCertificationDependencyHash must match expectedContext/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationExpiresAt: '2026-08-27T01:59:59.999Z',
+    }, {
+      ...reviewContext,
+      truthCertificationExpiresAt: '2026-08-27T01:59:59.999Z',
+    }).join('\n'),
+    /truthCertificationExpiresAt must be later than validation time/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationExpiresAt: '2026-08-27T02:00:00.000Z',
+    }, {
+      ...reviewContext,
+      truthCertificationExpiresAt: '2026-08-27T02:00:00.000Z',
+    }).join('\n'),
+    /truthCertificationExpiresAt must be later than validation time/,
   );
   assert.match(
     validateReviewCheckpoint(review, reviewContext, null).join('\n'),

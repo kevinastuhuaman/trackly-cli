@@ -259,9 +259,12 @@ function requirePositiveDecimalId(errors, value, field) {
   }
 }
 
-function requireIsoDateTime(errors, value, field) {
-  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+function requireFutureIsoDateTime(errors, value, field, validationTimeMs) {
+  const parsedTime = typeof value === 'string' ? Date.parse(value) : Number.NaN;
+  if (Number.isNaN(parsedTime)) {
     errors.push(`${field} must be an ISO-8601 date-time`);
+  } else if (parsedTime <= validationTimeMs) {
+    errors.push(`${field} must be later than validation time`);
   }
 }
 
@@ -562,7 +565,7 @@ function validateFill(receipt, expectedContext) {
   return errors;
 }
 
-function validateReview(receipt, expectedContext, priorFill) {
+function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
   const errors = [];
   const fillBaselineFields = [
     'profileRevision',
@@ -644,10 +647,11 @@ function validateReview(receipt, expectedContext, priorFill) {
     receipt.truthCertificationDependencyHash,
     'truthCertificationDependencyHash',
   );
-  requireIsoDateTime(
+  requireFutureIsoDateTime(
     errors,
     receipt.truthCertificationExpiresAt,
     'truthCertificationExpiresAt',
+    validationTimeMs,
   );
   if (!['recorded', 'replayed'].includes(receipt.truthCertificationStatus)) {
     errors.push('truthCertificationStatus must be recorded or replayed');
@@ -870,14 +874,17 @@ const VALIDATORS = {
   reconciliation: validateReconciliation,
 };
 
-function validateCheckpoint(phase, receipt, expectedContext, priorFill) {
+function validateCheckpoint(phase, receipt, expectedContext, priorFill, validationTimeMs = Date.now()) {
   if (!Object.hasOwn(VALIDATORS, phase)) return [`unknown phase: ${phase}`];
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return ['receipt must be a JSON object'];
   if (phase !== 'review' && priorFill !== undefined) return ['priorFill is permitted only for review'];
   const unexpectedFields = Object.keys(receipt)
     .filter((field) => !PHASE_FIELDS[phase].has(field))
     .map(() => 'receipt contains an unexpected field');
-  return [...unexpectedFields, ...VALIDATORS[phase](receipt, expectedContext, priorFill)];
+  return [
+    ...unexpectedFields,
+    ...VALIDATORS[phase](receipt, expectedContext, priorFill, validationTimeMs),
+  ];
 }
 
 async function readReceiptInput(stream) {

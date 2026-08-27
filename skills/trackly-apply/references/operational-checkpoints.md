@@ -217,7 +217,8 @@ Required fields:
   `truthCertificationDependencyHash`, `truthCertificationExpiresAt`, and
   `truthCertificationStatus` (`recorded` or `replayed`) in both the receipt and
   authoritative `expectedContext` to the value-free backend certification
-  result; and
+  result. The certification expiry must still be later than local validation
+  time; and
 - bind `checkpointAction: review/manual_submit` and
   `continuationAllowed: false` in both the receipt and `expectedContext` to the
   exact backend-accepted action result; a
