@@ -305,6 +305,24 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       /Set .* must be the unshadowed intrinsic/,
     );
   }
+  for (const mutation of [
+    'globalThis.Set = class FakeSet {};',
+    "Object.defineProperty(globalThis, 'Set', { value: class FakeSet {} });",
+    "Reflect.defineProperty(globalThis, 'Set', { value: class FakeSet {} });",
+    "Reflect.set(globalThis, 'Set', class FakeSet {});",
+    "Object.defineProperties(globalThis, { Set: { value: class FakeSet {} } });",
+    'Object.assign(globalThis, { Set: class FakeSet {} });',
+    'delete globalThis.Set;',
+    "const runtimeGlobal = globalThis; Object.defineProperty(runtimeGlobal, 'Set', { value: class FakeSet {} });",
+  ]) {
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        hostedApplySource: `${mutation}\n${fixture.hostedApplySource}`,
+      }),
+      /Set .* must be the unshadowed intrinsic/,
+    );
+  }
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,

@@ -3396,6 +3396,7 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
 function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
   const ast = parseFullSource(source, sourcePath);
   const forbiddenBindings = [];
+  const globalAliases = new Set(['globalThis', 'global']);
   function patternContainsName(pattern) {
     if (!pattern) return false;
     if (pattern.type === 'Identifier') return pattern.name === intrinsicName;
@@ -3435,6 +3436,97 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
     }
   }
   visit(ast);
+  let discoveredAlias = true;
+  while (discoveredAlias) {
+    discoveredAlias = false;
+    function discoverGlobalAliases(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) discoverGlobalAliases(child);
+        return;
+      }
+      if (node.type === 'VariableDeclarator'
+          && node.id?.type === 'Identifier'
+          && globalAliases.has(unwrapStaticExpression(node.init)?.name)
+          && !globalAliases.has(node.id.name)) {
+        globalAliases.add(node.id.name);
+        discoveredAlias = true;
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        discoverGlobalAliases(child);
+      }
+    }
+    discoverGlobalAliases(ast);
+  }
+  function staticPropertyName(member) {
+    if (member?.type !== 'MemberExpression' && member?.type !== 'OptionalMemberExpression') return null;
+    if (!member.computed && member.property?.type === 'Identifier') return member.property.name;
+    if (member.computed && (member.property?.type === 'StringLiteral' || member.property?.type === 'Literal')) {
+      return member.property.value;
+    }
+    return null;
+  }
+  function isGlobalReference(node) {
+    return unwrapStaticExpression(node)?.type === 'Identifier'
+      && globalAliases.has(unwrapStaticExpression(node).name);
+  }
+  function isGlobalIntrinsicMember(node) {
+    const member = unwrapStaticExpression(node);
+    return (member?.type === 'MemberExpression' || member?.type === 'OptionalMemberExpression')
+      && isGlobalReference(member.object)
+      && staticPropertyName(member) === intrinsicName;
+  }
+  function callName(node) {
+    const callee = unwrapStaticExpression(node?.callee);
+    if (callee?.type !== 'MemberExpression' && callee?.type !== 'OptionalMemberExpression') return null;
+    if (callee.object?.type !== 'Identifier') return null;
+    const property = staticPropertyName(callee);
+    return property === null ? null : `${callee.object.name}.${property}`;
+  }
+  function staticString(node) {
+    const value = unwrapStaticExpression(node);
+    return value?.type === 'StringLiteral' || value?.type === 'Literal' ? value.value : null;
+  }
+  function objectDefinesIntrinsic(node) {
+    const value = unwrapStaticExpression(node);
+    return value?.type === 'ObjectExpression' && value.properties.some((property) => {
+      if (property.type !== 'ObjectProperty' && property.type !== 'Property') return true;
+      const key = property.computed ? staticString(property.key) : property.key?.name ?? property.key?.value;
+      return key === null || key === intrinsicName;
+    });
+  }
+  function auditGlobalMutations(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditGlobalMutations(child);
+      return;
+    }
+    if (node.type === 'AssignmentExpression' && isGlobalIntrinsicMember(node.left)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression' && isGlobalIntrinsicMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && isGlobalIntrinsicMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      const mutationCall = callName(node);
+      if (['Object.defineProperty', 'Reflect.defineProperty', 'Reflect.set'].includes(mutationCall)
+          && isGlobalReference(node.arguments[0])
+          && (staticString(node.arguments[1]) === intrinsicName || staticString(node.arguments[1]) === null)) {
+        forbiddenBindings.push(node);
+      }
+      if (mutationCall === 'Object.defineProperties'
+          && isGlobalReference(node.arguments[0])
+          && objectDefinesIntrinsic(node.arguments[1])) forbiddenBindings.push(node);
+      if (mutationCall === 'Object.assign'
+          && isGlobalReference(node.arguments[0])
+          && node.arguments.slice(1).some(objectDefinesIntrinsic)) forbiddenBindings.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      auditGlobalMutations(child);
+    }
+  }
+  auditGlobalMutations(ast);
   assert.equal(
     forbiddenBindings.length,
     0,
