@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-08-24
+
+### Added
+
+- Expanded Trackly Apply skill 4.7.1 with value-free whole-form accounting,
+  deterministic answer-retrieval evidence, complete education and employment
+  reconciliation, and a seven-stage resume audit before review handoff.
+- Added independent employer, Trackly, and browser handoff states so an agent
+  cannot claim review readiness when the user-visible tab is unverified.
+
+### Fixed
+
+- Bound every Apply checkpoint action to its canonical continuation value in
+  the local MCP schema, including the non-continuing manual-review handoff.
+- Made oversized local checkpoint receipts fail immediately instead of
+  continuing to consume the input stream.
+
 ## [0.17.0] - 2026-08-21
 
 ### Added

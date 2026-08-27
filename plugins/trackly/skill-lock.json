@@ -3,12 +3,12 @@
   "adaptationVersion": "1.0.0",
   "source": {
     "path": "skills/trackly-apply",
-    "skillVersion": "4.7.0",
-    "treeSha256": "4c860ee8feaf3c939a40c513e9100b669b36fc0d0c3f4f26674eadebd599db34"
+    "skillVersion": "4.7.1",
+    "treeSha256": "2816d243ec221cf3a6557db03928812e1966a15364093b65c513857c0d076acf"
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "87e062e2ec1b969135198add9d6d91a95b61797c15561c392608ce2b0fbfc2eb"
+    "treeSha256": "5f3cf1ca22e4d0eadf7a700e2a8299072977de854c094ceb4c00375addb265fa"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -115,14 +115,15 @@
     },
     "pluginServerSha256": "d6e6c08e927416d546a6c6219e4b1ccac8b0d5d002266a62fff8f8651e7dc565",
     "pluginScopesSha256": "2f2eac1c723fec4c902918b97ca9234a10a620cb644d6cd4fc72c8bd1602c051",
-    "jobBriefServiceSha256": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
+    "jobBriefServiceSha256": "e8dad5884d6647176c780bf7e87bdf53f24216a7580b0980bff1f1faad6ecb91",
     "backendUiRedirectSha256": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceModeSha256": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBindingSha256": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
+    "databaseBindingSha256": "510123c5846db1899960903ecab37c9cf446f7215451149e863f344b4672a93a",
+    "databasePoolPolicySha256": "17c716980598100cfd91aa0630f93ee967652daf256bfaeaffe4b37802e98928",
     "reviewIdentitySha256": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptionsSha256": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
     "authRateLimitSha256": "6929621038a85cc53da3fe239851de693148cb9fb917504ac04bb4cac44e5e17",
-    "applicationProfileServiceSha256": "7edb5becbd24ae8a89b31df4e71faa8aa8a882557bcf4449583182aba74a4f9d",
+    "applicationProfileServiceSha256": "db9c8bb6ef058620eb7a3f4311b3f14cc27352647b4a59f02cca112758d85ffe",
     "schemaSha256": {
       "SAFE_IDEMPOTENCY_KEY": "046859665306e5aeaf57032c76268934e1b98c95d4c17a88434062c9b6a4547a",
       "SAFE_CODE": "a35176c6c3f6ee563d4b6f6f68e4c546d8b03b03915d37bf55dd5a7011927574",

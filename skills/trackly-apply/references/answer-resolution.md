@@ -32,6 +32,23 @@ revision, schema key, scope, authority class, derivation rule when any,
 expected type, and committed-control receipt. Never send the answer value in
 an observation.
 
+## Typed answer-memory lookup
+
+Before asking, query every applicable scope in this narrow-to-broad order:
+run-only live choice, exact question and version, exact office, jurisdiction,
+company, provider, then global. A candidate is reusable only when its canonical
+intent, type, sensitivity, question version when applicable, and permitted
+scope all match. The first compatible narrower answer wins; an answer never
+flows to a broader scope without explicit user confirmation.
+
+Question-ontology aliases, semantic retrieval, and form-schema history may
+identify candidate canonical intents, but they are not answer authority. Exact
+typed profile or contextual state must still resolve the value. Fail closed to
+`missing_fact`, `live_consent`, or `forbidden_inference` when intent, type,
+scope, version, or confidence is ambiguous. Record only per-scope counts and a
+lowercase SHA-256 over value-free lookup inputs and decisions; never hash or
+persist labels, answers, page text, or private values in the checkpoint.
+
 ## Source precedence
 
 The current profile revision is the only reusable answer authority. A
@@ -39,6 +56,14 @@ transcript or conversation, screenshot, parser output, browser autocomplete,
 or cached value is never authority. Resume parsing is a suggestion only: it may
 help identify a schema key, but the parser never becomes authority and never
 overwrites an answered profile value or a user-edited control.
+
+For a frozen batch, distinguish its frozen profile revision (the audit and
+certification baseline) from the current bounded snapshot projection used to
+resolve visible answers. A later scoped answer may legitimately appear in the
+current projection while the frozen baseline number remains unchanged. Do not
+treat that difference as corruption, do not silently substitute the stale
+baseline value, and do not mutate until the current work receipt authorizes the
+projection and certification behavior.
 
 Contact details and addresses must resolve from exact current profile keys.
 Verify their live committed state even when the browser initially displays a

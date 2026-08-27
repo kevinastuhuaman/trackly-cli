@@ -20,6 +20,27 @@ Use the compact execution snapshot as authority. Give a bounded next-update esti
 Every handoff names the browser surface and authoritative funnel. Use the
 matching template; do not improvise internal routing language.
 
+Every operator update also reports three independent state lines:
+
+```text
+Employer application state: not opened / access probed / form reached / partially filled / needs answers / review state prepared / manually submitted / ATS success observed / blocked
+Trackly state: execution + batch + member lifecycle + job state + inspection epoch + profile revision + resume/truth/submission receipts
+Browser state: no known tab / controller-owned / user inventory / visible / durable handoff proven / missing / closure unverified / closed verified
+```
+
+No state in one system implies a state in another. In particular, a Trackly
+`review_ready` member does not prove the employer draft is visible, and a
+visible form does not prove a durable checkpoint. When visibility is
+unverified, say so, preserve the exact binding, and do not claim a review-ready
+handoff or tell the user to submit.
+
+A verified handoff receipt must carry the exact browser-binding hash, a
+value-free evidence fingerprint, and whether the proof came from the adapter's
+exact-tab presentation action, an exact tab-bound user-visible handoff receipt,
+or a durable handoff receipt. A complete tab inventory proves reachability, not
+visibility. Bind those same fields into the validator's expected context; never
+substitute a self-asserted visibility boolean.
+
 ### Recovery
 
 ```text

@@ -1,20 +1,20 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-08-17T08:18:27-07:00",
+  "capturedAt": "2026-08-25T11:19:58-07:00",
   "sourceRuntime": {
-    "commit": "3a12902adb5bb9b7997b2dc32864894df6196f95",
-    "parent": "68436e08a8acb092accbd94315c9409a3f5db4dd",
-    "committedAt": "2026-08-17T07:36:27-07:00"
+    "commit": "e810e2e2955a847aa69c696dbdc16009f346e79b",
+    "parent": "67c2128fe46e16284b1df7b089e661e530670408",
+    "committedAt": "2026-08-25T11:05:50-07:00"
   },
   "mergedRuntime": {
-    "commit": "69f07ebbc7834bd30f9fca1e34f35ea56d332171",
+    "commit": "6becfab7198bf0ba4a0684c70cca30781389ad9a",
     "parents": [
-      "6de47e2e5267488925d188af6ef534582d25dc28",
-      "3a12902adb5bb9b7997b2dc32864894df6196f95"
+      "a24dff06a6bd027ca1d8bed3444e7ac7916dbe15",
+      "e810e2e2955a847aa69c696dbdc16009f346e79b"
     ],
-    "committedAt": "2026-08-17T07:43:25-07:00"
+    "committedAt": "2026-08-25T11:15:19-07:00"
   },
-  "applyContractVersion": "3.7.3",
+  "applyContractVersion": "3.7.6",
   "pluginContractVersion": "1.0.0",
   "publicTools": [
     ["trackly_search_jobs", "6e72672960c93c127fcd38588fcd2444ba59dea169c0d46d300c70201b6aca1a", "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481"],
@@ -93,13 +93,14 @@
   "sourceSha256": {
     "pluginServer": "d6e6c08e927416d546a6c6219e4b1ccac8b0d5d002266a62fff8f8651e7dc565",
     "pluginScopes": "2f2eac1c723fec4c902918b97ca9234a10a620cb644d6cd4fc72c8bd1602c051",
-    "jobBriefService": "a920dd7875696cccb6162210899292ced9b85cf06788f203740c26ef84f9658b",
+    "jobBriefService": "e8dad5884d6647176c780bf7e87bdf53f24216a7580b0980bff1f1faad6ecb91",
     "backendUiRedirect": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceMode": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBinding": "499baa684693db36a12c92e7dfea2101171f1636b994e74765fd6da6aae3a912",
+    "databaseBinding": "510123c5846db1899960903ecab37c9cf446f7215451149e863f344b4672a93a",
+    "databasePoolPolicy": "17c716980598100cfd91aa0630f93ee967652daf256bfaeaffe4b37802e98928",
     "reviewIdentity": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
     "authRateLimit": "6929621038a85cc53da3fe239851de693148cb9fb917504ac04bb4cac44e5e17",
-    "applicationProfileService": "7edb5becbd24ae8a89b31df4e71faa8aa8a882557bcf4449583182aba74a4f9d"
+    "applicationProfileService": "db9c8bb6ef058620eb7a3f4311b3f14cc27352647b4a59f02cca112758d85ffe"
   }
 }

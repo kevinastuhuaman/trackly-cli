@@ -2,6 +2,17 @@
 
 The handoff is valid only when the live application is visibly complete and the final Submit control remains untouched.
 
+Every update reports three independent lines: **Employer application state**
+(what the live form shows), **Trackly state** (execution, member, and job), and
+**Browser state** (presence, preservation, visibility, or verified closure).
+No state in one system implies a state in another. A preserved or
+controller-owned tab with visibility unverified must be labeled that way and
+must not be presented as ready for the user's Submit action.
+Verified visibility must remain bound to the exact browser-binding hash and a
+value-free exact-tab presentation, tab-bound user-visible handoff, or durable
+handoff evidence fingerprint. Inventory membership and a boolean claim alone
+are not visibility proof.
+
 ## Required checks
 
 - Employer, role, requisition when available, and current origin still match the approved work packet.

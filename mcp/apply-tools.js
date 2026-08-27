@@ -18,7 +18,6 @@ const APPLY_BROWSER_SURFACES = APPLY_CONTRACT.constants.applyBrowserSurfaces;
 const APPLY_EXECUTION_ACCESS_CLASSIFICATIONS = APPLY_CONTRACT.constants.applyAccessClassifications;
 const APPLY_EXECUTION_DISPOSITION_SOURCES = APPLY_CONTRACT.constants.applyExecutionDispositionSources;
 const APPLY_SCENARIO_CODES = APPLY_CONTRACT.constants.applyScenarioCodes;
-const APPLY_CHECKPOINT_ACTION_CODES = APPLY_CONTRACT.constants.applyCheckpointActionCodes;
 const APPLY_EXECUTION_MAX_TARGET = APPLY_CONTRACT.constants.applyExecutionMaxTarget;
 const APPLY_EXECUTION_STOP_REASON_CODES = APPLY_CONTRACT.constants.applyExecutionStopReasonCodes;
 const FIXED_APPLY_BATCH_CANCEL_REASON_CODES = APPLY_CONTRACT.constants.fixedApplyBatchCancelReasonCodes;
@@ -35,8 +34,96 @@ const APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST = 20;
 const APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT = 25;
 const APPLY_BATCH_MAX_BULK_MUTATIONS = 20;
 
+const APPLY_CHECKPOINT_CONTINUATION_BY_ACTION = APPLY_CONTRACT.constants
+  .applyCheckpointContinuationByAction;
+const APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION = APPLY_CONTRACT.constants
+  .applyCheckpointLifecycleByAction;
+const APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION = APPLY_CONTRACT.constants
+  .applyCheckpointQuestionPacketByAction;
+const APPLY_CHECKPOINT_ACTION_CODES = APPLY_CONTRACT.constants.applyCheckpointActionCodes;
+const applyCheckpointActionVariant = (actionCode) => z.object({
+  actionCode: z.literal(actionCode),
+  continuationAllowed: z.literal(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION[actionCode]),
+  fieldFingerprint: APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[actionCode]
+    ? z.string().regex(/^[a-f0-9]{64}$/)
+    : z.string().regex(/^[a-f0-9]{64}$/).optional(),
+});
+const applyCheckpointActionSchema = z.discriminatedUnion(
+  'actionCode',
+  APPLY_CHECKPOINT_ACTION_CODES.map(applyCheckpointActionVariant),
+);
+
 const SAFE_OBSERVATION_CODE = /^[a-z0-9][a-z0-9_:-]{0,99}$/;
 const SAFE_IDEMPOTENCY_KEY = /^[\x20-\x7e]+$/;
+const applyCheckpointSchema = z.object({
+  memberId: z.number().int().min(1),
+  runId: z.number().int().min(1),
+  expectedMemberVersion: z.number().int().min(1),
+  expectedInspectionEpoch: z.number().int().min(0),
+  inspectionEpoch: z.number().int().min(0),
+  packetPhase: z.enum(APPLY_CHECKPOINT_PACKET_PHASES).optional(),
+  knownFieldsCommitted: z.boolean(),
+  resolvedActionIds: z.array(z.string().regex(/^[1-9][0-9]*$/))
+    .max(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT).optional(),
+  idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+  actions: z.array(applyCheckpointActionSchema)
+    .min(1).max(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT),
+}).superRefine((checkpoint, context) => {
+  if (checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['inspectionEpoch'],
+      message: 'inspectionEpoch must equal expectedInspectionEpoch',
+    });
+  }
+  if (checkpoint.resolvedActionIds
+    && new Set(checkpoint.resolvedActionIds).size !== checkpoint.resolvedActionIds.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['resolvedActionIds'],
+      message: 'resolvedActionIds must be unique',
+    });
+  }
+  const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);
+  if (new Set(actionCodes.map((code) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION[code])).size !== 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['actions'],
+      message: 'Actions in one inspection checkpoint must share one lifecycle',
+    });
+  }
+  const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);
+  if (hasQuestions && checkpoint.packetPhase === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['packetPhase'],
+      message: 'Question checkpoints require a packet phase',
+    });
+  }
+  if (hasQuestions && !checkpoint.knownFieldsCommitted) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['knownFieldsCommitted'],
+      message: 'Question checkpoints require committed known fields',
+    });
+  }
+  if (!hasQuestions && checkpoint.packetPhase !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['packetPhase'],
+      message: 'packetPhase is only valid for grouped questions',
+    });
+  }
+  const reviewReady = actionCodes.includes('captcha/at_submit')
+    || actionCodes.includes('review/manual_submit');
+  if (reviewReady && !checkpoint.knownFieldsCommitted) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['knownFieldsCommitted'],
+      message: 'Review checkpoints require all known fields to be committed',
+    });
+  }
+});
 const iso3166Alpha2Schema = z.string().regex(/^[A-Za-z]{2}$/).refine(isIso3166Alpha2, {
   message: 'Expected an ISO 3166-1 alpha-2 country code',
 });
@@ -263,7 +350,7 @@ const startApplyRunSchema = z.object({
   }
 });
 
-const APPLY_RELIABILITY_PROMPT = 'Protocol 3.6 / skill 4.7.0 reliability gate: recover active work first. Retain the latest explicit target as hard, prove genuine applicant fields before counting access, obtain approval for the exact accessible jobs before form mutation, fill all deterministic fields before one true-gap question packet, and validate each value-free phase checkpoint. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
+const APPLY_RELIABILITY_PROMPT = 'Protocol 3.6 / skill 4.7.1 reliability gate: recover active work first. Retain the latest explicit target as hard, prove genuine applicant fields before counting access, obtain approval for the exact accessible jobs before form mutation, fill all deterministic fields before one true-gap question packet, and validate each value-free phase checkpoint. Every checkpoint action must use its canonical continuationAllowed value; review/manual_submit, captcha/at_submit, trust/origin_mismatch, and observability/unverifiable_state require false. Fail closed on a rejected checkpoint. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
 
 function registerApplyTools(
   server,
@@ -773,25 +860,10 @@ function registerApplyTools(
     {
       batchId: z.number().int().min(1),
       leaseToken: z.string().min(1).max(1024),
-      checkpoints: z.array(z.object({
-        memberId: z.number().int().min(1),
-        runId: z.number().int().min(1),
-        expectedMemberVersion: z.number().int().min(1),
-        expectedInspectionEpoch: z.number().int().min(0),
-        inspectionEpoch: z.number().int().min(0),
-        packetPhase: z.enum(APPLY_CHECKPOINT_PACKET_PHASES).optional(),
-        knownFieldsCommitted: z.boolean(),
-        resolvedActionIds: z.array(z.string().regex(/^[1-9][0-9]*$/))
-          .max(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT).optional(),
-        idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
-        actions: z.array(z.object({
-          actionCode: z.enum(APPLY_CHECKPOINT_ACTION_CODES),
-          continuationAllowed: z.boolean(),
-          fieldFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-        })).min(1).max(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT),
-      })).min(1).max(APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST),
+      checkpoints: z.array(applyCheckpointSchema)
+        .min(1).max(APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST),
     },
-    wrapTool(async ({ batchId, ...body }) => apiRequest(
+    wrapTool(async ({ batchId, ...body }) => applyApiRequest(
       'POST',
       `/api/jobscout/apply/batches/${batchId}/checkpoints`,
       body,
@@ -1199,7 +1271,7 @@ function registerApplyTools(
       content: { type: 'text', text: APPLY_RELIABILITY_PROMPT },
     }, {
       role: 'user',
-      content: { type: 'text', text: 'Before generating questions or filling controls, run the skill 4.7.0 deterministic answer resolver. Classify every visible answer as exact_profile, safe_derivation, supported_draft, missing_fact, live_consent, or forbidden_inference; validate the control type; fill only the first three; and ask only currently visible unresolved needs. Treat the current profile revision as reusable authority, never transcript, screenshot, parser, autocomplete, or cached values. Accessible-first is a hard scheduler invariant: park known authentication, account-creation, OTP, and pre-form-CAPTCHA work without starting a draft while an accessible candidate remains.' },
+      content: { type: 'text', text: 'Before generating questions or filling controls, run the skill 4.7.1 deterministic answer resolver. Classify every visible answer as exact_profile, safe_derivation, supported_draft, missing_fact, live_consent, or forbidden_inference; validate the control type; fill only the first three; and ask only currently visible unresolved needs. Treat the current profile revision as reusable authority, never transcript, screenshot, parser, autocomplete, or cached values. Accessible-first is a hard scheduler invariant: park known authentication, account-creation, OTP, and pre-form-CAPTCHA work without starting a draft while an accessible candidate remains.' },
     }, {
       role: 'user',
       content: { type: 'text', text: 'Only active=true identifies resumable execution work. Active=false and preserved=true is terminal read-only reconciliation evidence.' },
@@ -1207,7 +1279,7 @@ function registerApplyTools(
       role: 'user',
       content: {
         type: 'text',
-        text: 'Protocol 3.6.0 reliability gate for new work: require MCP contract 3.7.3 and skill 4.7.0. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
+        text: 'Protocol 3.6.0 reliability gate for new work: require MCP contract 3.7.6 and skill 4.7.1. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
       },
     }, {
       role: 'user',

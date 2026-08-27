@@ -63,9 +63,13 @@ node "<skill-dir>/scripts/validate-phase-checkpoint.js" <phase>
 ```
 
 Pass `{"receipt": {...}, "expectedContext": {...}}` on standard input. The
-envelope permits only those two fields. `expectedContext` is required for every
-phase and must be built only from the current authoritative work receipt. For
-selection, include `workMode`, the authoritative `latestExplicitTarget`,
+envelope permits those fields plus `priorFill` only for Review. `expectedContext` is required for every
+phase. Build Trackly lineage, profile, lifecycle, and approval fields only from
+the current authoritative work receipt. Build browser-surface fields such as
+`formInventoryFingerprint`, `resumeControl`, and browser handoff evidence only
+from the independently captured, value-free current browser baseline; never
+present those fields as backend-returned facts. For selection, include
+`workMode`, the authoritative `latestExplicitTarget`,
 `batchId`, `queueExhausted`, and `selectableJobIds`: the access-proven job IDs
 for an accessible execution or exact frozen member job IDs for a fixed
 inspection. Include `executionId` only for an accessible execution. For access,
@@ -74,7 +78,9 @@ exact current `waveJobIds`, including typed blockers. For later phases, include
 the exact `approvedJobIds` from the validated selection or authoritative
 recovered approval receipt. A nonzero exit means the
 phase is not complete. The script accepts `selection`, `access`, `fill`,
-`review`, and `reconciliation`.
+`review`, `handoff`, and `reconciliation`. `handoff` is a reporting receipt,
+not authority to claim review readiness; it exists so visibility-unverified
+work can be represented without pretending that it is visible.
 
 ### Selection
 
@@ -129,12 +135,52 @@ Required fields:
   `expectedContext.approvedJobIds`;
 - positive safe-integer `executionId` for `accessible_execution`, matching
   `expectedContext`; omit it from both objects for `fixed_inspection`;
-- `visibleControlCount`, `committedControlCount`, and `typedExceptionCount` as
-  non-negative safe integers, where committed plus exceptions equals visible;
+- bind the receipt to the independently captured form/profile baseline: the
+  same `profileRevision` must appear in both the receipt and `expectedContext`;
+  it is a non-negative safe integer for
+  `fixed_inspection` (so revision `0` is valid) and a positive safe integer for
+  `accessible_execution`; canonical education and employment-position counts
+  are non-negative safe integers; also include the exact value-free
+  `formInventoryFingerprint` and `resumeControl` (`required`, `optional`, or
+  `absent`);
+- `visibleControlCount` is a safe integer of at least 1;
+  `committedControlCount` and `typedExceptionCount` are non-negative safe
+  integers, and committed plus exceptions equals visible;
+- `controlAccounting`: one count for each allowed disposition
+  (`filledExactProfile`, `filledSafeDerivation`, `filledSupportedDraft`,
+  `preservedUserEdit`, `missingFact`, `liveConsent`,
+  `authenticationBlocker`, `unobservableCommit`, `unsupportedControl`, and
+  `notApplicable`). These counts must independently reconcile to the three
+  aggregate counts above;
+- `formInventoryFingerprint`: a lowercase SHA-256 over only the ordered,
+  value-free semantic control fingerprints and their dispositions. Never hash
+  labels, values, page text, URLs, or local paths into it;
 - `knownOmissionCount: 0`;
 - `knownFieldsFilledBeforeQuestions: true`;
+- `answerLookupCompleted: true`, plus typed counts in
+  `answerLookupScopeCounts` for `run`, `question`, `office`, `jurisdiction`,
+  `company`, `provider`, and `global`, and a value-free
+  `answerLookupFingerprint`. Query every applicable scope before asking;
 - `parserSensitiveFieldsRechecked: true`;
 - `educationAndEmploymentVerified: true`;
+- `historyReconciliation`: canonical and accounted education-record counts,
+  using `canonicalEducationRecordCount` and
+  `accountedEducationRecordCount`; canonical and accounted employment-position
+  counts using `canonicalEmploymentPositionCount` and
+  `accountedEmploymentPositionCount`; reverse-chronological order proofs,
+  `datePrecisionInvented: false`, and value-free reconciliation fingerprints.
+  Positions, including promotions at one employer, are records; an employer
+  summary is not a position-level reconciliation;
+- `resumeAudit`: `control` is `required`, `optional`, or `absent`, and `mode` is
+  `automated_verified`, `manual_unbound`, or `not_applicable`. An absent control
+  requires `mode: not_applicable` and `not_applicable` for every stage. A
+  required or optional automated upload requires `mode: automated_verified`
+  and `passed` for every stage. Use `mode: manual_unbound` only when the user
+  genuinely performs a browser-local upload that remains unbound; require
+  `approval: passed`, `preAttachVerification: not_applicable`,
+  `attachmentCommit: user_confirmed`, and `passed` for
+  `filenameVerification`, `parserRecheck`, and `finalSweep`. Never use the
+  manual mode for an agent-performed upload or a failed verifier;
 - `writingPresent`: boolean;
 - `localWritingGate`: `passed` when writing is present, otherwise
   `not_applicable`;
@@ -156,9 +202,92 @@ Required fields:
   `jobId`, `runId`, and non-negative `inspectionEpoch`, plus `executionId` only
   for `accessible_execution`; every value must match the current
   `expectedContext`, and `jobId` must remain in its approved set;
+- the same positive `profileRevision` for `accessible_execution`, or non-negative
+  `profileRevision` for `fixed_inspection`, and lowercase SHA-256
+  `formInventoryFingerprint` from the final validated Fill receipt; both must
+  match the current `expectedContext`, so a profile change or form rerender
+  requires Fill to be validated again before review;
+- a `priorFill` object containing only the complete value-free Fill `receipt`
+  and its `expectedContext`; Review reruns Fill validation and derives its
+  lineage, profile revision, and form inventory baseline from that receipt, so
+  matching caller-authored Review values alone cannot satisfy the gate. This
+  final Fill receipt must report zero `missingFact`, `liveConsent`,
+  `authenticationBlocker`, `unobservableCommit`, and `unsupportedControl`
+  dispositions; `notApplicable` controls may remain accounted. Resolve true
+  gaps and live decisions in the browser before producing this final receipt;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
-  `reviewTabPreserved`, and `userVisibleHandoffProven` all true; and
+  `reviewTabPreserved`, and `userVisibleHandoffProven` all true. Bind the
+  receipt and authoritative `expectedContext` to the exact visible tab with
+  lowercase SHA-256 `browserBindingHash` and `handoffEvidenceFingerprint`, plus
+  `handoffEvidenceType` set to `visible_presentation_receipt` or
+  `user_visible_handoff_receipt`. Durable or inventory-only evidence is not
+  sufficient for the manual-submit Review gate. A bare truth
+  boolean is insufficient: bind `truthCertificationAttestationId`,
+  `truthCertificationDependencyHash`, `truthCertificationExpiresAt`, and
+  `truthCertificationRunSetHash`, and `truthCertificationStatus` (`recorded` or
+  `replayed`) in both the receipt and
+  authoritative `expectedContext` to the value-free backend certification
+  result. The certification expiry must still be later than local validation
+  time. Preserve the accepted value-free `truthCertificationMemberRuns`,
+  bind that exact member-run list into `expectedContext`, recompute the backend's
+  canonical run-set hash, and prove the current member, run, checkpoint version,
+  and inspection epoch occur exactly once in that certified subset. A receipt
+  must never replace or extend the authoritative certified member-run list; and
+- bind `checkpointAction: review/manual_submit` and
+  `continuationAllowed: false` in both the receipt and `expectedContext` to the
+  exact backend-accepted action result; a
+  non-negative `resolvedActionCount`, and a value-free
+  `resolvedActionIdsFingerprint`. Both fields must match the authoritative
+  `expectedContext`; do not include raw action IDs;
+- bind the receipt and `expectedContext` to the exact backend result:
+  `checkpointStatus` (`recorded` or `replayed`), positive
+  `checkpointMemberVersion`, non-negative `checkpointInspectionEpoch`,
+  `checkpointLifecycle: review_ready`, `checkpointActionCount: 1`, and
+  `checkpointActionIdsFingerprint`. Newly recorded checkpoint actions and
+  previously open actions resolved by the review are separate sets, so each
+  summary binds independently to `expectedContext` rather than being forced to
+  equal the other. The single checkpoint action must be
+  `checkpointAction: review/manual_submit`. `checkpointInspectionEpoch` must equal the receipt's current
+  `inspectionEpoch`. A rejected or malformed checkpoint
+  fails closed: refetch the current contract once, correct the payload only when
+  the current schema proves how, and never claim durable review readiness until
+  the backend accepts it; and
 - `submitActivated: false`.
+
+### Handoff state report
+
+Use this receipt whenever reporting or transferring work, including when the
+review tab cannot be proven visible. Report `employerApplicationState`,
+`tracklyMemberState`, `tracklyJobState`, and `browserTabState` independently.
+Set `handoffVisibility` to `verified` only for a visibly proven or exact
+durably handed-off tab. Otherwise use `unverified` and
+`reviewReadyClaimed: false`. When readiness is false, omit all checkpoint
+authority fields. A state in one system never implies a state in
+another, and a valid unverified handoff receipt never authorizes telling the
+user to submit. `browserTabState: durable_handoff_proven` is invalid with
+unverified visibility and requires a `durable_handoff_receipt`. A true
+`reviewReadyClaimed` requires `checkpointStatus`,
+`checkpointMemberVersion`, `checkpointInspectionEpoch`, and
+`checkpointLifecycle`, plus `checkpointAction: review/manual_submit` and
+`checkpointActionCount: 1`; the checkpoint epoch must equal the receipt's current
+`inspectionEpoch`. The reported `employerApplicationState`,
+`tracklyMemberState`, and `tracklyJobState` must match the current authoritative
+`expectedContext` for every handoff, even when readiness is not claimed. The
+checkpoint fields must also match when readiness is claimed. A true handoff is
+valid only in the `awaiting_manual_submit` member state produced after the
+certified review-ready outcome is recorded; the earlier durable `review_ready`
+checkpoint state is not yet a user handoff. The current job state must still
+be `check_later`; a revoked,
+already-applied, or unknown job cannot be handed off as review-ready. A verified
+handoff must bind the receipt and `expectedContext` to
+the exact `browserBindingHash`, a value-free `handoffEvidenceFingerprint`, and
+`handoffEvidenceType`. A visible tab requires either
+`visible_presentation_receipt` from the adapter's exact-tab focus/reveal action
+and verified visible state, or `user_visible_handoff_receipt` from an exact
+current tab-bound user-visible handoff. Inventory membership alone is never
+visibility proof. A durably handed-off tab requires
+`durable_handoff_receipt`. Omit those evidence fields when visibility is
+unverified.
 
 ### Reconciliation
 
@@ -167,9 +296,11 @@ Required fields:
 - the same mode-specific current work lineage and approved-job binding required
   by Review. Reconciliation stays bound to the submitted run even though it is
   a post-submission phase;
-- `positiveSubmissionEvidenceRecorded: true`;
-- `memberLifecycle: submitted`;
-- `tracklyJobStatus: applied_confirmed`;
+- bind the receipt and `expectedContext` to the freshly refetched backend
+  result: `positiveSubmissionEvidenceRecorded: true`,
+  `memberLifecycle: submitted`, and `tracklyJobStatus: applied_confirmed`.
+  Self-authored terminal values are not authority; if the backend still reports
+  any nonterminal state, reconciliation and cleanup fail closed;
 - `cleanupPreference`: `never`, `submitted_only`, or
   `submitted_and_probe_blockers`;
 - `browserTabStatus`: `open`, `missing`, `closure_unverified`, or

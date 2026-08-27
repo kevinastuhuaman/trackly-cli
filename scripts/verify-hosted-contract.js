@@ -8,9 +8,20 @@ const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '5a5350f04e0f4afb5449bde7a35bae20518e8595310fa1dc321b9beb9188ec5f';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'bf980e3c48aa0817f8860a308dba4d5e054ca34f1e4b4bfdf1ace0402ad73799';
+const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
+  applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
+  applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
+  applyCheckpointSchema: '4759f1b7e1533e95ec1b5872c8bfe805ea6a6fd1c6e24c14f9499cd536331d1a',
+});
+const HOSTED_APPLY_REPLAY_HELPER_AST_SHA256 = Object.freeze({
+  actionCodeFromStoredCheckpoint: 'b23c10235645aa732c28073adfa2fd72dec0a8f7770b461df8bd5f408f896c6d',
+  loadStoredApplyBatchCheckpoint: '598233925c66ca36c69ae3dfe75984ec1d7098f27b8356d51cd6a43a7947bfd6',
+  storedCheckpointResult: '41227684c75aa7be1a96f3891372b6c9677d2c3fcf91d5e589425396c1a6b052',
+});
 
 const parsedSourceCache = new Map();
 
@@ -544,6 +555,7 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/index.ts',
   'src/__tests__/cors-origins.integration.test.ts',
   'src/config/database.ts',
+  'src/config/database-pool.ts',
   'src/mcp/server.ts',
   'src/mcp/plugin-server.ts',
   'src/mcp/__tests__/plugin-server.test.ts',
@@ -564,7 +576,9 @@ const HOSTED_DEPLOYABLE_PATHS = Object.freeze([
   'src/services/job-brief.ts',
   'src/services/review-identity.ts',
   'src/services/trackly-access.ts',
+  'src/services/application-profile/apply-checkpoint-contract.ts',
   'src/services/application-profile/apply-execution-contract.ts',
+  'src/services/application-profile/batch-service.ts',
   'src/services/application-profile/catalog.ts',
   'src/services/application-profile/service.ts',
   'src/routes/jobscout-filter-utils.ts',
@@ -627,6 +641,12 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     `${mergeCommit} must have the recorded merge parents in order`,
   );
   assertHostedCommitTimestamps(backendRoot, fixture);
+  assertMergeCommitPreservesPaths(
+    backendRoot,
+    sourceCommit,
+    mergeCommit,
+    HOSTED_DEPLOYABLE_PATHS,
+  );
   for (const relativePath of HOSTED_DEPLOYABLE_PATHS) {
     assert.equal(
       sha256ExactBytes(fs.readFileSync(path.join(backendRoot, relativePath))),
@@ -642,6 +662,7 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     authRateLimit: 'src/middleware/auth-rate-limit.ts',
     maintenanceMode: 'src/middleware/maintenance-mode.ts',
     databaseBinding: 'src/config/database.ts',
+    databasePoolPolicy: 'src/config/database-pool.ts',
     reviewIdentity: 'src/services/review-identity.ts',
     applicationProfileService: 'src/services/application-profile/service.ts',
   };
@@ -2926,7 +2947,7 @@ function assertPluginReviewReadyPersistenceSemantics(
   expectedRouteStatement,
   {
     routeAstSha256 = 'a4b0a5ba28a0c80c2ddbc438b3cde25f61a7bb092ead4efe1813384f9e7d46ec',
-    certifyAstSha256 = '28c7b9132231755052051724fd0fde9a2fc24b2ac5b9902db10aa98301deab12',
+    certifyAstSha256 = '134b267af1163f83330181ff151e2604271d6980d701c2a93bd5878ab326a852',
     serviceSourceSha256 = null,
   } = {},
 ) {
@@ -2967,6 +2988,222 @@ function assertPluginReviewReadyPersistenceSemantics(
   if (serviceSourceSha256 !== null) {
     assertExactHostedSourceSha256(serviceSource, serviceSourceSha256, serviceSourcePath);
   }
+}
+
+function assertCheckpointRouteCallChain(source, sourcePath) {
+  assertImportedFunctionCallInventory(
+    source,
+    'recordApplyBatchCheckpoints',
+    '../services/application-profile/batch-service',
+    1,
+    sourcePath,
+  );
+  const canonicalRoute = assertActiveTopLevelStatementAst(
+    source,
+    `router.post('/jobscout/apply/batches/:id/checkpoints', requireAuth, requireApplyFeature, async (req, res) => {
+      try {
+        assertPlainBodyKeys(
+          req.body,
+          ['leaseToken', 'checkpoints'],
+          'Only leaseToken and redacted checkpoints are accepted; keep labels, options, and answers local',
+          'Apply checkpoint body must be a plain object',
+        );
+        const ownerId = userId(req)!;
+        const input = {
+          userId: ownerId,
+          batchId: positiveInteger(req.params.id, 'Apply batch id'),
+          leaseToken: boundedMachineInput(req.body.leaseToken, 'leaseToken'),
+          now: new Date(),
+          checkpoints: req.body.checkpoints as ApplyBatchCheckpointInput[],
+        };
+        const result = await withAuthorizedApplyMutation(
+          ownerId,
+          applyRunCallerContext(req),
+          (db) => recordApplyBatchCheckpoints(db, input),
+        );
+        res.json({ success: true, ...result });
+      } catch (error) {
+        sendError(res, error);
+      }
+    });`,
+    sourcePath,
+  );
+  const program = parseFullSource(source, sourcePath).program;
+  const canonicalRouteIndex = program.body.findIndex((statement) => (
+    JSON.stringify(canonicalSchemaAst(statement)) === JSON.stringify(canonicalSchemaAst(canonicalRoute))
+  ));
+  assert.ok(canonicalRouteIndex >= 0, `${sourcePath} must expose the locked checkpoint route at top level`);
+  const checkpointPath = '/jobscout/apply/batches/:id/checkpoints';
+  const earlierStatements = program.body.slice(0, canonicalRouteIndex);
+  const routerAliases = new Set(['router']);
+  const routerAliasStatements = new Set();
+  function containsRouterAlias(node) {
+    const value = unwrapTransparentExpression(node);
+    if (value?.type === 'Identifier') return routerAliases.has(value.name);
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, child]) => (
+      !AST_METADATA_FIELDS.has(key) && containsRouterAlias(child)
+    ));
+  }
+  let discoveredRouterAlias = true;
+  while (discoveredRouterAlias) {
+    discoveredRouterAlias = false;
+    for (const statement of earlierStatements) {
+      const bindings = statement.type === 'VariableDeclaration'
+        ? statement.declarations.map((declaration) => [declaration.id, declaration.init])
+        : statement.type === 'ExpressionStatement'
+          && statement.expression?.type === 'AssignmentExpression'
+          ? [[statement.expression.left, statement.expression.right]]
+          : [];
+      for (const [target, value] of bindings) {
+        const initializer = unwrapTransparentExpression(value);
+        if (target?.type === 'Identifier'
+            && initializer?.type === 'Identifier'
+            && routerAliases.has(initializer.name)
+            && !routerAliases.has(target.name)) {
+          routerAliases.add(target.name);
+          routerAliasStatements.add(statement);
+          discoveredRouterAlias = true;
+        } else if (containsRouterAlias(initializer)) {
+          routerAliasStatements.add(statement);
+        }
+      }
+    }
+  }
+  for (const statement of earlierStatements) {
+    function findRouterEscape(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) findRouterEscape(child);
+        return;
+      }
+      if ((node.type === 'CallExpression' || node.type === 'OptionalCallExpression')
+          && node.arguments.some(containsRouterAlias)) {
+        routerAliasStatements.add(statement);
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        findRouterEscape(child);
+      }
+    }
+    findRouterEscape(statement);
+  }
+  function routeRegistration(statement) {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    const callee = call?.type === 'CallExpression' ? unwrapTransparentExpression(call.callee) : null;
+    const receiver = callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(callee.object)
+      : null;
+    const method = staticMemberName(callee);
+    if (receiver?.type === 'Identifier' && routerAliases.has(receiver.name)) {
+      if (method === 'param') return { method, pathArgument: call.arguments[0] };
+      if (method !== null && !['post', 'all', 'use'].includes(method)) return null;
+      return { method: method ?? 'use', pathArgument: call.arguments[0] };
+    }
+    if (method === 'call' && receiver?.type === 'MemberExpression') {
+      const indirectOwner = unwrapTransparentExpression(receiver.object);
+      const indirectMethod = staticMemberName(receiver);
+      const thisArgument = unwrapTransparentExpression(call.arguments[0]);
+      if (indirectOwner?.type === 'Identifier'
+          && routerAliases.has(indirectOwner.name)
+          && ['post', 'all', 'use'].includes(indirectMethod)
+          && thisArgument?.type === 'Identifier'
+          && routerAliases.has(thisArgument.name)) {
+        return { method: indirectMethod, pathArgument: call.arguments[1] };
+      }
+    }
+    const chainedMethods = [];
+    let chainedCall = call;
+    while (chainedCall?.type === 'CallExpression') {
+      const chainedCallee = unwrapTransparentExpression(chainedCall.callee);
+      const chainedMethod = staticMemberName(chainedCallee);
+      const chainedReceiver = chainedCallee?.type === 'MemberExpression'
+        ? unwrapTransparentExpression(chainedCallee.object)
+        : null;
+      if (chainedMethod) chainedMethods.push(chainedMethod);
+      if (chainedReceiver?.type !== 'CallExpression') break;
+      const routeCallee = unwrapTransparentExpression(chainedReceiver.callee);
+      const routeOwner = routeCallee?.type === 'MemberExpression'
+        ? unwrapTransparentExpression(routeCallee.object)
+        : null;
+      if (
+        routeOwner?.type === 'Identifier'
+        && routerAliases.has(routeOwner.name)
+        && staticMemberName(routeCallee) === 'route'
+      ) {
+        if (!chainedMethods.some((candidate) => candidate === 'post' || candidate === 'all')) return null;
+        return { method: 'post', pathArgument: chainedReceiver.arguments[0] };
+      }
+      chainedCall = chainedReceiver;
+    }
+    return null;
+  }
+  function staticRouteCovers(candidatePath, method) {
+    if (candidatePath === '*') return true;
+    const candidateSegments = candidatePath.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+    const targetSegments = checkpointPath.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+    const wildcardIndex = candidateSegments.indexOf('*');
+    const comparedLength = wildcardIndex >= 0 ? wildcardIndex : candidateSegments.length;
+    if (method !== 'use' && wildcardIndex < 0 && candidateSegments.length !== targetSegments.length) return false;
+    if (comparedLength > targetSegments.length) return false;
+    for (let index = 0; index < comparedLength; index += 1) {
+      const candidate = candidateSegments[index];
+      const target = targetSegments[index];
+      if (candidate.startsWith(':')) continue;
+      if (/[^A-Za-z0-9_-]/.test(candidate)) return true;
+      if (candidate.toLowerCase() !== target.toLowerCase()) return false;
+    }
+    return method === 'use' || wildcardIndex >= 0 || candidateSegments.length === targetSegments.length;
+  }
+  const reviewedApplyMiddleware = parseExpectedStatement(
+    "router.use('/jobscout/apply', privateNoStore, requireAuth, requireTracklyAccess, applyAgentLimiter);",
+    `${sourcePath} reviewed Apply middleware`,
+  );
+  const reviewedApplyMiddlewareAst = JSON.stringify(canonicalSchemaAst(reviewedApplyMiddleware));
+  function nodeContainsShadowingRoute(node) {
+    if (node === null || typeof node !== 'object') return false;
+    if (Array.isArray(node)) return node.some(nodeContainsShadowingRoute);
+    if (node.type === 'VariableDeclaration') {
+      if (node.declarations.some((declaration) => {
+        const initializer = unwrapTransparentExpression(declaration.init);
+        const callee = initializer?.type === 'CallExpression'
+          ? unwrapTransparentExpression(initializer.callee)
+          : null;
+        const receiver = callee?.type === 'MemberExpression'
+          ? unwrapTransparentExpression(callee.object)
+          : null;
+        if (receiver?.type !== 'Identifier' || !routerAliases.has(receiver.name) || staticMemberName(callee) !== 'route') {
+          return false;
+        }
+        const routePath = initializer.arguments[0];
+        return routePath?.type !== 'StringLiteral' || staticRouteCovers(routePath.value, 'post');
+      })) return true;
+    }
+    if (node.type === 'ExpressionStatement') {
+      const registration = routeRegistration(node);
+      if (registration) {
+        if (JSON.stringify(canonicalSchemaAst(node)) === reviewedApplyMiddlewareAst) return false;
+        if (registration.method === 'param') {
+          return registration.pathArgument?.type !== 'StringLiteral'
+            || registration.pathArgument.value === 'id';
+        }
+        if (registration.pathArgument?.type !== 'StringLiteral') return true;
+        if (staticRouteCovers(registration.pathArgument.value, registration.method)) return true;
+      }
+    }
+    return Object.entries(node).some(([key, child]) => (
+      !AST_METADATA_FIELDS.has(key) && nodeContainsShadowingRoute(child)
+    ));
+  }
+  const earlierShadowingRoutes = earlierStatements.filter((statement) => {
+    if (routerAliasStatements.has(statement)) return true;
+    return nodeContainsShadowingRoute(statement);
+  });
+  assert.equal(
+    earlierShadowingRoutes.length,
+    0,
+    `${sourcePath} must not register an earlier route that shadows the locked checkpoint endpoint`,
+  );
 }
 
 function assertInternalSecretCompatibility(
@@ -3163,6 +3400,7 @@ function assertActiveTopLevelStatementAst(source, expectedStatement, sourcePath)
     1,
     `${sourcePath} must execute its locked fail-closed top-level statement exactly once`,
   );
+  return matches[0];
 }
 
 function assertImportBinding(source, importedName, localName, moduleName, sourcePath) {
@@ -3184,6 +3422,389 @@ function assertImportBinding(source, importedName, localName, moduleName, source
     `${sourcePath} must import ${importedName} as ${localName} exactly once from ${moduleName}`,
   );
   return matches[0];
+}
+
+function assertUnshadowedImportBinding(source, importedName, localName, moduleName, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const importedBinding = assertImportBinding(source, importedName, localName, moduleName, sourcePath);
+  const forbiddenBindings = [];
+  const bindingAliases = new Set([localName]);
+  function patternContainsName(pattern) {
+    if (!pattern) return false;
+    if (pattern.type === 'Identifier') return pattern.name === localName;
+    if (pattern.type === 'AssignmentPattern') return patternContainsName(pattern.left);
+    if (pattern.type === 'RestElement') return patternContainsName(pattern.argument);
+    if (pattern.type === 'ArrayPattern') return pattern.elements.some(patternContainsName);
+    if (pattern.type === 'ObjectPattern') return pattern.properties.some((property) => (
+      property.type === 'RestElement'
+        ? patternContainsName(property.argument)
+        : patternContainsName(property.value)
+    ));
+    return false;
+  }
+  let discoveredAlias = true;
+  while (discoveredAlias) {
+    discoveredAlias = false;
+    function discoverAliases(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) discoverAliases(child);
+        return;
+      }
+      const binding = node.type === 'VariableDeclarator'
+        ? [node.id, node.init]
+        : node.type === 'AssignmentExpression'
+          ? [node.left, node.right]
+          : null;
+      const target = binding?.[0];
+      const value = unwrapTransparentExpression(binding?.[1]);
+      if (target?.type === 'Identifier'
+          && value?.type === 'Identifier'
+          && bindingAliases.has(value.name)
+          && !bindingAliases.has(target.name)) {
+        bindingAliases.add(target.name);
+        forbiddenBindings.push(node);
+        discoveredAlias = true;
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        discoverAliases(child);
+      }
+    }
+    discoverAliases(ast);
+  }
+  function isImportedObjectReference(node) {
+    const value = unwrapTransparentExpression(node);
+    return value?.type === 'Identifier' && bindingAliases.has(value.name);
+  }
+  function isImportedMember(node) {
+    const value = unwrapTransparentExpression(node);
+    return (value?.type === 'MemberExpression' || value?.type === 'OptionalMemberExpression')
+      && (isImportedObjectReference(value.object) || isImportedMember(value.object));
+  }
+  function mutationCallName(node) {
+    const callee = unwrapTransparentExpression(node?.callee);
+    const receiver = callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(callee.object)
+      : null;
+    const member = staticMemberName(callee);
+    return receiver?.type === 'Identifier' && member ? `${receiver.name}.${member}` : null;
+  }
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'VariableDeclarator' && patternContainsName(node.id)) forbiddenBindings.push(node);
+    if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
+        && node.id?.name === localName) forbiddenBindings.push(node);
+    if ((node.type === 'FunctionDeclaration'
+        || node.type === 'FunctionExpression'
+        || node.type === 'ArrowFunctionExpression')
+        && node.params.some(patternContainsName)) forbiddenBindings.push(node);
+    if (node.type === 'CatchClause' && patternContainsName(node.param)) forbiddenBindings.push(node);
+    if ((node.type === 'ImportSpecifier'
+        || node.type === 'ImportDefaultSpecifier'
+        || node.type === 'ImportNamespaceSpecifier')
+        && node.local?.name === localName
+        && node.local !== importedBinding.local) forbiddenBindings.push(node);
+    if (node.type === 'AssignmentExpression' && patternContainsName(node.left)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression' && patternContainsName(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'AssignmentExpression' && isImportedMember(node.left)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression' && isImportedMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && isImportedMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      const mutationCall = mutationCallName(node);
+      if ([
+        'Object.assign',
+        'Object.defineProperty',
+        'Object.defineProperties',
+        'Object.setPrototypeOf',
+        'Reflect.defineProperty',
+        'Reflect.set',
+        'Reflect.setPrototypeOf',
+      ].includes(mutationCall) && isImportedObjectReference(node.arguments[0])) {
+        forbiddenBindings.push(node);
+      }
+      if (node.arguments.some(isImportedObjectReference)) forbiddenBindings.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      visit(child);
+    }
+  }
+  visit(ast);
+  function auditImportedBindingEscapes(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditImportedBindingEscapes(child, parent, parentKey);
+      return;
+    }
+    if (node.type === 'Identifier' && bindingAliases.has(node.name)) {
+      const importBinding = parent?.type === 'ImportSpecifier'
+        || parent?.type === 'ImportDefaultSpecifier'
+        || parent?.type === 'ImportNamespaceSpecifier';
+      const reviewedMemberRead = (parent?.type === 'MemberExpression'
+          || parent?.type === 'OptionalMemberExpression')
+        && parentKey === 'object';
+      if (!importBinding && !reviewedMemberRead) forbiddenBindings.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      auditImportedBindingEscapes(child, node, key);
+    }
+  }
+  auditImportedBindingEscapes(ast);
+  assert.equal(
+    forbiddenBindings.length,
+    0,
+    `${sourcePath} must not shadow, reassign, alias, or mutate ${localName} imported from ${moduleName}`,
+  );
+  return importedBinding;
+}
+
+function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const forbiddenBindings = [];
+  const globalAliases = new Set(['globalThis', 'global']);
+  function patternContainsName(pattern) {
+    if (!pattern) return false;
+    if (pattern.type === 'Identifier') return pattern.name === intrinsicName;
+    if (pattern.type === 'AssignmentPattern') return patternContainsName(pattern.left);
+    if (pattern.type === 'RestElement') return patternContainsName(pattern.argument);
+    if (pattern.type === 'ArrayPattern') return pattern.elements.some(patternContainsName);
+    if (pattern.type === 'ObjectPattern') return pattern.properties.some((property) => (
+      property.type === 'RestElement'
+        ? patternContainsName(property.argument)
+        : patternContainsName(property.value)
+    ));
+    return false;
+  }
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'VariableDeclarator' && patternContainsName(node.id)) forbiddenBindings.push(node);
+    if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
+        && node.id?.name === intrinsicName) forbiddenBindings.push(node);
+    if ((node.type === 'FunctionDeclaration'
+        || node.type === 'FunctionExpression'
+        || node.type === 'ArrowFunctionExpression')
+        && node.params.some(patternContainsName)) forbiddenBindings.push(node);
+    if (node.type === 'CatchClause' && patternContainsName(node.param)) forbiddenBindings.push(node);
+    if ((node.type === 'ImportSpecifier'
+        || node.type === 'ImportDefaultSpecifier'
+        || node.type === 'ImportNamespaceSpecifier')
+        && node.local?.name === intrinsicName) forbiddenBindings.push(node);
+    if (node.type === 'AssignmentExpression' && patternContainsName(node.left)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression' && patternContainsName(node.argument)) forbiddenBindings.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      visit(child);
+    }
+  }
+  visit(ast);
+  let discoveredAlias = true;
+  while (discoveredAlias) {
+    discoveredAlias = false;
+    function discoverGlobalAliases(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) discoverGlobalAliases(child);
+        return;
+      }
+      if (node.type === 'VariableDeclarator'
+          && node.id?.type === 'Identifier'
+          && globalAliases.has(unwrapStaticExpression(node.init)?.name)
+          && !globalAliases.has(node.id.name)) {
+        globalAliases.add(node.id.name);
+        discoveredAlias = true;
+      }
+      if (node.type === 'AssignmentExpression'
+          && node.operator === '='
+          && node.left?.type === 'Identifier'
+          && globalAliases.has(unwrapStaticExpression(node.right)?.name)
+          && !globalAliases.has(node.left.name)) {
+        globalAliases.add(node.left.name);
+        discoveredAlias = true;
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        discoverGlobalAliases(child);
+      }
+    }
+    discoverGlobalAliases(ast);
+  }
+  function staticPropertyName(member) {
+    if (member?.type !== 'MemberExpression' && member?.type !== 'OptionalMemberExpression') return null;
+    if (!member.computed && member.property?.type === 'Identifier') return member.property.name;
+    if (member.computed && (member.property?.type === 'StringLiteral' || member.property?.type === 'Literal')) {
+      return member.property.value;
+    }
+    return null;
+  }
+  function isGlobalReference(node) {
+    return unwrapStaticExpression(node)?.type === 'Identifier'
+      && globalAliases.has(unwrapStaticExpression(node).name);
+  }
+  function isGlobalIntrinsicMember(node) {
+    const member = unwrapStaticExpression(node);
+    const propertyName = staticPropertyName(member);
+    return (member?.type === 'MemberExpression' || member?.type === 'OptionalMemberExpression')
+      && isGlobalReference(member.object)
+      && (propertyName === intrinsicName || (member.computed && propertyName === null));
+  }
+  function objectPatternSelectsGlobalIntrinsic(pattern, value) {
+    if (pattern?.type !== 'ObjectPattern' || !isGlobalReference(value)) return false;
+    return pattern.properties.some((property) => {
+      if (property.type === 'RestElement') return true;
+      if (property.type !== 'ObjectProperty' && property.type !== 'Property') return true;
+      const key = property.computed
+        ? property.key?.type === 'StringLiteral' || property.key?.type === 'Literal'
+          ? property.key.value
+          : null
+        : property.key?.name ?? property.key?.value;
+      return key === intrinsicName || key === null;
+    });
+  }
+  const intrinsicAliases = new Set([intrinsicName]);
+  let discoveredIntrinsicAlias = true;
+  while (discoveredIntrinsicAlias) {
+    discoveredIntrinsicAlias = false;
+    function discoverIntrinsicAliases(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) discoverIntrinsicAliases(child);
+        return;
+      }
+      const binding = node.type === 'VariableDeclarator'
+        ? [node.id, node.init]
+        : node.type === 'AssignmentExpression' && node.operator === '='
+          ? [node.left, node.right]
+          : null;
+      const target = binding?.[0];
+      const value = unwrapStaticExpression(binding?.[1]);
+      if (objectPatternSelectsGlobalIntrinsic(target, value)) {
+        forbiddenBindings.push(node);
+      }
+      const aliasesIntrinsic = value?.type === 'Identifier'
+        ? intrinsicAliases.has(value.name)
+        : isGlobalIntrinsicMember(value);
+      if (target?.type === 'Identifier'
+          && aliasesIntrinsic
+          && !intrinsicAliases.has(target.name)) {
+        intrinsicAliases.add(target.name);
+        forbiddenBindings.push(node);
+        discoveredIntrinsicAlias = true;
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        discoverIntrinsicAliases(child);
+      }
+    }
+    discoverIntrinsicAliases(ast);
+  }
+  function isIntrinsicObjectPath(node) {
+    const value = unwrapStaticExpression(node);
+    if (value?.type === 'Identifier' && intrinsicAliases.has(value.name)) return true;
+    if (isGlobalIntrinsicMember(value)) return true;
+    return (value?.type === 'MemberExpression' || value?.type === 'OptionalMemberExpression')
+      && isIntrinsicObjectPath(value.object);
+  }
+  function callName(node) {
+    const callee = unwrapStaticExpression(node?.callee);
+    if (callee?.type !== 'MemberExpression' && callee?.type !== 'OptionalMemberExpression') return null;
+    if (callee.object?.type !== 'Identifier') return null;
+    const property = staticPropertyName(callee);
+    return property === null ? null : `${callee.object.name}.${property}`;
+  }
+  function indirectCallName(node) {
+    const callee = unwrapStaticExpression(node?.callee);
+    const invocation = staticPropertyName(callee);
+    if ((invocation !== 'call' && invocation !== 'apply')
+        || (callee?.type !== 'MemberExpression' && callee?.type !== 'OptionalMemberExpression')) {
+      return null;
+    }
+    return callName({ callee: callee.object });
+  }
+  function staticString(node) {
+    const value = unwrapStaticExpression(node);
+    return value?.type === 'StringLiteral' || value?.type === 'Literal' ? value.value : null;
+  }
+  function objectDefinesIntrinsic(node) {
+    const value = unwrapStaticExpression(node);
+    if (value?.type !== 'ObjectExpression') return true;
+    return value.properties.some((property) => {
+      if (property.type !== 'ObjectProperty' && property.type !== 'Property') return true;
+      const key = property.computed ? staticString(property.key) : property.key?.name ?? property.key?.value;
+      return key === null || key === intrinsicName;
+    });
+  }
+  function auditGlobalMutations(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditGlobalMutations(child);
+      return;
+    }
+    if (node.type === 'AssignmentExpression' && isGlobalIntrinsicMember(node.left)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression' && isGlobalIntrinsicMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'AssignmentExpression'
+        && (node.left?.type === 'MemberExpression' || node.left?.type === 'OptionalMemberExpression')
+        && isIntrinsicObjectPath(node.left.object)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && isIntrinsicObjectPath(node.argument.object)) forbiddenBindings.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && isGlobalIntrinsicMember(node.argument)) forbiddenBindings.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && isIntrinsicObjectPath(node.argument.object)) forbiddenBindings.push(node);
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      const mutationCall = callName(node);
+      const indirectMutationCall = indirectCallName(node);
+      const intrinsicMutationCalls = [
+        'Object.assign',
+        'Object.defineProperty',
+        'Object.defineProperties',
+        'Object.setPrototypeOf',
+        'Reflect.defineProperty',
+        'Reflect.set',
+        'Reflect.setPrototypeOf',
+      ];
+      if (intrinsicMutationCalls.includes(indirectMutationCall)) forbiddenBindings.push(node);
+      if (['Object.defineProperty', 'Reflect.defineProperty', 'Reflect.set'].includes(mutationCall)
+          && isGlobalReference(node.arguments[0])
+          && (staticString(node.arguments[1]) === intrinsicName || staticString(node.arguments[1]) === null)) {
+        forbiddenBindings.push(node);
+      }
+      if (mutationCall === 'Object.defineProperties'
+          && isGlobalReference(node.arguments[0])
+          && objectDefinesIntrinsic(node.arguments[1])) forbiddenBindings.push(node);
+      if (mutationCall === 'Object.assign'
+          && isGlobalReference(node.arguments[0])
+          && node.arguments.slice(1).some(objectDefinesIntrinsic)) forbiddenBindings.push(node);
+      if (intrinsicMutationCalls.includes(mutationCall) && isIntrinsicObjectPath(node.arguments[0])) {
+        forbiddenBindings.push(node);
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      auditGlobalMutations(child);
+    }
+  }
+  auditGlobalMutations(ast);
+  assert.equal(
+    forbiddenBindings.length,
+    0,
+    `${intrinsicName} in ${sourcePath} must be the unshadowed intrinsic`,
+  );
 }
 
 function assertImportedFunctionCallInventory(source, name, moduleName, expectedCallSites, sourcePath) {
@@ -3968,6 +4589,1216 @@ function canonicalSchemaAst(value) {
   );
 }
 
+function namedDefinitionAstDigests(source, names, sourcePath) {
+  return Object.fromEntries(names.map((name) => [
+    name,
+    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(
+      activeNamedDefinitionAst(source, name, sourcePath),
+    ))),
+  ]));
+}
+
+function statementContainsString(node, expected) {
+  let found = false;
+  function visit(value) {
+    if (found || value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child);
+      return;
+    }
+    if (value.type === 'StringLiteral' && value.value === expected) {
+      found = true;
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (!AST_METADATA_FIELDS.has(key)) visit(child);
+    }
+  }
+  visit(node);
+  return found;
+}
+
+function parseExpectedStatement(statement, label) {
+  const parsed = babelParser.parse(statement, {
+    sourceType: 'module',
+    plugins: ['typescript'],
+    allowReturnOutsideFunction: true,
+  });
+  assert.equal(parsed.program.body.length, 1, `${label} must contain one complete statement`);
+  return parsed.program.body[0];
+}
+
+function assertExactParameters(actualParams, fixtureExpression, label, expectedDescription) {
+  const expectedParams = babelParser.parseExpression(fixtureExpression, {
+    plugins: ['typescript'],
+  }).params;
+  const runtimeParameterAst = (parameter) => {
+    const normalized = canonicalSchemaAst(parameter);
+    if (normalized?.type === 'Identifier') delete normalized.typeAnnotation;
+    return normalized;
+  };
+  assert.deepEqual(
+    actualParams.map(runtimeParameterAst),
+    expectedParams.map(runtimeParameterAst),
+    `${label} must use the exact ${expectedDescription} parameters`,
+  );
+}
+
+function singleDirectStatement(node, label) {
+  if (node?.type === 'BlockStatement') {
+    assert.equal(node.body.length, 1, `${label} must contain exactly one direct statement`);
+    return node.body[0];
+  }
+  return node;
+}
+
+function assertDirectThrowWithMessage(node, expectedMessage, label) {
+  const statement = singleDirectStatement(node, label);
+  assert.equal(statement?.type, 'ThrowStatement', `${label} must directly throw the locked rejection`);
+  assert.equal(statement.argument?.type, 'NewExpression', `${label} must throw a constructed error`);
+  assert.ok(
+    statement.argument.callee?.type === 'Identifier'
+      && ['Error', 'ApplyBatchValidationError'].includes(statement.argument.callee.name),
+    `${label} must throw Error or ApplyBatchValidationError`,
+  );
+  assert.deepEqual(
+    statement.argument.arguments?.map(canonicalSchemaAst),
+    [{ type: 'StringLiteral', value: expectedMessage }],
+    `${label} must throw the locked rejection message`,
+  );
+}
+
+function checkpointRefinementCallback(source, sourcePath) {
+  const schema = activeNamedDefinitionAst(source, 'applyCheckpointSchema', sourcePath);
+  assert.equal(schema?.type, 'CallExpression', `applyCheckpointSchema in ${sourcePath} must call superRefine`);
+  assert.equal(schema.callee?.type, 'MemberExpression', `applyCheckpointSchema in ${sourcePath} must call superRefine`);
+  assert.equal(schema.callee.computed, false, `applyCheckpointSchema in ${sourcePath} must use static superRefine`);
+  assert.equal(schema.callee.property?.name, 'superRefine', `applyCheckpointSchema in ${sourcePath} must call superRefine`);
+  assert.equal(schema.arguments.length, 1, `applyCheckpointSchema in ${sourcePath} must have one refinement callback`);
+  const callback = unwrapStaticExpression(schema.arguments[0]);
+  assert.ok(
+    callback?.type === 'ArrowFunctionExpression' || callback?.type === 'FunctionExpression',
+    `applyCheckpointSchema in ${sourcePath} must use an executable refinement callback`,
+  );
+  assertExactParameters(
+    callback.params,
+    '(checkpoint, context) => {}',
+    `applyCheckpointSchema in ${sourcePath} refinement`,
+    'checkpoint and context',
+  );
+  assert.equal(callback.body?.type, 'BlockStatement', `applyCheckpointSchema in ${sourcePath} refinement must use a block`);
+  return callback;
+}
+
+function assertCheckpointRefinementConditions(source, sourcePath, shape) {
+  const callback = checkpointRefinementCallback(source, sourcePath);
+  const common = {
+    'inspectionEpoch must equal expectedInspectionEpoch': 'checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch',
+    'resolvedActionIds must be unique': 'checkpoint.resolvedActionIds && new Set(checkpoint.resolvedActionIds).size !== checkpoint.resolvedActionIds.length',
+    'Question checkpoints require a packet phase': 'hasQuestions && checkpoint.packetPhase === undefined',
+    'Question checkpoints require committed known fields': 'hasQuestions && !checkpoint.knownFieldsCommitted',
+    'packetPhase is only valid for grouped questions': '!hasQuestions && checkpoint.packetPhase !== undefined',
+    'Review checkpoints require all known fields to be committed': 'reviewReady && !checkpoint.knownFieldsCommitted',
+  };
+  const expected = {
+    ...common,
+    ...(shape === 'hosted-map' ? {
+      'Access-blocking checkpoints cannot report private-field commits or other actions': 'accessBlocked && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)',
+    } : {}),
+    'Actions in one inspection checkpoint must share one lifecycle': shape === 'hosted-map'
+      ? 'new Set(mappings.map(({ lifecycleState }) => lifecycleState)).size !== 1'
+      : 'new Set(actionCodes.map((code) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION[code])).size !== 1',
+  };
+  const paths = {
+    'inspectionEpoch must equal expectedInspectionEpoch': 'inspectionEpoch',
+    'resolvedActionIds must be unique': 'resolvedActionIds',
+    'Actions in one inspection checkpoint must share one lifecycle': 'actions',
+    'Question checkpoints require a packet phase': 'packetPhase',
+    'Question checkpoints require committed known fields': 'knownFieldsCommitted',
+    'packetPhase is only valid for grouped questions': 'packetPhase',
+    'Access-blocking checkpoints cannot report private-field commits or other actions': 'actions',
+    'Review checkpoints require all known fields to be committed': 'knownFieldsCommitted',
+  };
+  const branchesByMessage = new Map();
+  for (const [message, expression] of Object.entries(expected)) {
+    const matches = callback.body.body.filter((statement) => (
+      statement.type === 'IfStatement' && statementContainsString(statement.consequent, message)
+    ));
+    assert.equal(matches.length, 1, `${sourcePath} must enforce ${message} in exactly one executable branch`);
+    branchesByMessage.set(message, matches[0]);
+    assert.deepEqual(
+      canonicalSchemaAst(matches[0].test),
+      canonicalSchemaAst(babelParser.parseExpression(expression, { plugins: ['typescript'] })),
+      `${sourcePath} must enforce ${message} with its locked executable condition`,
+    );
+    assert.equal(
+      matches[0].alternate,
+      null,
+      `${sourcePath} must enforce ${message} without an alternate branch`,
+    );
+    assert.deepEqual(
+      canonicalSchemaAst(singleDirectStatement(matches[0].consequent, `${sourcePath} ${message} branch`)),
+      canonicalSchemaAst(parseExpectedStatement(
+        `context.addIssue({ code: z.ZodIssueCode.custom, path: ['${paths[message]}'], message: '${message}' });`,
+        `${sourcePath} ${message} issue`,
+      )),
+      `${sourcePath} must enforce ${message} with exactly its locked issue effect`,
+    );
+  }
+
+  const expectedDeclarations = shape === 'hosted-map' ? [
+    'const mappings = checkpoint.actions.map(({ actionCode }) => (APPLY_BATCH_CHECKPOINT_ACTION_MAP[actionCode]));',
+    'const hasQuestions = mappings.some(({ questionPacket }) => questionPacket);',
+    'const actionCodes = new Set(checkpoint.actions.map(({ actionCode }) => actionCode));',
+    "const accessBlocked = actionCodes.has('captcha/before_form') || actionCodes.has('trust/origin_mismatch');",
+    "const reviewReady = actionCodes.has('captcha/at_submit') || actionCodes.has('review/manual_submit');",
+  ] : [
+    'const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);',
+    'const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);',
+    "const reviewReady = actionCodes.includes('captcha/at_submit') || actionCodes.includes('review/manual_submit');",
+  ];
+  const declarations = callback.body.body.filter((statement) => statement.type === 'VariableDeclaration');
+  assert.deepEqual(
+    canonicalSchemaAst(declarations),
+    canonicalSchemaAst(expectedDeclarations.map((statement, index) => parseExpectedStatement(
+      statement,
+      `${sourcePath} refinement declaration ${index + 1}`,
+    ))),
+    `${sourcePath} checkpoint refinement must use only its locked executable classifications`,
+  );
+  assert.equal(
+    callback.body.body.length,
+    Object.keys(expected).length + expectedDeclarations.length,
+    `${sourcePath} checkpoint refinement must not contain unmodeled executable statements`,
+  );
+  assert.ok(
+    callback.body.body.every((statement) => (
+      statement.type === 'IfStatement' || statement.type === 'VariableDeclaration'
+    )),
+    `${sourcePath} checkpoint refinement must contain only locked declarations and issue branches`,
+  );
+  const declarationsByName = new Map(declarations.flatMap((statement) => (
+    statement.declarations
+      .filter((declaration) => declaration.id?.type === 'Identifier')
+      .map((declaration) => [declaration.id.name, statement])
+  )));
+  const dependenciesByMessage = {
+    'Actions in one inspection checkpoint must share one lifecycle': [
+      shape === 'hosted-map' ? 'mappings' : 'actionCodes',
+    ],
+    'Question checkpoints require a packet phase': ['hasQuestions'],
+    'Question checkpoints require committed known fields': ['hasQuestions'],
+    'packetPhase is only valid for grouped questions': ['hasQuestions'],
+    ...(shape === 'hosted-map' ? {
+      'Access-blocking checkpoints cannot report private-field commits or other actions': ['accessBlocked'],
+    } : {}),
+    'Review checkpoints require all known fields to be committed': ['reviewReady'],
+  };
+  for (const [message, dependencies] of Object.entries(dependenciesByMessage)) {
+    const branchIndex = callback.body.body.indexOf(branchesByMessage.get(message));
+    for (const dependency of dependencies) {
+      const declarationIndex = callback.body.body.indexOf(declarationsByName.get(dependency));
+      assert.ok(
+        declarationIndex >= 0 && declarationIndex < branchIndex,
+        `${sourcePath} checkpoint refinement must declare ${dependency} before evaluating ${message}`,
+      );
+    }
+  }
+  return Object.keys(expected);
+}
+
+function assertReplayAwareMixedPacketOrdering(
+  source,
+  sourcePath,
+  expectedReplayHelperDigests = HOSTED_APPLY_REPLAY_HELPER_AST_SHA256,
+) {
+  for (const [helperName, expectedDigest] of Object.entries(expectedReplayHelperDigests)) {
+    const helperAst = activeNamedDefinitionAst(source, helperName, sourcePath);
+    assert.equal(
+      sha256ExactBytes(JSON.stringify(canonicalSchemaAst(helperAst))),
+      expectedDigest,
+      `${helperName} in ${sourcePath} must match its replay semantic lock`,
+    );
+  }
+  const definition = activeNamedDefinitionAst(source, 'recordOneApplyBatchCheckpoint', sourcePath);
+  assert.equal(definition?.type, 'FunctionDeclaration', `recordOneApplyBatchCheckpoint in ${sourcePath} must be a function`);
+  assertExactParameters(
+    definition.params,
+    '(queryable, input, checkpoint) => {}',
+    `recordOneApplyBatchCheckpoint in ${sourcePath}`,
+    'queryable, input, and checkpoint',
+  );
+  const forbiddenHelperBindings = new Set(['loadStoredApplyBatchCheckpoint', 'storedCheckpointResult']);
+  const shadowedHelperBindings = definition.body.body.flatMap((statement) => {
+    if (statement.type === 'FunctionDeclaration' && forbiddenHelperBindings.has(statement.id?.name)) {
+      return [statement.id.name];
+    }
+    if (statement.type !== 'VariableDeclaration') return [];
+    return statement.declarations.flatMap((declaration) => (
+      declaration.id?.type === 'Identifier' && forbiddenHelperBindings.has(declaration.id.name)
+        ? [declaration.id.name]
+        : []
+    ));
+  });
+  assert.deepEqual(
+    shadowedHelperBindings,
+    [],
+    `${sourcePath} checkpoint execution must not shadow its locked replay helper bindings`,
+  );
+  const statements = definition.body.body;
+  const expectedPrefix = [
+    `const checkpointMapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[
+      checkpoint.actions[0]!.actionCode
+    ];`,
+    'const payloadHash = checkpointPayloadHash(input.batchId, checkpoint);',
+    `const actionKeyHashes = checkpoint.actions.map((_action, index) => (
+      hashApplyBatchValue(
+        'checkpoint-action-key',
+        \`\${checkpoint.idempotencyKey}:\${index + 1}\`,
+      )
+    ));`,
+    `const existing = await loadStoredApplyBatchCheckpoint(
+      queryable,
+      input.userId,
+      actionKeyHashes,
+    );`,
+  ].map((statement, index) => parseExpectedStatement(
+    statement,
+    `${sourcePath} checkpoint pre-replay statement ${index + 1}`,
+  ));
+  const replayIndex = statements.findIndex((statement) => (
+    statement.type === 'IfStatement'
+    && statementContainsString(statement.consequent, 'replayed')
+  ));
+  assert.ok(replayIndex >= 0, `${sourcePath} checkpoint execution must preserve exact stored replays`);
+  assert.deepEqual(
+    canonicalSchemaAst(statements.slice(0, replayIndex)),
+    canonicalSchemaAst(expectedPrefix),
+    `${sourcePath} checkpoint execution must use only its locked pre-replay computations`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(statements[replayIndex].test),
+    canonicalSchemaAst(babelParser.parseExpression('existing.length > 0', { plugins: ['typescript'] })),
+    `${sourcePath} checkpoint replay branch must be guarded by stored checkpoint presence`,
+  );
+  assert.equal(
+    statements[replayIndex].alternate,
+    null,
+    `${sourcePath} checkpoint replay branch must not define an alternate path`,
+  );
+  const replayStatements = statements[replayIndex].consequent?.type === 'BlockStatement'
+    ? statements[replayIndex].consequent.body
+    : [statements[replayIndex].consequent];
+  const replayReturn = parseExpectedStatement(
+    "return storedCheckpointResult(existing, 'replayed');",
+    `${sourcePath} checkpoint replay result`,
+  );
+  const replayConflictGuard = parseExpectedStatement(`
+    if (
+      existing.length !== checkpoint.actions.length
+      || existing.some((action, index) => (
+        action.idempotencyPayloadHash !== payloadHash
+        || action.actionVersion !== index + 1
+      ))
+    ) {
+      throw new ApplyBatchIdempotencyConflictError();
+    }
+  `, `${sourcePath} checkpoint replay conflict guard`);
+  const canonicalReplayStatements = canonicalSchemaAst(replayStatements);
+  assert.ok(
+    isDeepStrictEqual(
+      canonicalSchemaAst([replayConflictGuard, replayReturn]),
+      canonicalReplayStatements,
+    ),
+    `${sourcePath} checkpoint replay branch must contain its locked conflict guard and stored replay return`,
+  );
+
+  const expectedAuthenticationGuard = [
+    "const preFormAuthenticationBlocked = checkpoint.actions.some((action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].stage === 'authentication');",
+    `if (
+      preFormAuthenticationBlocked
+      && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)
+    ) {
+      throw new ApplyBatchValidationError(
+        'Access-blocking checkpoints cannot report private-field commits or other actions.',
+      );
+    }`,
+  ].map((statement, index) => parseExpectedStatement(
+    statement,
+    `${sourcePath} authentication guard statement ${index + 1}`,
+  ));
+  const authenticationGuardIndex = statements.findIndex((statement) => (
+    statement.type === 'IfStatement'
+    && statementContainsString(
+      statement.consequent,
+      'Access-blocking checkpoints cannot report private-field commits or other actions.',
+    )
+  ));
+  assert.ok(
+    authenticationGuardIndex > replayIndex,
+    `${sourcePath} must reject new pre-form authentication walls only after exact replay lookup`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(statements.slice(replayIndex + 1, authenticationGuardIndex + 1)),
+    canonicalSchemaAst(expectedAuthenticationGuard),
+    `${sourcePath} must enforce the locked replay-aware pre-form authentication guard`,
+  );
+
+  const expectedClassifiers = [
+    'const hasQuestions = checkpoint.actions.some((action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket);',
+    'const hasNonQuestions = checkpoint.actions.some((action) => !APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket);',
+  ];
+  const classifierDeclarations = statements.filter((statement) => (
+    statement.type === 'VariableDeclaration'
+    && statement.declarations.some((declaration) => (
+      declaration.id?.type === 'Identifier'
+      && ['hasQuestions', 'hasNonQuestions'].includes(declaration.id.name)
+    ))
+  ));
+  assert.deepEqual(
+    canonicalSchemaAst(classifierDeclarations),
+    canonicalSchemaAst(expectedClassifiers.map((statement, index) => parseExpectedStatement(
+      statement,
+      `${sourcePath} mixed-packet classifier ${index + 1}`,
+    ))),
+    `${sourcePath} mixed-packet classifiers must use the locked action mappings`,
+  );
+  const mixedIndex = statements.findIndex((statement) => (
+    statement.type === 'IfStatement'
+    && statementContainsString(
+      statement.consequent,
+      'Question checkpoints cannot mix question and non-question actions.',
+    )
+  ));
+  assert.ok(mixedIndex >= 0, `${sourcePath} checkpoint execution must reject new mixed packets`);
+  assert.deepEqual(
+    canonicalSchemaAst(statements.slice(replayIndex + 1, mixedIndex)),
+    canonicalSchemaAst([...expectedAuthenticationGuard, ...classifierDeclarations]),
+    `${sourcePath} must contain only the locked authentication guard and classifiers between replay lookup and mixed-packet rejection`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(statements[mixedIndex].test),
+    canonicalSchemaAst(babelParser.parseExpression('hasQuestions && hasNonQuestions', { plugins: ['typescript'] })),
+    `${sourcePath} mixed-packet branch must use both executable classifications`,
+  );
+  assert.equal(
+    statements[mixedIndex].alternate,
+    null,
+    `${sourcePath} mixed-packet branch must not define an alternate path`,
+  );
+  assertDirectThrowWithMessage(
+    statements[mixedIndex].consequent,
+    'Question checkpoints cannot mix question and non-question actions.',
+    `${sourcePath} mixed-packet branch`,
+  );
+  const classifierIndexes = classifierDeclarations.map((declaration) => statements.indexOf(declaration));
+  assert.ok(
+    classifierIndexes.every((index) => index > replayIndex && index < mixedIndex),
+    `${sourcePath} must compute locked mixed-packet classifiers after replay lookup and before rejection`,
+  );
+  assert.ok(mixedIndex > replayIndex, `${sourcePath} must reject new mixed packets only after exact replay lookup`);
+}
+
+function assertCheckpointWriterCallChain(source, sourcePath) {
+  assertUnshadowedIntrinsicBinding(source, 'Promise', sourcePath);
+  const definition = activeNamedDefinitionAst(source, 'recordApplyBatchCheckpoints', sourcePath);
+  assert.equal(definition?.type, 'FunctionDeclaration', `recordApplyBatchCheckpoints in ${sourcePath} must be a function`);
+  assertExactParameters(
+    definition.params,
+    '(queryable, input) => {}',
+    `recordApplyBatchCheckpoints in ${sourcePath}`,
+    'queryable and input',
+  );
+
+  const shadowBindings = [];
+  function bindingContainsRecordOne(pattern) {
+    if (!pattern) return false;
+    if (pattern.type === 'Identifier') return pattern.name === 'recordOneApplyBatchCheckpoint';
+    if (pattern.type === 'AssignmentPattern') return bindingContainsRecordOne(pattern.left);
+    if (pattern.type === 'RestElement') return bindingContainsRecordOne(pattern.argument);
+    if (pattern.type === 'ArrayPattern') return pattern.elements.some(bindingContainsRecordOne);
+    if (pattern.type === 'ObjectPattern') return pattern.properties.some((property) => (
+      property.type === 'RestElement'
+        ? bindingContainsRecordOne(property.argument)
+        : bindingContainsRecordOne(property.value)
+    ));
+    return false;
+  }
+  function findShadowBindings(node, isRoot = false) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) findShadowBindings(child);
+      return;
+    }
+    if (!isRoot && (
+      node.type === 'FunctionDeclaration'
+      || node.type === 'FunctionExpression'
+      || node.type === 'ArrowFunctionExpression'
+    )) {
+      if (node.type === 'FunctionDeclaration' && node.id?.name === 'recordOneApplyBatchCheckpoint') {
+        shadowBindings.push(node);
+      }
+      if (node.params?.some(bindingContainsRecordOne)) shadowBindings.push(node);
+    }
+    if (node.type === 'VariableDeclarator' && bindingContainsRecordOne(node.id)) shadowBindings.push(node);
+    if (node.type === 'CatchClause' && bindingContainsRecordOne(node.param)) shadowBindings.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      findShadowBindings(child);
+    }
+  }
+  findShadowBindings(definition, true);
+  assert.equal(
+    shadowBindings.length,
+    0,
+    `${sourcePath} checkpoint writer must not shadow the locked recordOneApplyBatchCheckpoint binding`,
+  );
+
+  const resultDeclarations = definition.body.body.filter((statement) => (
+    statement.type === 'VariableDeclaration'
+    && statement.declarations.some((declaration) => declaration.id?.type === 'Identifier' && declaration.id.name === 'results')
+  ));
+  assert.equal(resultDeclarations.length, 1, `${sourcePath} checkpoint writer must declare one results binding`);
+  assert.equal(
+    resultDeclarations[0].declarations.length,
+    1,
+    `${sourcePath} checkpoint writer results declaration must not contain sibling bindings`,
+  );
+  const resultsDeclarator = resultDeclarations[0].declarations.find((declaration) => declaration.id.name === 'results');
+  const resultsInitializer = unwrapStaticExpression(resultsDeclarator.init);
+  assert.equal(resultsInitializer?.type, 'AwaitExpression', `${sourcePath} checkpoint writer results must await Promise.all`);
+  const promiseAllCall = unwrapStaticExpression(resultsInitializer.argument);
+  assert.equal(babelCalleeName(promiseAllCall?.callee), 'Promise.all', `${sourcePath} checkpoint writer results must await Promise.all`);
+  assert.equal(promiseAllCall.arguments.length, 1, `${sourcePath} checkpoint writer Promise.all must receive one checkpoint map`);
+  const mapCall = unwrapStaticExpression(promiseAllCall.arguments[0]);
+  assert.equal(mapCall?.type, 'CallExpression', `${sourcePath} checkpoint writer must map input.checkpoints`);
+  assert.equal(babelCalleeName(mapCall.callee), 'input.checkpoints.map', `${sourcePath} checkpoint writer must map input.checkpoints`);
+  assert.equal(mapCall.arguments.length, 1, `${sourcePath} checkpoint writer map must receive one callback`);
+  const callback = unwrapStaticExpression(mapCall.arguments[0]);
+  assert.equal(callback?.type, 'ArrowFunctionExpression', `${sourcePath} checkpoint writer map must use an arrow callback`);
+  assert.equal(callback.async, true, `${sourcePath} checkpoint writer map callback must be async`);
+  assertExactParameters(
+    callback.params,
+    'async (checkpoint) => {}',
+    `${sourcePath} checkpoint writer map`,
+    'checkpoint',
+  );
+  assert.equal(callback.body?.type, 'BlockStatement', `${sourcePath} checkpoint writer map callback must use a block`);
+  assert.equal(
+    callback.body.body.length,
+    1,
+    `${sourcePath} checkpoint writer map callback must contain only its guarded write`,
+  );
+  const tryStatements = callback.body.body.filter((statement) => statement.type === 'TryStatement');
+  assert.equal(tryStatements.length, 1, `${sourcePath} checkpoint writer map callback must contain one guarded write`);
+  const expectedWrite = parseExpectedStatement(`
+    return await recordOneApplyBatchCheckpoint(queryable, {
+      userId: input.userId,
+      batchId: input.batchId,
+      leaseToken: input.leaseToken,
+      now: input.now,
+    }, checkpoint);
+  `, `${sourcePath} checkpoint writer call`);
+  assert.deepEqual(
+    canonicalSchemaAst(tryStatements[0].block.body),
+    canonicalSchemaAst([expectedWrite]),
+    `${sourcePath} checkpoint writer must directly await the locked recordOneApplyBatchCheckpoint call`,
+  );
+  assert.equal(tryStatements[0].finalizer, null, `${sourcePath} checkpoint writer guarded write must not use a finalizer`);
+  assert.ok(tryStatements[0].handler, `${sourcePath} checkpoint writer guarded write must preserve its catch handler`);
+  assertExactParameters(
+    [tryStatements[0].handler.param],
+    '(error) => {}',
+    `${sourcePath} checkpoint writer catch handler`,
+    'error',
+  );
+  const fixtureCatchBody = [
+    parseExpectedStatement('throw error;', `${sourcePath} fixture writer catch`),
+  ];
+  const productionCatchBody = [
+    parseExpectedStatement(`
+      if (error instanceof ApplyBatchIdempotencyConflictError) {
+        return {
+          memberId: checkpoint.memberId,
+          status: 'conflict' as const,
+          errorCode: 'idempotency_payload_mismatch' as const,
+        };
+      }
+    `, `${sourcePath} production idempotency catch`),
+    parseExpectedStatement(`
+      if (error instanceof ApplyBatchConflictError) {
+        return {
+          memberId: checkpoint.memberId,
+          status: 'conflict' as const,
+          errorCode: 'stale_member_state' as const,
+        };
+      }
+    `, `${sourcePath} production stale-state catch`),
+    parseExpectedStatement('throw error;', `${sourcePath} production writer catch`),
+  ];
+  assert.ok(
+    [fixtureCatchBody, productionCatchBody].some((expectedCatchBody) => (
+      JSON.stringify(canonicalSchemaAst(tryStatements[0].handler.body.body))
+        === JSON.stringify(canonicalSchemaAst(expectedCatchBody))
+    )),
+    `${sourcePath} checkpoint writer catch handler must preserve only its locked conflict mapping`,
+  );
+
+  const resultIndex = definition.body.body.indexOf(resultDeclarations[0]);
+  const prefixStatements = definition.body.body.slice(0, resultIndex);
+  const fixturePrefix = [];
+  const productionPrefix = [
+    parseExpectedStatement(`
+      if (
+        !isPositiveInteger(input.userId)
+        || !isPositiveInteger(input.batchId)
+        || typeof input.leaseToken !== 'string'
+        || input.leaseToken.length < 1
+        || Buffer.byteLength(input.leaseToken, 'utf8') > 1_024
+        || !Number.isFinite(input.now.getTime())
+        || !Array.isArray(input.checkpoints)
+        || input.checkpoints.length < 1
+        || input.checkpoints.length > MAX_CHECKPOINTS_PER_REQUEST
+      ) {
+        throw new ApplyBatchValidationError(
+          \`Apply checkpoint request must contain 1-\${MAX_CHECKPOINTS_PER_REQUEST} bounded members.\`,
+        );
+      }
+    `, `${sourcePath} production writer request validation`),
+    parseExpectedStatement('const idempotencyKeys = new Set<string>();', `${sourcePath} idempotency set`),
+    parseExpectedStatement('const memberEpochs = new Set<string>();', `${sourcePath} member epoch set`),
+    parseExpectedStatement(`
+      for (const checkpoint of input.checkpoints) {
+        validateApplyBatchCheckpoint(checkpoint);
+        idempotencyKeys.add(checkpoint.idempotencyKey);
+        memberEpochs.add(\`\${checkpoint.memberId}:\${checkpoint.inspectionEpoch}\`);
+      }
+    `, `${sourcePath} production writer member validation`),
+    parseExpectedStatement(`
+      if (
+        idempotencyKeys.size !== input.checkpoints.length
+        || memberEpochs.size !== input.checkpoints.length
+      ) {
+        throw new ApplyBatchValidationError(
+          'Apply checkpoints require unique idempotency keys and member epochs.',
+        );
+      }
+    `, `${sourcePath} production writer uniqueness validation`),
+  ];
+  assert.ok(
+    [fixturePrefix, productionPrefix].some((expectedPrefix) => (
+      JSON.stringify(canonicalSchemaAst(prefixStatements)) === JSON.stringify(canonicalSchemaAst(expectedPrefix))
+    )),
+    `${sourcePath} checkpoint writer must preserve only its locked validation prefix`,
+  );
+  const tailStatements = definition.body.body.slice(resultIndex + 1);
+  const fixtureTail = [parseExpectedStatement('return { results };', `${sourcePath} fixture writer return`)];
+  const productionTail = [
+    parseExpectedStatement(`
+      await completeApplyBatchIfTerminal(queryable, {
+        userId: input.userId,
+        batchId: input.batchId,
+        now: input.now,
+      });
+    `, `${sourcePath} production writer completion`),
+    parseExpectedStatement(`
+      return {
+        results,
+        questionPacket: buildApplyBatchQuestionPacket(results),
+      };
+    `, `${sourcePath} production writer return`),
+  ];
+  assert.ok(
+    [fixtureTail, productionTail].some((expectedTail) => (
+      JSON.stringify(canonicalSchemaAst(tailStatements)) === JSON.stringify(canonicalSchemaAst(expectedTail))
+    )),
+    `${sourcePath} checkpoint writer must return only its locked results and question packet`,
+  );
+  const matchesWriterShape = (prefix, catchBody, tail) => (
+    JSON.stringify(canonicalSchemaAst(prefixStatements)) === JSON.stringify(canonicalSchemaAst(prefix))
+    && JSON.stringify(canonicalSchemaAst(tryStatements[0].handler.body.body))
+      === JSON.stringify(canonicalSchemaAst(catchBody))
+    && JSON.stringify(canonicalSchemaAst(tailStatements)) === JSON.stringify(canonicalSchemaAst(tail))
+  );
+  assert.ok(
+    matchesWriterShape(fixturePrefix, fixtureCatchBody, fixtureTail)
+      || matchesWriterShape(productionPrefix, productionCatchBody, productionTail),
+    `${sourcePath} checkpoint writer must match one complete locked fixture or production shape`,
+  );
+}
+
+function checkpointHelperSemanticDescriptor(
+  source,
+  contract,
+  sourcePath,
+  replayAwareServiceSource = null,
+  checkpointContractSource = null,
+  checkpointContractSourcePath = null,
+  expectedReplayHelperDigests = HOSTED_APPLY_REPLAY_HELPER_AST_SHA256,
+) {
+  const hostedMappings = checkpointContractSource === null
+    ? null
+    : hostedCheckpointActionMappings(
+      checkpointContractSource,
+      checkpointContractSourcePath || sourcePath,
+    );
+  const actionCodes = hostedMappings?.actionCodes
+    ?? contract.constants.applyCheckpointActionCodes;
+  const continuationByAction = hostedMappings?.continuationByAction
+    ?? contract.constants.applyCheckpointContinuationByAction;
+  const questionPacketByAction = hostedMappings?.questionPacketByAction
+    ?? contract.constants.applyCheckpointQuestionPacketByAction;
+  const lifecycleByAction = hostedMappings?.lifecycleByAction
+    ?? contract.constants.applyCheckpointLifecycleByAction;
+  const variant = exactSchemaDefinition(source, 'applyCheckpointActionVariant', sourcePath);
+  const actionSchema = exactSchemaDefinition(source, 'applyCheckpointActionSchema', sourcePath);
+  const checkpointSchema = exactSchemaDefinition(source, 'applyCheckpointSchema', sourcePath);
+  const declarationStatements = contractDeclarationStatements(source, sourcePath);
+  const checkpointSchemaAst = activeNamedDefinitionAst(
+    source,
+    'applyCheckpointSchema',
+    sourcePath,
+    declarationStatements,
+  );
+  const actionSchemaAst = activeNamedDefinitionAst(
+    source,
+    'applyCheckpointActionSchema',
+    sourcePath,
+    declarationStatements,
+  );
+  const checkpointBaseSchema = checkpointSchemaAst.callee.object;
+  const variantAst = activeNamedDefinitionAst(
+    source,
+    'applyCheckpointActionVariant',
+    sourcePath,
+    declarationStatements,
+  );
+  for (const protectedDefinition of [
+    'applyCheckpointActionVariant',
+    'applyCheckpointActionSchema',
+    'applyCheckpointSchema',
+  ]) {
+    assertNamedDefinitionNotMutatedOrAliased(source, protectedDefinition, sourcePath);
+  }
+  assertExactParameters(
+    variantAst.params,
+    '(actionCode) => null',
+    `applyCheckpointActionVariant in ${sourcePath}`,
+    'actionCode',
+  );
+  const variantBody = variantAst.body?.type === 'BlockStatement'
+    ? variantAst.body.body
+    : [{ type: 'ReturnStatement', argument: variantAst.body }];
+  const variantReturns = variantBody.filter((statement) => statement.type === 'ReturnStatement');
+  assert.equal(
+    variantReturns.length,
+    1,
+    `applyCheckpointActionVariant in ${sourcePath} must have exactly one top-level return`,
+  );
+  const variantReturn = unwrapStaticExpression(variantReturns[0].argument);
+  assert.equal(variantReturn?.type, 'CallExpression', `${sourcePath} action variant must return z.object(...)`);
+  assert.equal(variantReturn.callee?.type, 'MemberExpression', `${sourcePath} action variant must return z.object(...)`);
+  assert.equal(variantReturn.callee.object?.name, 'z', `${sourcePath} action variant must return z.object(...)`);
+  assert.equal(variantReturn.callee.property?.name, 'object', `${sourcePath} action variant must return z.object(...)`);
+  const variantProperties = staticBabelObjectProperties(
+    variantReturn.arguments[0],
+    `applyCheckpointActionVariant in ${sourcePath}`,
+  );
+  assert.deepEqual(
+    Object.keys(variantProperties),
+    ['actionCode', 'continuationAllowed', 'fieldFingerprint'],
+    `${sourcePath} action variant must contain the exact reviewed fields`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(variantProperties.actionCode),
+    canonicalSchemaAst(babelParser.parseExpression('z.literal(actionCode)', { plugins: ['typescript'] })),
+    `${sourcePath} actionCode must be the exact action-code literal`,
+  );
+  const fingerprintSemantics = {
+    pattern: '^[a-f0-9]{64}$',
+    requiredWhenQuestionPacket: true,
+    optionalOtherwise: true,
+  };
+  const continuationAllowedAst = canonicalSchemaAst(variantProperties.continuationAllowed);
+  const localContinuationAllowedAst = canonicalSchemaAst(babelParser.parseExpression(
+    'z.literal(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION[actionCode])',
+    { plugins: ['typescript'] },
+  ));
+  const hostedContinuationAllowedAst = canonicalSchemaAst(babelParser.parseExpression(
+    'z.literal(mapping.continuationAllowed)',
+    { plugins: ['typescript'] },
+  ));
+  const usesLocalActionMap = isDeepStrictEqual(continuationAllowedAst, localContinuationAllowedAst);
+  const usesHostedActionMap = isDeepStrictEqual(continuationAllowedAst, hostedContinuationAllowedAst);
+  assert.notEqual(
+    usesLocalActionMap,
+    usesHostedActionMap,
+    `${sourcePath} action variant must use exactly one supported executable action mapping`,
+  );
+
+  if (usesLocalActionMap) {
+    assert.equal(variantBody.length, 1, `${sourcePath} local action variant must contain only its locked return`);
+    assert.match(variant, /z\.literal\(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION\[actionCode\]\)/);
+    assert.match(variant, /APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[actionCode\]/);
+    assert.match(actionSchema, /APPLY_CHECKPOINT_ACTION_CODES\.map\(applyCheckpointActionVariant\)/);
+    assert.deepEqual(
+      canonicalSchemaAst(actionSchemaAst),
+      canonicalSchemaAst(babelParser.parseExpression(
+        "z.discriminatedUnion('actionCode', APPLY_CHECKPOINT_ACTION_CODES.map(applyCheckpointActionVariant))",
+        { plugins: ['typescript'] },
+      )),
+      `${sourcePath} action schema must be the exact discriminated union`,
+    );
+    assertBabelPropertyExpression(
+      variantProperties,
+      'fieldFingerprint',
+      'APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[actionCode] ? z.string().regex(/^[a-f0-9]{64}$/) : z.string().regex(/^[a-f0-9]{64}$/).optional()',
+      `${sourcePath} must preserve the canonical question-packet fingerprint semantics`,
+    );
+    assert.match(checkpointSchema, /actionCodes\.map\(\(code\) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION\[code\]\)/);
+    assert.match(checkpointSchema, /actionCodes\.some\(\(code\) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[code\]\)/);
+    if (checkpointSchema.includes('hasNonQuestions')) {
+      assert.match(checkpointSchema, /actionCodes\.some\(\(code\) => !APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[code\]\)/);
+    }
+    assert.match(checkpointSchema, /actionCodes\.includes\('review\/manual_submit'\)/);
+    assertCheckpointRefinementConditions(source, sourcePath, 'local-map');
+  } else if (usesHostedActionMap) {
+    assert.equal(
+      variantBody.length,
+      2,
+      `${sourcePath} hosted action variant must contain only its locked mapping initializer and return`,
+    );
+    assert.deepEqual(
+      canonicalSchemaAst(variantBody[0]),
+      canonicalSchemaAst(parseExpectedStatement(
+        'const mapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[actionCode];',
+        `${sourcePath} hosted action mapping initializer`,
+      )),
+      `${sourcePath} hosted action variant must use its locked action mapping initializer`,
+    );
+    assert.equal(
+      variantBody[1],
+      variantReturns[0],
+      `${sourcePath} hosted action variant must return immediately after its locked mapping initializer`,
+    );
+    assert.match(variant, /z\.literal\(mapping\.continuationAllowed\)/);
+    assert.match(variant, /mapping\.questionPacket/);
+    const fingerprintSchema = exactSchemaDefinition(
+      source,
+      'applyCheckpointFingerprintSchema',
+      sourcePath,
+    ).replace(/\s+/g, '');
+    assert.equal(
+      fingerprintSchema,
+      'constapplyCheckpointFingerprintSchema=z.string().regex(/^[a-f0-9]{64}$/);',
+      `${sourcePath} must preserve the canonical checkpoint fingerprint schema`,
+    );
+    assertBabelPropertyExpression(
+      variantProperties,
+      'fieldFingerprint',
+      'mapping.questionPacket ? applyCheckpointFingerprintSchema : applyCheckpointFingerprintSchema.optional()',
+      `${sourcePath} must preserve the canonical question-packet fingerprint semantics`,
+    );
+    const declaredActionCodes = [...actionSchema.matchAll(
+      /applyCheckpointActionVariant\('([^']+)'\)/g,
+    )].map((match) => match[1]);
+    assert.deepEqual(declaredActionCodes, actionCodes);
+    assert.deepEqual(
+      canonicalSchemaAst(actionSchemaAst),
+      canonicalSchemaAst(babelParser.parseExpression(
+        `z.discriminatedUnion('actionCode', [${actionCodes.map((code) => `applyCheckpointActionVariant('${code}')`).join(',')}])`,
+        { plugins: ['typescript'] },
+      )),
+      `${sourcePath} action schema must be the exact discriminated union`,
+    );
+    assert.match(checkpointSchema, /mappings\.map\(\(\{ lifecycleState \}\) => lifecycleState\)/);
+    assert.match(checkpointSchema, /mappings\.some\(\(\{ questionPacket \}\) => questionPacket\)/);
+    if (checkpointSchema.includes('hasNonQuestions')) {
+      assert.match(checkpointSchema, /mappings\.some\(\(\{ questionPacket \}\) => !questionPacket\)/);
+    }
+    assert.match(checkpointSchema, /actionCodes\.has\('captcha\/before_form'\)/);
+    assert.match(checkpointSchema, /actionCodes\.has\('review\/manual_submit'\)/);
+    assertCheckpointRefinementConditions(source, sourcePath, 'hosted-map');
+  } else {
+    assert.fail(`${sourcePath} uses an unrecognized checkpoint action-variant shape`);
+  }
+
+  const checkpointInvariant = contract.toolInputInvariants?.trackly_checkpoint_apply_batch;
+  assert.deepEqual(checkpointInvariant, {
+    questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
+    exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
+    preFormAuthenticationWallsRejectedAfterExactReplayLookup: true,
+  });
+  const localMixedPacketCondition = canonicalSchemaAst(babelParser.parseExpression(
+    'hasQuestions && hasNonQuestions',
+    { plugins: ['typescript'] },
+  ));
+  const hasLocalMixedPacketPreflight = checkpointRefinementCallback(source, sourcePath)
+    .body.body.some((statement) => (
+      statement.type === 'IfStatement'
+      && isDeepStrictEqual(canonicalSchemaAst(statement.test), localMixedPacketCondition)
+      && statementContainsString(
+        statement.consequent,
+        'Question checkpoints cannot mix question and non-question actions',
+      )
+    ));
+  if (!hasLocalMixedPacketPreflight) {
+    assert.equal(typeof replayAwareServiceSource, 'string', `${sourcePath} must delegate mixed-packet enforcement to a replay-aware service`);
+    assertReplayAwareMixedPacketOrdering(
+      replayAwareServiceSource,
+      `${sourcePath} replay-aware service`,
+      expectedReplayHelperDigests,
+    );
+    assertCheckpointWriterCallChain(
+      replayAwareServiceSource,
+      `${sourcePath} replay-aware service`,
+    );
+  } else {
+    assert.fail(`${sourcePath} contains an unmodeled local mixed-packet preflight`);
+  }
+
+  return {
+    actionCodes,
+    continuationByAction,
+    lifecycleByAction,
+    questionPacketByAction,
+    fingerprintSemantics,
+    actionVariantSchema: {
+      fields: ['actionCode', 'continuationAllowed', 'fieldFingerprint'],
+      actionCode: 'exact-literal',
+    },
+    actionSchema: {
+      discriminator: 'actionCode',
+      actionCodes,
+      exactUnion: true,
+    },
+    checkpointBaseSchema: canonicalSchemaAst(checkpointBaseSchema),
+    mixedPacketEnforcement: hasLocalMixedPacketPreflight
+      ? 'local-preflight'
+      : 'replay-aware-backend',
+    invariants: [
+      'current-inspection-epoch',
+      'unique-resolved-action-ids',
+      'single-lifecycle',
+      'question-packet-homogeneous',
+      'question-packet-phase-required',
+      'question-known-fields-committed',
+      'packet-phase-question-only',
+      'access-blocker-exclusive-before-private-commit',
+      'review-ready-after-known-fields-commit',
+    ],
+  };
+}
+
+function unwrapStaticExpression(node) {
+  let current = node;
+  while (
+    current?.type === 'TSAsExpression'
+    || current?.type === 'TSSatisfiesExpression'
+    || current?.type === 'TypeCastExpression'
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function staticPrimitive(node, label) {
+  const value = unwrapStaticExpression(node);
+  if (value?.type === 'StringLiteral' || value?.type === 'BooleanLiteral') return value.value;
+  assert.fail(`${label} must be a static string or boolean literal`);
+}
+
+function hostedCheckpointActionMappings(source, sourcePath) {
+  const contractAst = parseFullSource(source, sourcePath);
+  const reviewedRoutingByAction = {
+    'answer/unknown': ['complete_field', 'application', 'unknown_answer'],
+    'auth/sign_in': ['sign_in', 'authentication', 'sign_in'],
+    'auth/account_creation': ['sign_in', 'authentication', 'account_creation'],
+    'auth/otp': ['otp', 'authentication', 'otp'],
+    'captcha/before_form': ['captcha', 'navigation', 'before_form'],
+    'captcha/at_submit': ['captcha', 'review', 'at_submit'],
+    'artifact/upload_required': ['upload_document', 'application', 'upload_required'],
+    'legal/decision_required': ['complete_field', 'application', 'legal_decision_required'],
+    'consent/decision_required': ['complete_field', 'application', 'consent_decision_required'],
+    'review/manual_submit': ['review', 'review', 'manual_submit'],
+    'trust/origin_mismatch': ['review', 'navigation', 'origin_mismatch'],
+    'observability/unverifiable_state': ['review', 'application', 'unverifiable_state'],
+  };
+  const allowedRuntimeBindings = new Set([
+    'APPLY_BATCH_CHECKPOINT_ACTION_CODES',
+    'APPLY_BATCH_CHECKPOINT_PACKET_PHASES',
+    'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+    'APPLY_BATCH_MIN_LEASE_DURATION_MS',
+    'APPLY_BATCH_MAX_LEASE_DURATION_MS',
+    'APPLY_BATCH_LEASE_RENEW_BY_FRACTION',
+  ]);
+  const runtimeInitializers = new Map();
+  for (const statement of contractAst.program.body) {
+    assert.equal(
+      statement.type,
+      'ExportNamedDeclaration',
+      `${sourcePath} checkpoint contract may contain only reviewed exported declarations`,
+    );
+    const declaration = statement.declaration;
+    assert.ok(
+      ['VariableDeclaration', 'TSTypeAliasDeclaration', 'TSInterfaceDeclaration'].includes(declaration?.type),
+      `${sourcePath} checkpoint contract contains an unreviewed executable declaration`,
+    );
+    if (declaration.type === 'VariableDeclaration') {
+      assert.equal(declaration.kind, 'const', `${sourcePath} checkpoint runtime declarations must be const`);
+      for (const declarator of declaration.declarations) {
+        assert.ok(
+          declarator.id?.type === 'Identifier' && allowedRuntimeBindings.has(declarator.id.name),
+          `${sourcePath} checkpoint contract contains an unreviewed runtime binding`,
+        );
+        assert.ok(
+          !runtimeInitializers.has(declarator.id.name),
+          `${sourcePath} checkpoint contract contains a duplicate runtime binding`,
+        );
+        runtimeInitializers.set(declarator.id.name, unwrapStaticExpression(declarator.init));
+      }
+    }
+  }
+  assert.deepEqual(
+    new Set(runtimeInitializers.keys()),
+    allowedRuntimeBindings,
+    `${sourcePath} checkpoint contract must declare exactly the reviewed runtime bindings`,
+  );
+  const packetPhases = runtimeInitializers.get('APPLY_BATCH_CHECKPOINT_PACKET_PHASES');
+  assert.deepEqual(
+    canonicalSchemaAst(packetPhases),
+    canonicalSchemaAst(babelParser.parseExpression("['first_pass', 'delta']", { plugins: ['typescript'] })),
+    `APPLY_BATCH_CHECKPOINT_PACKET_PHASES in ${sourcePath} must match the reviewed packet phases`,
+  );
+  const reviewedLeaseInitializers = {
+    APPLY_BATCH_MIN_LEASE_DURATION_MS: '15000',
+    APPLY_BATCH_MAX_LEASE_DURATION_MS: '5 * 60000',
+    APPLY_BATCH_LEASE_RENEW_BY_FRACTION: '0.8',
+  };
+  for (const [name, expression] of Object.entries(reviewedLeaseInitializers)) {
+    assert.deepEqual(
+      canonicalSchemaAst(runtimeInitializers.get(name)),
+      canonicalSchemaAst(babelParser.parseExpression(expression, { plugins: ['typescript'] })),
+      `${name} in ${sourcePath} must match its reviewed static value`,
+    );
+  }
+  const actionCodesDeclaration = activeVariableDeclarator(
+    source,
+    'APPLY_BATCH_CHECKPOINT_ACTION_CODES',
+    sourcePath,
+  ).declarator;
+  const actionMapDeclaration = activeVariableDeclarator(
+    source,
+    'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+    sourcePath,
+  ).declarator;
+  const actionCodesNode = unwrapStaticExpression(actionCodesDeclaration.init);
+  assert.equal(
+    actionCodesNode?.type,
+    'ArrayExpression',
+    `APPLY_BATCH_CHECKPOINT_ACTION_CODES in ${sourcePath} must be a static array`,
+  );
+  const actionCodes = actionCodesNode.elements.map((element, index) => staticPrimitive(
+    element,
+    `APPLY_BATCH_CHECKPOINT_ACTION_CODES[${index}] in ${sourcePath}`,
+  ));
+
+  const actionCodeReferences = collectBindingReferences(
+    contractAst,
+    'APPLY_BATCH_CHECKPOINT_ACTION_CODES',
+    () => false,
+  );
+  const lockedActionCodeReferences = [actionCodesDeclaration.id];
+  function collectLockedTypeReferences(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) collectLockedTypeReferences(child);
+      return;
+    }
+    if (node.type === 'TSTypeQuery'
+        && node.exprName?.type === 'Identifier'
+        && node.exprName.name === 'APPLY_BATCH_CHECKPOINT_ACTION_CODES') {
+      lockedActionCodeReferences.push(node.exprName);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      collectLockedTypeReferences(child);
+    }
+  }
+  collectLockedTypeReferences(contractAst);
+  assert.deepEqual(
+    actionCodeReferences,
+    lockedActionCodeReferences,
+    `APPLY_BATCH_CHECKPOINT_ACTION_CODES in ${sourcePath} must not be mutated, aliased, escaped, or used outside its locked type`,
+  );
+  const actionMapReferences = collectBindingReferences(
+    contractAst,
+    'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+    () => false,
+  );
+  assert.deepEqual(
+    actionMapReferences,
+    [actionMapDeclaration.id],
+    `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must not be mutated, aliased, escaped, or used outside its immutable declaration`,
+  );
+
+  const frozenMap = unwrapStaticExpression(actionMapDeclaration.init);
+  assert.equal(frozenMap?.type, 'CallExpression', `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must be frozen`);
+  assert.deepEqual(
+    canonicalSchemaAst(frozenMap.callee),
+    canonicalSchemaAst(babelParser.parseExpression('Object.freeze', { plugins: ['typescript'] })),
+    `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must use Object.freeze`,
+  );
+  assert.equal(frozenMap.arguments.length, 1, `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath} must freeze one object`);
+  const mappings = staticBabelObjectProperties(
+    unwrapStaticExpression(frozenMap.arguments[0]),
+    `APPLY_BATCH_CHECKPOINT_ACTION_MAP in ${sourcePath}`,
+  );
+  assert.deepEqual(Object.keys(mappings), actionCodes, `${sourcePath} checkpoint mappings must exactly match action-code order`);
+
+  const continuationByAction = {};
+  const lifecycleByAction = {};
+  const questionPacketByAction = {};
+  const lockedObjectReferences = [frozenMap.callee.object];
+  const lockedFreezeCalls = [frozenMap];
+  for (const actionCode of actionCodes) {
+    const frozenMapping = unwrapStaticExpression(mappings[actionCode]);
+    assert.equal(
+      frozenMapping?.type,
+      'CallExpression',
+      `${actionCode} mapping in ${sourcePath} must be frozen`,
+    );
+    assert.deepEqual(
+      canonicalSchemaAst(frozenMapping.callee),
+      canonicalSchemaAst(babelParser.parseExpression('Object.freeze', { plugins: ['typescript'] })),
+      `${actionCode} mapping in ${sourcePath} must use Object.freeze`,
+    );
+    assert.equal(
+      frozenMapping.arguments.length,
+      1,
+      `${actionCode} mapping in ${sourcePath} must freeze one object`,
+    );
+    lockedObjectReferences.push(frozenMapping.callee.object);
+    lockedFreezeCalls.push(frozenMapping);
+    const fields = staticBabelObjectProperties(
+      unwrapStaticExpression(frozenMapping.arguments[0]),
+      `${actionCode} mapping in ${sourcePath}`,
+    );
+    assert.deepEqual(
+      new Set(Object.keys(fields)),
+      new Set(['actionType', 'stage', 'continuationCode', 'lifecycleState', 'continuationAllowed', 'questionPacket']),
+      `${actionCode} mapping in ${sourcePath} must contain the complete reviewed field set`,
+    );
+    assert.deepEqual(
+      [
+        staticPrimitive(fields.actionType, `${actionCode}.actionType`),
+        staticPrimitive(fields.stage, `${actionCode}.stage`),
+        staticPrimitive(fields.continuationCode, `${actionCode}.continuationCode`),
+      ],
+      reviewedRoutingByAction[actionCode],
+      `${actionCode} mapping in ${sourcePath} must match its reviewed routing semantics`,
+    );
+    continuationByAction[actionCode] = staticPrimitive(fields.continuationAllowed, `${actionCode}.continuationAllowed`);
+    lifecycleByAction[actionCode] = staticPrimitive(fields.lifecycleState, `${actionCode}.lifecycleState`);
+    questionPacketByAction[actionCode] = staticPrimitive(fields.questionPacket, `${actionCode}.questionPacket`);
+  }
+  assert.deepEqual(
+    collectBindingReferences(contractAst, 'Object', () => false),
+    lockedObjectReferences,
+    `Object in ${sourcePath} must be the unshadowed intrinsic used only by the locked freeze calls`,
+  );
+  const executableCalls = [];
+  const forbiddenDynamicNodes = [];
+  function auditExecutableContract(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditExecutableContract(child);
+      return;
+    }
+    if (node.type === 'CallExpression') executableCalls.push(node);
+    if (['AssignmentExpression', 'UpdateExpression', 'AwaitExpression', 'YieldExpression', 'NewExpression', 'TaggedTemplateExpression', 'SequenceExpression'].includes(node.type)
+        || (node.type === 'UnaryExpression' && node.operator === 'delete')) {
+      forbiddenDynamicNodes.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'extra') continue;
+      auditExecutableContract(child);
+    }
+  }
+  auditExecutableContract(contractAst);
+  assert.deepEqual(
+    executableCalls,
+    lockedFreezeCalls,
+    `${sourcePath} checkpoint contract must not execute dynamic code outside its locked Object.freeze calls`,
+  );
+  assert.equal(
+    forbiddenDynamicNodes.length,
+    0,
+    `${sourcePath} checkpoint contract must not mutate globals or execute dynamic expressions`,
+  );
+  return { actionCodes, continuationByAction, lifecycleByAction, questionPacketByAction };
+}
+
+function assertCoordinatedCheckpointHelperSemantics({
+  localContract,
+  localApplySource,
+  hostedApplySource,
+  hostedBatchServiceSource = null,
+  hostedCheckpointContractSource = null,
+  sourcePaths = {},
+  expectedHostedDigests = HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256,
+  expectedReplayHelperDigests = HOSTED_APPLY_REPLAY_HELPER_AST_SHA256,
+}) {
+  const localApplyPath = sourcePaths.localApply || 'local Apply source';
+  const hostedApplyPath = sourcePaths.hostedApply || 'hosted Apply source';
+  const helperNames = Object.keys(expectedHostedDigests);
+  assertUnshadowedIntrinsicBinding(localApplySource, 'Set', localApplyPath);
+  assertUnshadowedIntrinsicBinding(hostedApplySource, 'Set', hostedApplyPath);
+  if (typeof hostedBatchServiceSource === 'string') {
+    assertUnshadowedIntrinsicBinding(
+      hostedBatchServiceSource,
+      'Set',
+      sourcePaths.hostedBatchService || 'hosted replay service',
+    );
+  }
+  assert.deepEqual(
+    Object.keys(localContract.schemaDigests || {}),
+    helperNames,
+    'Local checkpoint schema digests must lock the complete coordinated helper set',
+  );
+  assert.deepEqual(
+    namedDefinitionAstDigests(localApplySource, helperNames, localApplyPath),
+    localContract.schemaDigests,
+    'Local checkpoint helper ASTs drifted from their versioned semantic digests',
+  );
+  assert.deepEqual(
+    namedDefinitionAstDigests(hostedApplySource, helperNames, hostedApplyPath),
+    expectedHostedDigests,
+    'Hosted checkpoint helper ASTs drifted from the coordinated semantic digest lock',
+  );
+  assert.deepEqual(
+    checkpointHelperSemanticDescriptor(
+      localApplySource,
+      localContract,
+      localApplyPath,
+      hostedBatchServiceSource,
+      null,
+      null,
+      expectedReplayHelperDigests,
+    ),
+    checkpointHelperSemanticDescriptor(
+      hostedApplySource,
+      localContract,
+      hostedApplyPath,
+      hostedBatchServiceSource,
+      hostedCheckpointContractSource,
+      sourcePaths.hostedCheckpointContract,
+      expectedReplayHelperDigests,
+    ),
+    'Local and hosted checkpoint helpers drifted from one language-neutral semantic contract',
+  );
+}
+
 function parseSchemaExpression(source, name, sourcePath) {
   const expression = schemaDefinition(source, name, sourcePath);
   const ast = acorn.parseExpressionAt(expression, 0, { ecmaVersion: 'latest' });
@@ -4113,8 +5944,8 @@ function classifyFreeIdentifiers(identifiers, categories, label) {
   return Object.fromEntries(identifiers.map((name) => [name, classifications[name]]));
 }
 
-function activeNamedDefinitionAst(source, name, sourcePath) {
-  const matches = contractDeclarationStatements(source, sourcePath).flatMap((statement) => {
+function activeNamedDefinitionAst(source, name, sourcePath, declarationStatements = null) {
+  const matches = (declarationStatements ?? contractDeclarationStatements(source, sourcePath)).flatMap((statement) => {
     const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
     if (declaration?.type === 'FunctionDeclaration' && declaration.id?.name === name) return [declaration];
     if (declaration?.type !== 'VariableDeclaration') return [];
@@ -4163,6 +5994,100 @@ function activeNamedDefinitionAst(source, name, sourcePath) {
     `${name} in ${sourcePath} must never be assigned or updated after its locked definition`,
   );
   return matches[0];
+}
+
+function assertNamedDefinitionNotMutatedOrAliased(source, name, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const violations = [];
+  function rootedAtBinding(node) {
+    const value = unwrapTransparentExpression(node);
+    if (value?.type === 'Identifier') return value.name === name;
+    return (value?.type === 'MemberExpression' || value?.type === 'OptionalMemberExpression')
+      && rootedAtBinding(value.object);
+  }
+  function staticCallName(node) {
+    const callee = unwrapTransparentExpression(node?.callee);
+    const receiver = callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(callee.object)
+      : null;
+    const member = staticMemberName(callee);
+    return receiver?.type === 'Identifier' && member ? `${receiver.name}.${member}` : null;
+  }
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'VariableDeclarator'
+        && node.id?.type === 'Identifier'
+        && node.id.name !== name
+        && rootedAtBinding(node.init)) violations.push(node);
+    if (node.type === 'AssignmentExpression'
+        && node.left?.type === 'Identifier'
+        && node.left.name !== name
+        && rootedAtBinding(node.right)) violations.push(node);
+    if (node.type === 'AssignmentExpression'
+        && (node.left?.type === 'MemberExpression' || node.left?.type === 'OptionalMemberExpression')
+        && rootedAtBinding(node.left.object)) violations.push(node);
+    if (node.type === 'UpdateExpression'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && rootedAtBinding(node.argument.object)) violations.push(node);
+    if (node.type === 'UnaryExpression'
+        && node.operator === 'delete'
+        && (node.argument?.type === 'MemberExpression' || node.argument?.type === 'OptionalMemberExpression')
+        && rootedAtBinding(node.argument.object)) violations.push(node);
+    if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
+      if ([
+        'Object.assign',
+        'Object.defineProperty',
+        'Object.defineProperties',
+        'Object.setPrototypeOf',
+        'Reflect.defineProperty',
+        'Reflect.set',
+        'Reflect.setPrototypeOf',
+      ].includes(staticCallName(node)) && rootedAtBinding(node.arguments[0])) {
+        violations.push(node);
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      visit(child);
+    }
+  }
+  visit(ast);
+  function auditReferences(node, parent = null, parentKey = null) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) auditReferences(child, parent, parentKey);
+      return;
+    }
+    if (node.type === 'Identifier' && node.name === name) {
+      const declarationId = parent?.type === 'VariableDeclarator' && parentKey === 'id';
+      const directVariantCall = name === 'applyCheckpointActionVariant'
+        && parent?.type === 'CallExpression'
+        && parentKey === 'callee';
+      const reviewedArgument = parent?.type === 'CallExpression'
+        && parent.arguments.includes(node)
+        && (
+          ((name === 'applyCheckpointActionSchema' || name === 'applyCheckpointSchema')
+            && babelCalleeName(parent.callee) === 'z.array')
+          || (name === 'applyCheckpointActionVariant'
+            && babelCalleeName(parent.callee)?.endsWith('.map'))
+        );
+      if (!declarationId && !directVariantCall && !reviewedArgument) violations.push(node);
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      auditReferences(child, node, key);
+    }
+  }
+  auditReferences(ast);
+  assert.equal(
+    violations.length,
+    0,
+    `${name} in ${sourcePath} must not be mutated, aliased, or escaped after its locked definition`,
+  );
 }
 
 function typescriptConstArrayValues(source, name, sourcePath) {
@@ -4562,6 +6487,7 @@ function verifyCheckedInHostedContractFixture(
     backendUiRedirect: lock.publicExecutableContract.backendUiRedirectSha256,
     maintenanceMode: lock.publicExecutableContract.maintenanceModeSha256,
     databaseBinding: lock.publicExecutableContract.databaseBindingSha256,
+    databasePoolPolicy: lock.publicExecutableContract.databasePoolPolicySha256,
     reviewIdentity: lock.publicExecutableContract.reviewIdentitySha256,
     azureRateLimitOptions: lock.publicExecutableContract.azureRateLimitOptionsSha256,
     authRateLimit: lock.publicExecutableContract.authRateLimitSha256,
@@ -4574,6 +6500,7 @@ function verifyCheckedInHostedContractFixture(
     lock.publicExecutableContract.backendUiRedirectSha256,
     lock.publicExecutableContract.maintenanceModeSha256,
     lock.publicExecutableContract.databaseBindingSha256,
+    lock.publicExecutableContract.databasePoolPolicySha256,
     lock.publicExecutableContract.reviewIdentitySha256,
     lock.publicExecutableContract.azureRateLimitOptionsSha256,
     lock.publicExecutableContract.authRateLimitSha256,
@@ -4614,6 +6541,8 @@ const backendRoot = backendCandidates.find((candidate) => fs.existsSync(path.joi
   || backendCandidates[0];
 const hostedContractPath = path.join(backendRoot, 'contracts', 'trackly-apply-tools.json');
 const hostedApplySourcePath = path.join(backendRoot, 'src', 'mcp', 'server.ts');
+const hostedBatchServicePath = path.join(backendRoot, 'src', 'services', 'application-profile', 'batch-service.ts');
+const hostedCheckpointContractPath = path.join(backendRoot, 'src', 'services', 'application-profile', 'apply-checkpoint-contract.ts');
 const hostedPluginContractPath = path.join(backendRoot, 'contracts', 'trackly-plugin-tools.json');
 const hostedPluginSourcePath = path.join(backendRoot, 'src', 'mcp', 'plugin-server.ts');
 const hostedPluginRouterPath = path.join(backendRoot, 'src', 'mcp', 'plugin-router.ts');
@@ -4665,6 +6594,8 @@ if (
     `Hosted plugin contract at ${hostedPluginContractPath} must contain a top-level "tools" JSON object before tool parity can be verified.`,
   );
 }
+const hostedBatchServiceSource = fs.readFileSync(hostedBatchServicePath, 'utf8');
+const hostedCheckpointContractSource = fs.readFileSync(hostedCheckpointContractPath, 'utf8');
 const hostedPluginSource = fs.readFileSync(hostedPluginSourcePath, 'utf8');
 const hostedPluginRouterSource = fs.readFileSync(hostedPluginRouterPath, 'utf8');
 const hostedPluginScopesSource = fs.readFileSync(hostedPluginScopesPath, 'utf8');
@@ -4688,6 +6619,22 @@ const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtil
 const hostedTracklyApplySource = fs.readFileSync(hostedTracklyApplyPath, 'utf8');
 
 verifyHostedSnapshotGitProvenance(cliRoot, backendRoot);
+assertUnshadowedImportBinding(hostedApplySource, 'z', 'z', 'zod', hostedApplySourcePath);
+assertUnshadowedImportBinding(
+  hostedApplySource,
+  'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+  'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+  '../services/application-profile/batch-service.js',
+  hostedApplySourcePath,
+);
+assertUnshadowedImportBinding(
+  hostedBatchServiceSource,
+  'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+  'APPLY_BATCH_CHECKPOINT_ACTION_MAP',
+  './apply-checkpoint-contract.js',
+  hostedBatchServicePath,
+);
+assertCheckpointRouteCallChain(hostedTracklyApplySource, hostedTracklyApplyPath);
 assertLivePluginRouterMount(
   hostedApplicationSource,
   'tracklyPluginMcpRoutes',
@@ -4737,13 +6684,28 @@ verifyCoordinatedBackendCore({
   hostedContract: hosted,
   localApplySource,
   hostedApplySource,
+  hostedBatchServiceSource,
+  hostedCheckpointContractSource,
   hostedPluginContract,
   pluginLock,
   hostedPluginSource,
   sourcePaths: {
     localApply: localApplySourcePath,
     hostedApply: hostedApplySourcePath,
+    hostedCheckpointContract: hostedCheckpointContractPath,
     hostedPlugin: hostedPluginSourcePath,
+  },
+});
+assertCoordinatedCheckpointHelperSemantics({
+  localContract: local,
+  localApplySource,
+  hostedApplySource,
+  hostedBatchServiceSource,
+  hostedCheckpointContractSource,
+  sourcePaths: {
+    localApply: localApplySourcePath,
+    hostedApply: hostedApplySourcePath,
+    hostedCheckpointContract: hostedCheckpointContractPath,
   },
 });
 
@@ -4787,14 +6749,16 @@ for (const toolName of LOCAL_ONLY_TOOLS) {
   assert.equal(hosted.tools[toolName], undefined, `${toolName} must not be advertised by hosted MCP`);
   assert.doesNotMatch(hostedApplySource, new RegExp(`['"]${toolName}['"]`), `${toolName} must not be registered by hosted MCP`);
 }
+const { schemaDigests: coordinatedSchemaDigests, ...sharedLocalContract } = local;
+assert.ok(coordinatedSchemaDigests, 'Local contract must publish coordinated checkpoint helper digests');
 const sharedLocal = {
-  ...local,
+  ...sharedLocalContract,
   constants: Object.fromEntries(
     Object.entries(local.constants).filter(([name]) => !LOCAL_ONLY_CONSTANTS.includes(name)),
   ),
   tools: Object.fromEntries(Object.entries(local.tools).filter(([name]) => !LOCAL_ONLY_TOOLS.includes(name))),
 };
-assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented local-only tools');
+assert.deepEqual(hosted, sharedLocal, 'Hosted and local Trackly Apply MCP contracts drifted outside documented CLI digest metadata');
 assert.match(
   local.tools.trackly_record_apply_execution_dispositions,
   /applyExecutionDispositionSchema/,
@@ -7469,13 +9433,17 @@ console.log(
 
 module.exports = {
   CHECKED_IN_HOSTED_FIXTURE_SHA256,
+  HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256,
   HOSTED_DEPLOYABLE_PATHS,
   HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertCheckpointRouteCallChain,
+  assertCoordinatedCheckpointHelperSemantics,
   assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
+  assertUnshadowedImportBinding,
   assertInstallProcessGuardsSemantics,
   assertPluginManualSubmissionRouteSemantics,
   assertPluginReviewReadyPersistenceSemantics,
@@ -7510,6 +9478,7 @@ module.exports = {
   assertWrappedHandlerStatementSequenceAst,
   assertWrappedHandlerRequestEndpoint,
   canonicalSchemaAst,
+  checkpointHelperSemanticDescriptor,
   classifyFreeIdentifiers,
   directToolRegistrationsInExportedFunction,
   directHostedToolRegistrationsInNamedFactory,

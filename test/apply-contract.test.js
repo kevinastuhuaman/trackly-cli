@@ -15,8 +15,11 @@ const {
   HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertCheckpointRouteCallChain,
+  assertCoordinatedCheckpointHelperSemantics,
   assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
+  assertUnshadowedImportBinding,
   assertInstallProcessGuardsSemantics,
   assertPluginRoutePrecedence: assertPluginRoutePrecedenceProduction,
   assertServerListenSemantics,
@@ -32,6 +35,51 @@ const {
   verifyHostedContract,
 } = require('../scripts/verify-hosted-contract.js');
 
+test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {
+  const reviewedSource = `
+    import { z } from 'zod';
+    const schema = z.object({ value: z.string() });
+  `;
+  assert.doesNotThrow(() => assertUnshadowedImportBinding(
+    reviewedSource,
+    'z',
+    'z',
+    'zod',
+    'reviewed import fixture',
+  ));
+  assert.throws(() => assertUnshadowedImportBinding(
+    reviewedSource.replace("from 'zod'", "from './lookalike.js'"),
+    'z',
+    'z',
+    'zod',
+    'lookalike import fixture',
+  ), /must import z as z exactly once from zod/);
+  assert.throws(() => assertUnshadowedImportBinding(
+    `${reviewedSource}\nfunction bypass(z) { return z; }`,
+    'z',
+    'z',
+    'zod',
+    'shadowed import fixture',
+  ), /must not shadow, reassign, alias, or mutate z/);
+  for (const mutation of [
+    "Object.assign(z, { object: () => ({ parse: () => ({}) }) });",
+    "Object.defineProperty(z, 'object', { value: () => ({}) });",
+    'z.object = () => ({});',
+    'delete z.object;',
+    'const schemaLibrary = z; schemaLibrary.object = () => ({});',
+    'const mutate = Object.assign; mutate(z, { object: () => ({}) });',
+    'const readSchema = () => z; readSchema().object = () => ({});',
+  ]) {
+    assert.throws(() => assertUnshadowedImportBinding(
+      `${reviewedSource}\n${mutation}`,
+      'z',
+      'z',
+      'zod',
+      'mutated import fixture',
+    ), /must not shadow, reassign, alias, or mutate z/);
+  }
+});
+
 const assertPluginRoutePrecedence = (...args) => assertPluginRoutePrecedenceProduction(
   ...args,
   { reviewedGlobalMiddlewareCallDigests: [] },
@@ -42,6 +90,886 @@ function activeFunctionDigest(sourceText, name, sourcePath) {
     canonicalSchemaAst(activeNamedDefinitionAst(sourceText, name, sourcePath)),
   ));
 }
+
+test('checkpoint helper semantics match their versioned AST digests', () => {
+  assert.deepEqual(
+    Object.fromEntries(Object.keys(contract.schemaDigests).map((name) => [
+      name,
+      activeFunctionDigest(source, name, 'mcp/apply-tools.js'),
+    ])),
+    contract.schemaDigests,
+  );
+});
+
+test('hosted checkpoint helper drift fails coordinated semantic parity even when the tool alias is unchanged', () => {
+  const helperSource = source;
+  const replayAwareServiceSource = `
+    function actionCodeFromStoredCheckpoint(
+      stored: StoredApplyBatchCheckpoint,
+    ): ApplyBatchCheckpointActionCode | undefined {
+      return APPLY_BATCH_CHECKPOINT_ACTION_CODES.find((code) => {
+        const mapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[code];
+        return (
+          mapping.actionType === stored.actionType
+          && mapping.continuationCode === stored.continuationCode
+        );
+      });
+    }
+
+    async function loadStoredApplyBatchCheckpoint(
+      queryable: ApplyBatchQueryable,
+      userId: number,
+      idempotencyKeyHashes: string[],
+    ): Promise<StoredApplyBatchCheckpoint[]> {
+      const result = await queryable.query(
+        \`SELECT action.id::TEXT AS "actionId",
+                action.action_version AS "actionVersion",
+                action.idempotency_payload_hash AS "idempotencyPayloadHash",
+                action.member_id AS "memberId",
+                member.frozen_job_id AS "jobId",
+                member.company_name_snapshot AS "companyName",
+                member.job_title_snapshot AS "roleTitle",
+                action.run_id AS "runId",
+                member.member_version AS "memberVersion",
+                member.inspection_epoch AS "inspectionEpoch",
+                member.lifecycle_state AS "lifecycleState",
+                action.action_type AS "actionType",
+                action.continuation_code AS "continuationCode",
+                action.field_fingerprint AS "fieldFingerprint",
+                action.metadata
+           FROM public.user_apply_human_actions AS action
+           JOIN public.user_apply_batch_members AS member
+             ON member.id = action.member_id
+            AND member.user_id = action.user_id
+          WHERE action.user_id = $1
+            AND action.idempotency_key_hash = ANY($2::TEXT[])
+          ORDER BY action.action_version ASC\`,
+        [userId, idempotencyKeyHashes],
+      );
+      return result.rows as unknown as StoredApplyBatchCheckpoint[];
+    }
+
+    function storedCheckpointResult(
+      stored: StoredApplyBatchCheckpoint[],
+      status: 'recorded' | 'replayed',
+    ): ApplyBatchCheckpointResult {
+      const member = stored[0]!;
+      return {
+        memberId: Number(member.memberId),
+        status,
+        actions: stored.flatMap((action) => {
+          const actionCode = actionCodeFromStoredCheckpoint(action);
+          if (!actionCode) return [];
+          const packetPhase = action.metadata?.source_code;
+          return [{
+            actionId: action.actionId,
+            actionCode,
+            fieldFingerprint: action.fieldFingerprint ?? undefined,
+            packetPhase: packetPhase === 'first_pass' || packetPhase === 'delta'
+              ? packetPhase
+              : undefined,
+          }];
+        }),
+        lifecycleState: member.lifecycleState,
+        memberVersion: Number(member.memberVersion),
+        inspectionEpoch: Number(member.inspectionEpoch),
+        jobId: Number(member.jobId),
+        companyName: member.companyName,
+        roleTitle: member.roleTitle,
+        runId: Number(member.runId),
+      };
+    }
+
+    async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {
+      const checkpointMapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[
+        checkpoint.actions[0]!.actionCode
+      ];
+      const payloadHash = checkpointPayloadHash(input.batchId, checkpoint);
+      const actionKeyHashes = checkpoint.actions.map((_action, index) => (
+        hashApplyBatchValue(
+          'checkpoint-action-key',
+          \`\${checkpoint.idempotencyKey}:\${index + 1}\`,
+        )
+      ));
+      const existing = await loadStoredApplyBatchCheckpoint(
+        queryable,
+        input.userId,
+        actionKeyHashes,
+      );
+      if (existing.length > 0) {
+        if (
+          existing.length !== checkpoint.actions.length
+          || existing.some((action, index) => (
+            action.idempotencyPayloadHash !== payloadHash
+            || action.actionVersion !== index + 1
+          ))
+        ) {
+          throw new ApplyBatchIdempotencyConflictError();
+        }
+        return storedCheckpointResult(existing, 'replayed');
+      }
+      const preFormAuthenticationBlocked = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].stage === 'authentication',
+      );
+      if (
+        preFormAuthenticationBlocked
+        && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)
+      ) {
+        throw new ApplyBatchValidationError(
+          'Access-blocking checkpoints cannot report private-field commits or other actions.',
+        );
+      }
+      const hasQuestions = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
+      const hasNonQuestions = checkpoint.actions.some(
+        (action) => !APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
+      if (hasQuestions && hasNonQuestions) {
+        throw new Error('Question checkpoints cannot mix question and non-question actions.');
+      }
+    }
+
+    async function recordApplyBatchCheckpoints(queryable, input) {
+      const results = await Promise.all(input.checkpoints.map(async (checkpoint) => {
+        try {
+          return await recordOneApplyBatchCheckpoint(queryable, {
+            userId: input.userId,
+            batchId: input.batchId,
+            leaseToken: input.leaseToken,
+            now: input.now,
+          }, checkpoint);
+        } catch (error) {
+          throw error;
+        }
+      }));
+      return { results };
+    }
+  `;
+  const helperNames = [
+    'applyCheckpointActionVariant',
+    'applyCheckpointActionSchema',
+    'applyCheckpointSchema',
+  ];
+  const expectedDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(helperSource, name, 'checkpoint helper fixture'),
+  ]));
+  const replayHelperNames = [
+    'actionCodeFromStoredCheckpoint',
+    'loadStoredApplyBatchCheckpoint',
+    'storedCheckpointResult',
+  ];
+  const expectedReplayHelperDigests = Object.fromEntries(replayHelperNames.map((name) => [
+    name,
+    activeFunctionDigest(replayAwareServiceSource, name, 'replay helper fixture'),
+  ]));
+  const reviewedRoutingByAction = {
+    'answer/unknown': ['complete_field', 'application', 'unknown_answer'],
+    'auth/sign_in': ['sign_in', 'authentication', 'sign_in'],
+    'auth/account_creation': ['sign_in', 'authentication', 'account_creation'],
+    'auth/otp': ['otp', 'authentication', 'otp'],
+    'captcha/before_form': ['captcha', 'navigation', 'before_form'],
+    'captcha/at_submit': ['captcha', 'review', 'at_submit'],
+    'artifact/upload_required': ['upload_document', 'application', 'upload_required'],
+    'legal/decision_required': ['complete_field', 'application', 'legal_decision_required'],
+    'consent/decision_required': ['complete_field', 'application', 'consent_decision_required'],
+    'review/manual_submit': ['review', 'review', 'manual_submit'],
+    'trust/origin_mismatch': ['review', 'navigation', 'origin_mismatch'],
+    'observability/unverifiable_state': ['review', 'application', 'unverifiable_state'],
+  };
+  const checkpointMappings = Object.fromEntries(
+    contract.constants.applyCheckpointActionCodes.map((actionCode) => {
+      const [actionType, stage, continuationCode] = reviewedRoutingByAction[actionCode];
+      return [actionCode, {
+        actionType,
+        stage,
+        continuationCode,
+      continuationAllowed: contract.constants.applyCheckpointContinuationByAction[actionCode],
+      lifecycleState: contract.constants.applyCheckpointLifecycleByAction[actionCode],
+      questionPacket: contract.constants.applyCheckpointQuestionPacketByAction[actionCode],
+      }];
+    }),
+  );
+  const frozenCheckpointMappings = Object.entries(checkpointMappings)
+    .map(([actionCode, mapping]) => `${JSON.stringify(actionCode)}: Object.freeze(${JSON.stringify(mapping)})`)
+    .join(',');
+  const hostedCheckpointContractSource = `
+    export const APPLY_BATCH_CHECKPOINT_ACTION_CODES = ${JSON.stringify(contract.constants.applyCheckpointActionCodes)} as const;
+    export const APPLY_BATCH_CHECKPOINT_PACKET_PHASES = ['first_pass', 'delta'] as const;
+    export const APPLY_BATCH_CHECKPOINT_ACTION_MAP = Object.freeze({${frozenCheckpointMappings}});
+    export const APPLY_BATCH_MIN_LEASE_DURATION_MS = 15_000;
+    export const APPLY_BATCH_MAX_LEASE_DURATION_MS = 5 * 60_000;
+    export const APPLY_BATCH_LEASE_RENEW_BY_FRACTION = 0.8;
+  `;
+  const fixture = {
+    localContract: { ...contract, schemaDigests: expectedDigests },
+    localApplySource: helperSource,
+    hostedApplySource: helperSource,
+    hostedBatchServiceSource: replayAwareServiceSource,
+    hostedCheckpointContractSource,
+    expectedHostedDigests: expectedDigests,
+    expectedReplayHelperDigests,
+  };
+
+  assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: `${fixture.hostedApplySource}\n(applyCheckpointSchema as any)._def.effect.refinement = () => {};`,
+    }),
+    /applyCheckpointSchema .* must not be mutated, aliased, or escaped/,
+  );
+  for (const sourceKey of ['localApplySource', 'hostedApplySource', 'hostedBatchServiceSource']) {
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        [sourceKey]: `const Set = class FakeSet { constructor() { return { size: 1 }; } };\n${fixture[sourceKey]}`,
+      }),
+      /Set .* must be the unshadowed intrinsic/,
+    );
+  }
+  for (const mutation of [
+    'globalThis.Set = class FakeSet {};',
+    "globalThis['S' + 'et'] = class FakeSet {};",
+    "Object.defineProperty(globalThis, 'Set', { value: class FakeSet {} });",
+    "Reflect.defineProperty(globalThis, 'Set', { value: class FakeSet {} });",
+    "Reflect.set(globalThis, 'Set', class FakeSet {});",
+    "Object.defineProperties(globalThis, { Set: { value: class FakeSet {} } });",
+    'Object.assign(globalThis, { Set: class FakeSet {} });',
+    'delete globalThis.Set;',
+    "const runtimeGlobal = globalThis; Object.defineProperty(runtimeGlobal, 'Set', { value: class FakeSet {} });",
+    'let runtimeGlobal; runtimeGlobal = globalThis; runtimeGlobal.Set = class FakeSet {};',
+    'Set.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
+    "Object.defineProperty(Set.prototype, 'add', { value(value) { this[value] = true; return this; } });",
+    'const SetAlias = Set; SetAlias.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
+    'const { Set: SetAlias } = globalThis; SetAlias.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
+    "Object.defineProperty.call(Object, globalThis, 'Set', { value: class FakeSet {} });",
+    'const intrinsicPatch = { Set: class FakeSet {} }; Object.assign(globalThis, intrinsicPatch);',
+  ]) {
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        hostedApplySource: `${mutation}\n${fixture.hostedApplySource}`,
+      }),
+      /Set .* must be the unshadowed intrinsic/,
+    );
+  }
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: `
+        const Object = { freeze: (value) => value };
+        ${hostedCheckpointContractSource}
+      `,
+    }),
+    /only reviewed exported declarations|unshadowed intrinsic|must not be mutated, aliased, escaped/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: `
+        ${hostedCheckpointContractSource}
+        APPLY_BATCH_CHECKPOINT_ACTION_MAP['review/manual_submit'].continuationAllowed = true;
+      `,
+    }),
+    /only reviewed exported declarations|must not be mutated, aliased, escaped/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: `
+        ${hostedCheckpointContractSource}
+        globalThis.Object.freeze = (value) => value;
+        eval("APPLY_BATCH_CHECKPOINT_ACTION_MAP['review/manual_submit'].continuationAllowed = true");
+      `,
+    }),
+    /only reviewed exported declarations|must not mutate globals|must not execute dynamic code/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
+        'export const APPLY_BATCH_MIN_LEASE_DURATION_MS = 15_000;',
+        'export const APPLY_BATCH_MIN_LEASE_DURATION_MS = (delete globalThis.Object.freeze, 15_000);',
+      ),
+    }),
+    /must match its reviewed static value|must not mutate globals|must not execute dynamic code/,
+  );
+  for (const [from, to, expectedError] of [
+    ["['first_pass', 'delta']", "['bypass']", /must match the reviewed packet phases/],
+    ['APPLY_BATCH_MIN_LEASE_DURATION_MS = 15_000', 'APPLY_BATCH_MIN_LEASE_DURATION_MS = 0', /must match its reviewed static value/],
+    ['APPLY_BATCH_MAX_LEASE_DURATION_MS = 5 * 60_000', 'APPLY_BATCH_MAX_LEASE_DURATION_MS = 999 * 999', /must match its reviewed static value/],
+    ['APPLY_BATCH_LEASE_RENEW_BY_FRACTION = 0.8', 'APPLY_BATCH_LEASE_RENEW_BY_FRACTION = 2', /must match its reviewed static value/],
+    ['"stage":"authentication"', '"stage":"application"', /must match its reviewed routing semantics/],
+  ]) {
+    const driftedSource = hostedCheckpointContractSource.replace(from, to);
+    assert.notEqual(driftedSource, hostedCheckpointContractSource);
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        hostedCheckpointContractSource: driftedSource,
+      }),
+      expectedError,
+    );
+  }
+  const commentOnlyMixedPacketSource = helperSource.replace(
+    'const applyCheckpointSchema',
+    '// hasQuestions && hasNonQuestions: Question checkpoints cannot mix question and non-question actions\nconst applyCheckpointSchema',
+  );
+  const missingMixedPacketServiceSource = replayAwareServiceSource.replace(
+    `      const hasQuestions = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
+      const hasNonQuestions = checkpoint.actions.some(
+        (action) => !APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
+      );
+      if (hasQuestions && hasNonQuestions) {
+        throw new Error('Question checkpoints cannot mix question and non-question actions.');
+      }
+`,
+    '',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: commentOnlyMixedPacketSource,
+      hostedBatchServiceSource: missingMixedPacketServiceSource,
+    }),
+    /mixed-packet classifiers|reject new mixed packets/,
+  );
+  const missingAuthenticationGuardSource = replayAwareServiceSource.replace(
+    `      const preFormAuthenticationBlocked = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].stage === 'authentication',
+      );
+      if (
+        preFormAuthenticationBlocked
+        && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)
+      ) {
+        throw new ApplyBatchValidationError(
+          'Access-blocking checkpoints cannot report private-field commits or other actions.',
+        );
+      }
+`,
+    '',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: missingAuthenticationGuardSource,
+    }),
+    /replay-aware pre-form authentication guard|pre-form authentication walls/,
+  );
+  const weakenedFingerprintSource = helperSource.replace(
+    "z.string().regex(/^[a-f0-9]{64}$/)",
+    "z.string().regex(/^[a-f0-9]{32}$/)",
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(weakenedFingerprintSource, name, 'weakened fingerprint fixture'),
+        ])),
+      },
+      localApplySource: weakenedFingerprintSource,
+    }),
+    /canonical question-packet fingerprint semantics/,
+  );
+  const widenedActionCodeSource = helperSource.replace(
+    'actionCode: z.literal(actionCode)',
+    'actionCode: z.any()',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(widenedActionCodeSource, name, 'widened action-code fixture'),
+        ])),
+      },
+      localApplySource: widenedActionCodeSource,
+    }),
+    /actionCode.*literal|exact action variant/i,
+  );
+  const wrappedActionSchemaSource = helperSource.replace(
+    "const applyCheckpointActionSchema = z.discriminatedUnion(\n  'actionCode',\n  APPLY_CHECKPOINT_ACTION_CODES.map(applyCheckpointActionVariant),\n);",
+    "const applyCheckpointActionSchema = z.discriminatedUnion(\n  'actionCode',\n  APPLY_CHECKPOINT_ACTION_CODES.map(applyCheckpointActionVariant),\n).or(z.any());",
+  );
+  assert.notEqual(wrappedActionSchemaSource, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(wrappedActionSchemaSource, name, 'wrapped action-schema fixture'),
+        ])),
+      },
+      localApplySource: wrappedActionSchemaSource,
+    }),
+    /exact discriminated union/i,
+  );
+  const commentBypassFingerprintSource = weakenedFingerprintSource.replace(
+    'const applyCheckpointActionVariant',
+    '// fieldFingerprint: APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[actionCode] ? z.string().regex(/^[a-f0-9]{64}$/) : z.string().regex(/^[a-f0-9]{64}$/).optional()\nconst applyCheckpointActionVariant',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(commentBypassFingerprintSource, name, 'comment bypass fingerprint fixture'),
+        ])),
+      },
+      localApplySource: commentBypassFingerprintSource,
+    }),
+    /canonical question-packet fingerprint semantics/,
+  );
+  const alternateRefinementSource = helperSource.replace(
+    "  if (checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch) {\n    context.addIssue({\n      code: z.ZodIssueCode.custom,\n      path: ['inspectionEpoch'],\n      message: 'inspectionEpoch must equal expectedInspectionEpoch',\n    });\n  }",
+    "  if (checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch) {\n    context.addIssue({\n      code: z.ZodIssueCode.custom,\n      path: ['inspectionEpoch'],\n      message: 'inspectionEpoch must equal expectedInspectionEpoch',\n    });\n  } else {\n    sideEffect();\n  }",
+  );
+  assert.notEqual(alternateRefinementSource, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: alternateRefinementSource,
+      expectedHostedDigests: Object.fromEntries(helperNames.map((name) => [
+        name,
+        activeFunctionDigest(alternateRefinementSource, name, 'alternate refinement fixture'),
+      ])),
+    }),
+    /without an alternate branch/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
+        `Object.freeze({${frozenCheckpointMappings}})`,
+        `Object.freeze(${JSON.stringify(checkpointMappings)})`,
+      ),
+    }),
+    /mapping in .* must be frozen/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: helperSource.replace(
+        'hasQuestions && checkpoint.packetPhase === undefined',
+        '!hasQuestions && checkpoint.packetPhase === undefined',
+      ),
+    }),
+    /Hosted checkpoint helper ASTs drifted from the coordinated semantic digest lock/,
+  );
+
+  const locallyDrifted = helperSource.replace(
+    "if (hasQuestions && checkpoint.packetPhase === undefined)",
+    "const hasNonQuestions = actionCodes.some((code) => !APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);\n  if (hasQuestions && hasNonQuestions) context.addIssue({ code: z.ZodIssueCode.custom, path: ['actions'], message: 'Question checkpoints cannot mix question and non-question actions' });\n  if (hasQuestions && checkpoint.packetPhase === undefined)",
+  );
+  const driftedLocalDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(locallyDrifted, name, 'drifted local checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: driftedLocalDigests },
+      localApplySource: locallyDrifted,
+    }),
+    /locked executable classifications|language-neutral semantic contract/,
+  );
+  const invertedEpoch = helperSource.replace(
+    'checkpoint.inspectionEpoch !== checkpoint.expectedInspectionEpoch',
+    'checkpoint.inspectionEpoch === checkpoint.expectedInspectionEpoch',
+  );
+  const invertedEpochDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(invertedEpoch, name, 'inverted epoch checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: invertedEpochDigests },
+      localApplySource: invertedEpoch,
+    }),
+    /locked executable condition/,
+  );
+  const weakenedBound = helperSource.replace(
+    'inspectionEpoch: z.number().int().min(0)',
+    'inspectionEpoch: z.number().int().min(-1)',
+  );
+  const weakenedBoundDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(weakenedBound, name, 'weakened bound checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: weakenedBoundDigests },
+      localApplySource: weakenedBound,
+    }),
+    /language-neutral semantic contract/,
+  );
+  const extraRefinement = helperSource.replace(
+    'const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);',
+    "if (checkpoint.actions.length === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['actions'], message: 'Actions required' });\n  const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);",
+  );
+  const extraRefinementDigests = Object.fromEntries(helperNames.map((name) => [
+    name,
+    activeFunctionDigest(extraRefinement, name, 'extra refinement checkpoint helper fixture'),
+  ]));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: { ...fixture.localContract, schemaDigests: extraRefinementDigests },
+      localApplySource: extraRefinement,
+    }),
+    /must not contain unmodeled executable statements/,
+  );
+  const swappedRefinementParameters = helperSource.replace(
+    '.superRefine((checkpoint, context) => {',
+    '.superRefine((context, checkpoint) => {',
+  );
+  assert.notEqual(swappedRefinementParameters, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedApplySource: swappedRefinementParameters,
+      expectedHostedDigests: Object.fromEntries(helperNames.map((name) => [
+        name,
+        activeFunctionDigest(swappedRefinementParameters, name, 'swapped refinement parameter fixture'),
+      ])),
+    }),
+    /exact checkpoint and context parameters/,
+  );
+  const actionVariantWithInitializer = helperSource.replace(
+    'const applyCheckpointActionVariant = (actionCode) => z.object({',
+    'const applyCheckpointActionVariant = (actionCode) => {\n  const mapping = { continuationAllowed: true };\n  return z.object({',
+  ).replace(
+    '});\nconst applyCheckpointActionSchema',
+    '});\n};\nconst applyCheckpointActionSchema',
+  );
+  assert.notEqual(actionVariantWithInitializer, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(actionVariantWithInitializer, name, 'action variant initializer fixture'),
+        ])),
+      },
+      localApplySource: actionVariantWithInitializer,
+    }),
+    /local action variant must contain only its locked return/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: `
+        async function recordOneApplyBatchCheckpoint() {
+          const existing = await loadStoredApplyBatchCheckpoint();
+          const hasQuestions = true;
+          const hasNonQuestions = true;
+          if (hasQuestions && hasNonQuestions) {
+            throw new Error('Question checkpoints cannot mix question and non-question actions.');
+          }
+          if (existing.length > 0) return storedCheckpointResult(existing, 'replayed');
+        }
+      `,
+    }),
+    /must have exactly one active top-level variable or function definition|checkpoint execution must use only its locked pre-replay computations|mixed-packet classifiers must use the locked action mappings|only after exact replay lookup/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {',
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint, loadStoredApplyBatchCheckpoint = bypassReplayLookup) {',
+      ),
+    }),
+    /exact queryable, input, and checkpoint parameters/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {',
+        'async function recordOneApplyBatchCheckpoint(queryable, input, checkpoint) {\n      function loadStoredApplyBatchCheckpoint() { return []; }',
+      ),
+    }),
+    /must not shadow its locked replay helper bindings/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        "return storedCheckpointResult(existing, 'replayed');",
+        "void 'replayed';",
+      ),
+    }),
+    /must contain its locked conflict guard and stored replay return/,
+  );
+  for (const [driftedReplaySource, expectedError] of [
+    [replayAwareServiceSource.replace(
+      'return result.rows as unknown as StoredApplyBatchCheckpoint[];',
+      'return (result.rows as unknown as StoredApplyBatchCheckpoint[]).slice(0, 1);',
+    ), /loadStoredApplyBatchCheckpoint.*semantic lock/i],
+    [replayAwareServiceSource.replace(
+      'actions: stored.flatMap((action) => {',
+      'actions: stored.slice(0, 1).flatMap((action) => {',
+    ), /storedCheckpointResult.*semantic lock/i],
+    [replayAwareServiceSource.replace(
+      'mapping.continuationCode === stored.continuationCode',
+      'mapping.continuationCode !== stored.continuationCode',
+    ), /actionCodeFromStoredCheckpoint.*semantic lock/i],
+  ]) {
+    assert.notEqual(driftedReplaySource, replayAwareServiceSource);
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        hostedBatchServiceSource: driftedReplaySource,
+      }),
+      expectedError,
+    );
+  }
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        "return storedCheckpointResult(existing, 'replayed');",
+        "sideEffect(); return storedCheckpointResult(existing, 'replayed');",
+      ),
+    }),
+    /must contain its locked conflict guard and stored replay return/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'throw new ApplyBatchIdempotencyConflictError();',
+        'void 0;',
+      ),
+    }),
+    /must contain its locked conflict guard and stored replay return/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'const hasQuestions = checkpoint.actions.some(',
+        'sideEffect();\n      const hasQuestions = checkpoint.actions.some(',
+      ),
+    }),
+    /must contain only the locked authentication guard and classifiers between replay lookup and mixed-packet rejection/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /const hasQuestions = checkpoint\.actions\.some\([\s\S]*?\n\s*\);/,
+        'const hasQuestions = true;',
+      ),
+    }),
+    /mixed-packet classifiers must use the locked action mappings/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /const hasNonQuestions = checkpoint\.actions\.some\([\s\S]*?\n\s*\);/,
+        'const hasNonQuestions = true;',
+      ),
+    }),
+    /mixed-packet classifiers must use the locked action mappings/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /return storedCheckpointResult\(existing, 'replayed'\);\n(\s*)}/,
+        "return storedCheckpointResult(existing, 'replayed');\n$1} else {\n$1  sideEffect();\n$1}",
+      ),
+    }),
+    /checkpoint replay branch must not define an alternate path/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        /throw new Error\('Question checkpoints cannot mix question and non-question actions\.'\);\n(\s*)}/,
+        "throw new Error('Question checkpoints cannot mix question and non-question actions.');\n$1} else {\n$1  sideEffect();\n$1}",
+      ),
+    }),
+    /mixed-packet branch must not define an alternate path/,
+  );
+  assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics({
+    ...fixture,
+    hostedBatchServiceSource: replayAwareServiceSource.replace(
+      "throw new Error('Question checkpoints cannot mix question and non-question actions.');",
+      "throw new ApplyBatchValidationError('Question checkpoints cannot mix question and non-question actions.');",
+    ),
+  }));
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        "throw new Error('Question checkpoints cannot mix question and non-question actions.');",
+        "void 'Question checkpoints cannot mix question and non-question actions.';",
+      ),
+    }),
+    /must directly throw the locked rejection/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'return await recordOneApplyBatchCheckpoint(queryable, {',
+        'return await recordAlternateApplyBatchCheckpoint(queryable, {',
+      ),
+    }),
+    /directly await the locked recordOneApplyBatchCheckpoint call/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'try {\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+        'try {\n          const recordOneApplyBatchCheckpoint = recordAlternateApplyBatchCheckpoint;\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+      ),
+    }),
+    /must not shadow the locked recordOneApplyBatchCheckpoint binding/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'try {\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+        'return { memberId: checkpoint.memberId, status: \'recorded\' };\n        try {\n          return await recordOneApplyBatchCheckpoint(queryable, {',
+      ),
+    }),
+    /must contain only its guarded write/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'return { results };',
+        'return { results: [] };',
+      ),
+    }),
+    /must return only its locked results and question packet/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'const results = await Promise.all',
+        'return { results: [] };\n      const results = await Promise.all',
+      ),
+    }),
+    /must preserve only its locked validation prefix/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'const results = await Promise.all',
+        'const bypass = sideEffect(), results = await Promise.all',
+      ),
+    }),
+    /results declaration must not contain sibling bindings/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: `const Promise = { all: async () => [] };\n${replayAwareServiceSource}`,
+    }),
+    /Promise .* must be the unshadowed intrinsic/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'throw error;',
+        "return { memberId: checkpoint.memberId, status: 'recorded' };",
+      ),
+    }),
+    /catch handler must preserve only its locked conflict mapping/,
+  );
+  const mixedWriterShape = replayAwareServiceSource.replace(
+    `} catch (error) {
+          throw error;
+        }`,
+    `} catch (error) {
+          if (error instanceof ApplyBatchIdempotencyConflictError) {
+            return { memberId: checkpoint.memberId, status: 'conflict' as const, errorCode: 'idempotency_payload_mismatch' as const };
+          }
+          if (error instanceof ApplyBatchConflictError) {
+            return { memberId: checkpoint.memberId, status: 'conflict' as const, errorCode: 'stale_member_state' as const };
+          }
+          throw error;
+        }`,
+  ).replace(
+    'return { results };',
+    `await completeApplyBatchIfTerminal(queryable, { userId: input.userId, batchId: input.batchId, now: input.now });
+      return { results, questionPacket: buildApplyBatchQuestionPacket(results) };`,
+  );
+  assert.notEqual(mixedWriterShape, replayAwareServiceSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: mixedWriterShape,
+    }),
+    /must match one complete locked fixture or production shape/,
+  );
+  const hasQuestionsDeclaration = 'const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);';
+  const packetPhaseBranch = `if (hasQuestions && checkpoint.packetPhase === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['packetPhase'],
+      message: 'Question checkpoints require a packet phase',
+    });
+  }`;
+  const refinementBranchBeforeDeclarations = helperSource.replace(
+    `${hasQuestionsDeclaration}\n  ${packetPhaseBranch}`,
+    `${packetPhaseBranch}\n  ${hasQuestionsDeclaration}`,
+  );
+  assert.notEqual(refinementBranchBeforeDeclarations, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(refinementBranchBeforeDeclarations, name, 'reordered refinement fixture'),
+        ])),
+      },
+      localApplySource: refinementBranchBeforeDeclarations,
+    }),
+    /must declare hasQuestions before evaluating Question checkpoints require a packet phase/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedCheckpointContractSource: hostedCheckpointContractSource.replace(
+        '"continuationAllowed":true',
+        '"continuationAllowed":false',
+      ),
+    }),
+    /language-neutral semantic contract/,
+  );
+});
 
 function startServerListenDigest(sourceText, sourcePath) {
   const startServer = activeNamedDefinitionAst(sourceText, 'startServer', sourcePath);
@@ -151,12 +1079,20 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.7.3');
+  assert.equal(contract.contractVersion, '3.7.6');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
     assert.equal(normalizeSchema(executableSchema), localSchema, `${name} schema drifted`);
   }
+});
+
+test('Apply contract publishes mixed-packet and replay invariants', () => {
+  assert.deepEqual(contract.toolInputInvariants.trackly_checkpoint_apply_batch, {
+    questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
+    exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
+    preFormAuthenticationWallsRejectedAfterExactReplayLookup: true,
+  });
 });
 
 function canonicalJsonValue(value) {
@@ -177,6 +1113,8 @@ function contractDigest(candidate) {
   const crypto = require('node:crypto');
   const executableContract = canonicalJsonValue({
     constants: candidate.constants,
+    schemaDigests: candidate.schemaDigests,
+    toolInputInvariants: candidate.toolInputInvariants,
     tools: candidate.tools,
   });
   return crypto.createHash('sha256').update(JSON.stringify(executableContract)).digest('hex');
@@ -224,6 +1162,27 @@ test('contract history covers changes to constants as well as tools', () => {
   );
 });
 
+test('contract history covers changes to internal schema semantics', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.schemaDigests.applyCheckpointSchema = '0'.repeat(64);
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
+});
+
+test('contract history covers changes to published cross-field invariants', () => {
+  const historicalContract = JSON.parse(JSON.stringify(contract));
+  historicalContract.contractVersion = contract.contractVersion;
+  historicalContract.toolInputInvariants.trackly_checkpoint_apply_batch
+    .exactReplayOfPreviouslyAcceptedPayloadPreserved = false;
+  assert.throws(
+    () => assertNoHistoricalVersionReuse(historicalContract),
+    (error) => error?.code === 'ERR_ASSERTION',
+  );
+});
+
 test('release manifests stay on one package version', () => {
   assert.equal(serverManifest.version, packageManifest.version);
   assert.equal(serverManifest.packages[0].version, packageManifest.version);
@@ -240,7 +1199,10 @@ test('hosted provenance covers plugin UI, resource identity, and auth-epoch runt
     'package-lock.json',
     'src/index.ts',
     'src/config/database.ts',
+    'src/config/database-pool.ts',
     'src/services/review-identity.ts',
+    'src/services/application-profile/apply-checkpoint-contract.ts',
+    'src/services/application-profile/batch-service.ts',
     'src/__tests__/cors-origins.integration.test.ts',
     'src/mcp/plugin-router.ts',
     'src/mcp/__tests__/plugin-server.test.ts',
@@ -713,6 +1675,87 @@ test('review-ready persistence lock rejects route and atomic transaction drift',
   );
 });
 
+test('checkpoint route lock binds the live endpoint to the reviewed bulk writer', () => {
+  const routeStatement = `router.post('/jobscout/apply/batches/:id/checkpoints', requireAuth, requireApplyFeature, async (req, res) => {
+    try {
+      assertPlainBodyKeys(
+        req.body,
+        ['leaseToken', 'checkpoints'],
+        'Only leaseToken and redacted checkpoints are accepted; keep labels, options, and answers local',
+        'Apply checkpoint body must be a plain object',
+      );
+      const ownerId = userId(req)!;
+      const input = {
+        userId: ownerId,
+        batchId: positiveInteger(req.params.id, 'Apply batch id'),
+        leaseToken: boundedMachineInput(req.body.leaseToken, 'leaseToken'),
+        now: new Date(),
+        checkpoints: req.body.checkpoints as ApplyBatchCheckpointInput[],
+      };
+      const result = await withAuthorizedApplyMutation(
+        ownerId,
+        applyRunCallerContext(req),
+        (db) => recordApplyBatchCheckpoints(db, input),
+      );
+      res.json({ success: true, ...result });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });`;
+  const routeSource = `import { recordApplyBatchCheckpoints } from '../services/application-profile/batch-service';\n${routeStatement}`;
+  assert.doesNotThrow(() => assertCheckpointRouteCallChain(routeSource, 'checkpoint route fixture'));
+  assert.throws(
+    () => assertCheckpointRouteCallChain(
+      routeSource.replace(
+        '(db) => recordApplyBatchCheckpoints(db, input)',
+        '(db) => recordAlternateApplyBatchCheckpoints(db, input)',
+      ),
+      'rewired checkpoint route fixture',
+    ),
+    /must call imported recordApplyBatchCheckpoints exactly 1 times/,
+  );
+  assert.throws(
+    () => assertCheckpointRouteCallChain(
+      routeSource.replace('withAuthorizedApplyMutation(', 'withoutAuthorization('),
+      'unauthorized checkpoint route fixture',
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertCheckpointRouteCallChain(
+      `router.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.json({ success: true }));\n${routeSource}`,
+      'shadowed checkpoint route fixture',
+    ),
+    /must not register an earlier route that shadows the locked checkpoint endpoint/,
+  );
+  for (const shadowingRoute of [
+    "router.use('/jobscout/apply/batches', (_req, res) => res.json({ success: true }));",
+    "router.all('/jobscout/apply/batches/:id/*', (_req, res) => res.json({ success: true }));",
+    "router.post('/jobscout/apply/batches/:id/:action', (_req, res) => res.json({ success: true }));",
+    "router.route('/jobscout/apply/batches/:id/checkpoints').post((_req, res) => res.json({ success: true }));",
+    "router.route('/jobscout/apply/batches/:id/checkpoints').get((_req, res) => res.end()).post((_req, res) => res.json({ success: true }));",
+    "const shadowRoute = router.route('/jobscout/apply/batches/:id/checkpoints');",
+    "const alternateRouter = router; alternateRouter.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "let alternateRouter; alternateRouter = router; alternateRouter.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "router[method]('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "const holder = { router }; holder.router.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "const holder = [router]; holder[0].post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "installCheckpointRoutes(router);",
+    "const getRouter = () => router; getRouter().post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "router.post.call(router, '/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
+    "router.param('id', (_req, res) => res.sendStatus(403));",
+    "if (true) { router.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.sendStatus(403)); }",
+  ]) {
+    assert.throws(
+      () => assertCheckpointRouteCallChain(
+        `${shadowingRoute}\n${routeSource}`,
+        'covering checkpoint route fixture',
+      ),
+      /must not register an earlier route that shadows the locked checkpoint endpoint/,
+    );
+  }
+});
+
 test('Azure shared limiter helper source is exact-byte locked', () => {
   const source = 'export function azureRehearsalRateLimitOptions() { return {}; }\n';
   const digest = sha256ExactBytes(source);
@@ -854,29 +1897,54 @@ test('Apply contract owns value-free bulk checkpoint semantics', () => {
   ]);
   assert.deepEqual(contract.constants.applyCheckpointPacketPhases, ['first_pass', 'delta']);
   const schema = normalizeSchema(toolArguments('trackly_checkpoint_apply_batch')[2]);
-  assert.match(schema, /checkpoints:z\.array\(z\.object\(/);
-  assert.match(schema, /actions:z\.array\(z\.object\(/);
+  const actionSchema = normalizeSchema(schemaDefinition('applyCheckpointActionSchema'));
+  const actionVariant = normalizeSchema(schemaDefinition('applyCheckpointActionVariant'));
+  assert.match(schema, /checkpoints:z\.array\(applyCheckpointSchema\)/);
+  const checkpointSchema = normalizeSchema(schemaDefinition('applyCheckpointSchema'));
+  assert.match(checkpointSchema, /actions:z\.array\(applyCheckpointActionSchema\)/);
   assert.match(
-    schema,
+    checkpointSchema,
     /actions:.*\.min\(1\)\.max\(APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT\)/,
   );
-  assert.match(schema, /inspectionEpoch:.*packetPhase:.*knownFieldsCommitted:.*actions:/);
+  assert.match(checkpointSchema, /inspectionEpoch:.*packetPhase:.*knownFieldsCommitted:.*actions:/);
   assert.match(
     schema,
     /\.min\(1\)\.max\(APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST\)/,
   );
-  assert.match(schema, /expectedMemberVersion/);
-  assert.match(schema, /expectedInspectionEpoch/);
-  assert.match(schema, /inspectionEpoch/);
-  assert.match(schema, /continuationAllowed/);
-  assert.match(schema, /fieldFingerprint/);
-  assert.match(schema, /knownFieldsCommitted/);
-  assert.match(schema, /idempotencyKey/);
+  assert.match(checkpointSchema, /expectedMemberVersion/);
+  assert.match(checkpointSchema, /expectedInspectionEpoch/);
+  assert.match(checkpointSchema, /inspectionEpoch/);
+  assert.match(actionVariant, /continuationAllowed/);
+  assert.match(actionVariant, /fieldFingerprint/);
+  assert.match(checkpointSchema, /knownFieldsCommitted/);
+  assert.match(checkpointSchema, /idempotencyKey/);
   assert.doesNotMatch(
-    schema,
+    checkpointSchema,
     /questionLabel|fieldLabel|rawLabel|options|answerValue|credential|captchaText|pageText/i,
   );
   assert.match(source, /\/api\/jobscout\/apply\/batches\/\$\{batchId\}\/checkpoints/);
+});
+
+test('local checkpoint schema binds every action to its canonical continuation value', () => {
+  const canonicalContinuationByAction = contract.constants
+    .applyCheckpointContinuationByAction;
+  const lifecycleByAction = contract.constants.applyCheckpointLifecycleByAction;
+  const questionPacketByAction = contract.constants.applyCheckpointQuestionPacketByAction;
+
+  assert.deepEqual(Object.keys(canonicalContinuationByAction), contract.constants.applyCheckpointActionCodes);
+  assert.deepEqual(Object.keys(lifecycleByAction), contract.constants.applyCheckpointActionCodes);
+  assert.deepEqual(Object.keys(questionPacketByAction), contract.constants.applyCheckpointActionCodes);
+  assert.ok(Object.values(lifecycleByAction).every((lifecycle) => (
+    ['needs_input', 'review_ready', 'blocked'].includes(lifecycle)
+  )));
+  assert.match(
+    schemaDefinition('applyCheckpointActionSchema'),
+    /z\.discriminatedUnion\(\s*['"]actionCode['"]/,
+  );
+  assert.match(
+    schemaDefinition('applyCheckpointSchema'),
+    /actions:\s*z\.array\(applyCheckpointActionSchema\)/,
+  );
 });
 
 test('Apply contract binds recovered surfaces and proves close from three current-epoch facts', () => {
@@ -1482,13 +2550,13 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.7.0 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.7.1 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.7\.0 requires protocol 3\.6\.0 or newer/);
+  assert.match(skill, /Skill 4\.7\.1 requires protocol 3\.6\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.7\.0/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.7\.1/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
@@ -1875,12 +2943,12 @@ test('Apply skill runs Humanizer when available and retains a self-contained fal
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.7.0 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.7.1 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.7\.0/);
+  assert.match(skill, /Skill 4\.7\.1/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);

@@ -3644,6 +3644,7 @@ test('public skills reference only the locked 18-tool facade', () => {
   assert.match(lock.publicExecutableContract.authRateLimitSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.maintenanceModeSha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.databaseBindingSha256, /^[a-f0-9]{64}$/);
+  assert.match(lock.publicExecutableContract.databasePoolPolicySha256, /^[a-f0-9]{64}$/);
   assert.match(lock.publicExecutableContract.reviewIdentitySha256, /^[a-f0-9]{64}$/);
   assert.ok(Object.values(lock.publicExecutableContract.schemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));
   assert.ok(Object.values(lock.publicExecutableContract.transitiveSchemaSha256).every((digest) => /^[a-f0-9]{64}$/.test(digest)));

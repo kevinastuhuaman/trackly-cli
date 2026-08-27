@@ -3,11 +3,29 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
+
+function canonicalJson(value) {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+    .join(',')}}`;
+}
+
+function memberRunsHash(memberRuns) {
+  const normalized = memberRuns
+    .map((member) => ({ ...member }))
+    .sort((left, right) => left.memberId - right.memberId || left.runId - right.runId);
+  return createHash('sha256').update(canonicalJson(normalized)).digest('hex');
+}
 
 const skill = read('skills/trackly-apply/SKILL.md');
 
@@ -28,6 +46,36 @@ test('operational checklist preserves target, approval, fill order, and manual s
   assert.match(checkpoints, /never[\s\S]*Submit/i);
   assert.match(checkpoints, /preserve[\s\S]*review-ready[\s\S]*tabs/i);
   assert.match(checkpoints, /application lifecycle[\s\S]*Trackly job status[\s\S]*browser tab status/i);
+});
+
+test('operational checkpoints require audited whole-form, history, resume, lookup, and handoff receipts', () => {
+  const checkpoints = read('skills/trackly-apply/references/operational-checkpoints.md');
+  const resolver = read('skills/trackly-apply/references/answer-resolution.md');
+  const integrity = read('skills/trackly-apply/references/form-integrity.md');
+  const upload = read('skills/trackly-apply/references/browser-upload.md');
+  const handoff = read('skills/trackly-apply/references/review-handoff.md');
+
+  assert.match(checkpoints, /controlAccounting[\s\S]*formInventoryFingerprint/);
+  assert.match(checkpoints, /canonicalEducationRecordCount[\s\S]*canonicalEmploymentPositionCount/);
+  assert.match(checkpoints, /same `profileRevision`[\s\S]*receipt and `expectedContext`/i);
+  assert.match(checkpoints, /browser-surface fields[\s\S]*independently captured[\s\S]*browser baseline/i);
+  assert.match(checkpoints, /resumeAudit/i);
+  assert.match(checkpoints, /preAttachVerification/);
+  assert.match(checkpoints, /finalSweep/);
+  assert.match(checkpoints, /review\/manual_submit[\s\S]*checkpointStatus/);
+  assert.match(checkpoints, /continuationAllowed[\s\S]*false[\s\S]*review\/manual_submit|review\/manual_submit[\s\S]*continuationAllowed[\s\S]*false/i);
+  assert.match(checkpoints, /handoff[\s\S]*visibility[\s\S]*unverified/i);
+  assert.match(checkpoints, /tracklyJobState[\s\S]*match[\s\S]*expectedContext[\s\S]*every handoff/i);
+  assert.match(resolver, /run-only[\s\S]*exact question[\s\S]*office[\s\S]*jurisdiction[\s\S]*company[\s\S]*provider[\s\S]*global/i);
+  assert.match(resolver, /before asking[\s\S]*query every applicable scope/i);
+  assert.match(resolver, /frozen profile revision[\s\S]*current bounded snapshot projection/i);
+  assert.match(integrity, /one accounting row[\s\S]*every visible control/i);
+  assert.match(integrity, /position-level[\s\S]*reverse chronological[\s\S]*date\s+precision/i);
+  assert.match(upload, /final sweep[\s\S]*attachment is still committed/i);
+  assert.match(upload, /only chooser arming[\s\S]*file attachment[\s\S]*hand the upload to the user/i);
+  assert.match(upload, /verification capabilities is unavailable[\s\S]*do not route it into `manual_unbound`/i);
+  assert.match(handoff, /Employer application state[\s\S]*Trackly state[\s\S]*Browser state/);
+  assert.match(handoff, /No state in one[\s\S]*implies[\s\S]*another/i);
 });
 
 test('access probe requires actual applicant controls and typed terminal states', () => {
@@ -98,7 +146,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...selection,
       latestExplicitTarget: 21,
     }, { ...selectionContext, latestExplicitTarget: 21 }).join('\n'),
-    /1 to 20 for accessible_execution/
+    /1 to 20 for the selected work mode/
   );
   assert.match(
     validateCheckpoint('selection', {
@@ -106,7 +154,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       workMode: 'fixed_inspection',
       latestExplicitTarget: 101,
     }, { ...fixedSelectionContext, latestExplicitTarget: 101 }).join('\n'),
-    /1 to 100 for fixed_inspection/
+    /1 to 100 for the selected work mode/
   );
   assert.deepEqual(validateCheckpoint('selection', { ...selection, approvedJobIds: [] }, selectionContext), []);
   assert.deepEqual(validateCheckpoint('selection', {
@@ -141,7 +189,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   );
   assert.match(
     validateCheckpoint('selection', { ...selection, email: 'private@example.com' }, selectionContext).join('\n'),
-    /unexpected field: email/
+    /receipt contains an unexpected field/
   );
   assert.match(
     validateCheckpoint('selection', { ...selection, approvedJobIds: ['private@example.com'] }, selectionContext).join('\n'),
@@ -262,13 +310,59 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     jobId: 101,
     runId: 401,
     inspectionEpoch: 2,
+    profileRevision: 7,
     visibleControlCount: 12,
     committedControlCount: 11,
     typedExceptionCount: 1,
+    controlAccounting: {
+      filledExactProfile: 8,
+      filledSafeDerivation: 1,
+      filledSupportedDraft: 1,
+      preservedUserEdit: 1,
+      missingFact: 1,
+      liveConsent: 0,
+      authenticationBlocker: 0,
+      unobservableCommit: 0,
+      unsupportedControl: 0,
+      notApplicable: 0,
+    },
+    formInventoryFingerprint: 'a'.repeat(64),
     knownOmissionCount: 0,
     knownFieldsFilledBeforeQuestions: true,
+    answerLookupCompleted: true,
+    answerLookupScopeCounts: {
+      run: 0,
+      question: 1,
+      office: 0,
+      jurisdiction: 1,
+      company: 2,
+      provider: 0,
+      global: 7,
+    },
+    answerLookupFingerprint: 'b'.repeat(64),
     parserSensitiveFieldsRechecked: true,
     educationAndEmploymentVerified: true,
+    historyReconciliation: {
+      canonicalEducationRecordCount: 2,
+      accountedEducationRecordCount: 2,
+      canonicalEmploymentPositionCount: 6,
+      accountedEmploymentPositionCount: 6,
+      educationOrderVerified: true,
+      employmentOrderVerified: true,
+      datePrecisionInvented: false,
+      educationReconciliationFingerprint: 'c'.repeat(64),
+      employmentReconciliationFingerprint: 'd'.repeat(64),
+    },
+    resumeAudit: {
+      control: 'required',
+      mode: 'automated_verified',
+      approval: 'passed',
+      preAttachVerification: 'passed',
+      attachmentCommit: 'passed',
+      filenameVerification: 'passed',
+      parserRecheck: 'passed',
+      finalSweep: 'passed',
+    },
     writingPresent: true,
     localWritingGate: 'passed',
     humanizerAvailability: 'available',
@@ -276,7 +370,27 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     humanizerFallbackUsed: false,
     questionPacketTrueGapsOnly: true,
   };
-  assert.deepEqual(validateCheckpoint('fill', fill, expectedContext), []);
+  const fillContext = {
+    ...expectedContext,
+    profileRevision: 7,
+    canonicalEducationRecordCount: 2,
+    canonicalEmploymentPositionCount: 6,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
+    resumeControl: 'required',
+  };
+  assert.deepEqual(validateCheckpoint('fill', fill, fillContext), []);
+  assert.match(
+    validateCheckpoint('fill', { ...fill, profileRevision: 6 }, fillContext).join('\n'),
+    /profileRevision must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('fill', fill, { ...fillContext, profileRevision: 0 }).join('\n'),
+    /profileRevision must be a positive safe integer/
+  );
+  assert.match(
+    validateCheckpoint('fill', fill, { ...fillContext, profileRevision: -1 }).join('\n'),
+    /profileRevision must be a positive safe integer/
+  );
   const { executionId: omittedFillExecutionId, ...fixedFill } = fill;
   const { executionId: omittedContextExecutionId, ...fixedExpectedContext } = expectedContext;
   assert.equal(omittedFillExecutionId, 301);
@@ -285,36 +399,181 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...fixedFill,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
+    profileRevision: 0,
   }, {
     ...fixedExpectedContext,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
+    profileRevision: 0,
+    canonicalEducationRecordCount: 2,
+    canonicalEmploymentPositionCount: 6,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
+    resumeControl: 'required',
   }), []);
   assert.match(
-    validateCheckpoint('fill', { ...fill, knownOmissionCount: 1 }, expectedContext).join('\n'),
+    validateCheckpoint('fill', {
+      ...fixedFill,
+      workMode: 'fixed_inspection',
+      inspectionEpoch: 0,
+      profileRevision: 0,
+    }, {
+      ...fixedExpectedContext,
+      workMode: 'fixed_inspection',
+      inspectionEpoch: 0,
+      profileRevision: -1,
+      canonicalEducationRecordCount: 2,
+      canonicalEmploymentPositionCount: 6,
+      formInventoryFingerprint: fill.formInventoryFingerprint,
+      resumeControl: 'required',
+    }).join('\n'),
+    /profileRevision must be a non-negative safe integer/
+  );
+  assert.match(
+    validateCheckpoint('fill', { ...fill, knownOmissionCount: 1 }, fillContext).join('\n'),
     /knownOmissionCount/
   );
   assert.match(
     validateCheckpoint('fill', {
       ...fill,
+      visibleControlCount: 0,
+      committedControlCount: 0,
+      typedExceptionCount: 0,
+      controlAccounting: Object.fromEntries(Object.keys(fill.controlAccounting).map((field) => [field, 0])),
+    }, fillContext).join('\n'),
+    /visibleControlCount must be at least 1/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      controlAccounting: { ...fill.controlAccounting, missingFact: 0 },
+    }, fillContext).join('\n'),
+    /controlAccounting counts must equal visibleControlCount/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      controlAccounting: { ...fill.controlAccounting, rawLabel: 'private text' },
+    }, fillContext).join('\n'),
+    /controlAccounting contains an unexpected field/
+  );
+  assert.match(
+    validateCheckpoint('fill', { ...fill, formInventoryFingerprint: 'not-a-hash' }, fillContext).join('\n'),
+    /formInventoryFingerprint must be a lowercase SHA-256 fingerprint/
+  );
+  assert.match(
+    validateCheckpoint('fill', { ...fill, answerLookupCompleted: false }, fillContext).join('\n'),
+    /answerLookupCompleted/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      answerLookupScopeCounts: { ...fill.answerLookupScopeCounts, employerQuestion: 1 },
+    }, fillContext).join('\n'),
+    /answerLookupScopeCounts contains an unexpected field/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      historyReconciliation: {
+        ...fill.historyReconciliation,
+        accountedEmploymentPositionCount: 5,
+      },
+    }, fillContext).join('\n'),
+    /employment position counts must match/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      historyReconciliation: { ...fill.historyReconciliation, datePrecisionInvented: true },
+    }, fillContext).join('\n'),
+    /datePrecisionInvented must be false/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      resumeAudit: { ...fill.resumeAudit, parserRecheck: 'not_applicable' },
+    }, fillContext).join('\n'),
+    /resumeAudit\.parserRecheck must match the declared control mode/
+  );
+  assert.deepEqual(validateCheckpoint('fill', {
+    ...fill,
+    resumeAudit: {
+      control: 'required',
+      mode: 'manual_unbound',
+      approval: 'passed',
+      preAttachVerification: 'not_applicable',
+      attachmentCommit: 'user_confirmed',
+      filenameVerification: 'passed',
+      parserRecheck: 'passed',
+      finalSweep: 'passed',
+    },
+  }, fillContext), []);
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      resumeAudit: {
+        control: 'required',
+        mode: 'manual_unbound',
+        approval: 'passed',
+        preAttachVerification: 'not_applicable',
+        attachmentCommit: 'passed',
+        filenameVerification: 'passed',
+        parserRecheck: 'passed',
+        finalSweep: 'passed',
+      },
+    }, fillContext).join('\n'),
+    /resumeAudit\.attachmentCommit must match the declared control mode/
+  );
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
+      resumeAudit: {
+        control: 'required',
+        mode: 'manual_unbound',
+        approval: 'passed',
+        preAttachVerification: 'not_applicable',
+        attachmentCommit: 'user_confirmed',
+        filenameVerification: 'passed',
+        parserRecheck: 'not_applicable',
+        finalSweep: 'passed',
+      },
+    }, fillContext).join('\n'),
+    /resumeAudit\.parserRecheck must match the declared control mode/
+  );
+  assert.deepEqual(validateCheckpoint('fill', {
+    ...fill,
+    resumeAudit: {
+      control: 'absent',
+      mode: 'not_applicable',
+      approval: 'not_applicable',
+      preAttachVerification: 'not_applicable',
+      attachmentCommit: 'not_applicable',
+      filenameVerification: 'not_applicable',
+      parserRecheck: 'not_applicable',
+      finalSweep: 'not_applicable',
+    },
+  }, { ...fillContext, resumeControl: 'absent' }), []);
+  assert.match(
+    validateCheckpoint('fill', {
+      ...fill,
       visibleControlCount: Number.MAX_SAFE_INTEGER + 1,
-    }, expectedContext).join('\n'),
+    }, fillContext).join('\n'),
     /visibleControlCount must be a non-negative safe integer/
   );
   assert.match(
-    validateCheckpoint('fill', { ...fill, inspectionEpoch: 3 }, expectedContext).join('\n'),
+    validateCheckpoint('fill', { ...fill, inspectionEpoch: 3 }, fillContext).join('\n'),
     /inspectionEpoch must match expectedContext/
   );
   assert.match(
-    validateCheckpoint('fill', { ...fill, jobId: 103 }, { ...expectedContext, jobId: 103 }).join('\n'),
+    validateCheckpoint('fill', { ...fill, jobId: 103 }, { ...fillContext, jobId: 103 }).join('\n'),
     /jobId must belong to expectedContext\.approvedJobIds/
   );
   assert.match(
-    validateCheckpoint('fill', fill, { ...expectedContext, email: 'private@example.com' }).join('\n'),
-    /unexpected expectedContext field: email/
+    validateCheckpoint('fill', fill, { ...fillContext, email: 'private@example.com' }).join('\n'),
+    /expectedContext contains an unexpected field/
   );
   assert.match(
-    validateCheckpoint('fill', { ...fill, humanizerRan: false }, expectedContext).join('\n'),
+    validateCheckpoint('fill', { ...fill, humanizerRan: false }, fillContext).join('\n'),
     /humanizerRan/
   );
   assert.deepEqual(validateCheckpoint('fill', {
@@ -322,14 +581,14 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     humanizerAvailability: 'unavailable',
     humanizerRan: false,
     humanizerFallbackUsed: true,
-  }, expectedContext), []);
+  }, fillContext), []);
   assert.match(
     validateCheckpoint('fill', {
       ...fill,
       humanizerAvailability: 'not_applicable',
       humanizerRan: false,
       humanizerFallbackUsed: false,
-    }, expectedContext).join('\n'),
+    }, fillContext).join('\n'),
     /must be available or unavailable when writing is present/
   );
 
@@ -341,31 +600,728 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     jobId: 101,
     runId: 401,
     inspectionEpoch: 2,
+    profileRevision: fill.profileRevision,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
     finalIntegrityPassed: true,
     truthConfirmationRecorded: true,
+    truthCertificationAttestationId: '901',
+    truthCertificationDependencyHash: 'a'.repeat(64),
+    truthCertificationExpiresAt: '2026-08-28T03:00:00.000Z',
+    truthCertificationMemberRuns: [
+      { memberId: 202, runId: 402, memberVersion: 4, inspectionEpoch: 2 },
+      { memberId: 201, runId: 401, memberVersion: 8, inspectionEpoch: 2 },
+    ],
+    truthCertificationRunSetHash: '',
+    truthCertificationStatus: 'recorded',
     submitActivated: false,
     reviewTabPreserved: true,
     userVisibleHandoffProven: true,
+    browserBindingHash: '4'.repeat(64),
+    handoffEvidenceFingerprint: '5'.repeat(64),
+    handoffEvidenceType: 'visible_presentation_receipt',
+    checkpointAction: 'review/manual_submit',
+    continuationAllowed: false,
+    resolvedActionCount: 2,
+    resolvedActionIdsFingerprint: 'e'.repeat(64),
+    checkpointStatus: 'recorded',
+    checkpointMemberVersion: 8,
+    checkpointInspectionEpoch: 2,
+    checkpointLifecycle: 'review_ready',
+    checkpointActionCount: 1,
+    checkpointActionIdsFingerprint: 'e'.repeat(64),
   };
-  assert.deepEqual(validateCheckpoint('review', review, expectedContext), []);
+  review.truthCertificationRunSetHash = memberRunsHash(review.truthCertificationMemberRuns);
+  const reviewContext = {
+    ...expectedContext,
+    profileRevision: fill.profileRevision,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
+    truthCertificationAttestationId: '901',
+    truthCertificationDependencyHash: 'a'.repeat(64),
+    truthCertificationExpiresAt: '2026-08-28T03:00:00.000Z',
+    truthCertificationMemberRuns: review.truthCertificationMemberRuns,
+    truthCertificationRunSetHash: review.truthCertificationRunSetHash,
+    truthCertificationStatus: 'recorded',
+    browserBindingHash: '4'.repeat(64),
+    handoffEvidenceFingerprint: '5'.repeat(64),
+    handoffEvidenceType: 'visible_presentation_receipt',
+    checkpointAction: 'review/manual_submit',
+    continuationAllowed: false,
+    resolvedActionCount: 2,
+    resolvedActionIdsFingerprint: 'e'.repeat(64),
+    checkpointStatus: 'recorded',
+    checkpointMemberVersion: 8,
+    checkpointInspectionEpoch: 2,
+    checkpointLifecycle: 'review_ready',
+    checkpointActionCount: 1,
+    checkpointActionIdsFingerprint: 'e'.repeat(64),
+  };
+  const resolvedFill = {
+    ...fill,
+    committedControlCount: 12,
+    typedExceptionCount: 0,
+    controlAccounting: {
+      ...fill.controlAccounting,
+      filledExactProfile: 9,
+      missingFact: 0,
+    },
+  };
+  const priorFill = { receipt: resolvedFill, expectedContext: fillContext };
+  const reviewValidationTimeMs = Date.parse('2026-08-27T02:00:00.000Z');
+  const validateReviewCheckpoint = (
+    receiptCandidate,
+    contextCandidate,
+    fillEvidence = priorFill,
+    validationTimeMs = reviewValidationTimeMs,
+  ) => validateCheckpoint(
+    'review',
+    receiptCandidate,
+    contextCandidate,
+    fillEvidence,
+    validationTimeMs,
+  );
+  assert.deepEqual(validateReviewCheckpoint(review, reviewContext), []);
+  assert.match(
+    validateReviewCheckpoint(review, reviewContext, {
+      receipt: fill,
+      expectedContext: fillContext,
+    }).join('\n'),
+    /priorFill\.controlAccounting\.missingFact must be 0 before review/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: [],
+    }, reviewContext).join('\n'),
+    /receipt: truthCertificationMemberRuns must contain/,
+  );
+  assert.match(
+    validateReviewCheckpoint(review, {
+      ...reviewContext,
+      truthCertificationMemberRuns: [],
+    }).join('\n'),
+    /expectedContext: truthCertificationMemberRuns must contain/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      handoffEvidenceFingerprint: '6'.repeat(64),
+    }, reviewContext).join('\n'),
+    /handoffEvidenceFingerprint must match expectedContext/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      handoffEvidenceType: 'durable_handoff_receipt',
+    }, {
+      ...reviewContext,
+      handoffEvidenceType: 'durable_handoff_receipt',
+    }).join('\n'),
+    /handoffEvidenceType must identify visible presentation/,
+  );
+  assert.deepEqual(
+    validateReviewCheckpoint(
+      JSON.parse(JSON.stringify(review)),
+      JSON.parse(JSON.stringify(reviewContext)),
+      JSON.parse(JSON.stringify(priorFill)),
+    ),
+    [],
+    'review validation must compare separately parsed member-run arrays structurally',
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationAttestationId: undefined,
+      truthCertificationDependencyHash: undefined,
+      truthCertificationExpiresAt: undefined,
+      truthCertificationStatus: undefined,
+    }, reviewContext).join('\n'),
+    /truthCertificationAttestationId must be a positive decimal identifier/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationDependencyHash: 'b'.repeat(64),
+    }, reviewContext).join('\n'),
+    /truthCertificationDependencyHash must match expectedContext/,
+  );
+  for (const nonCanonicalExpiry of ['9999', '2026-08-28 03:00:00Z', '2026-02-30T03:00:00.000Z']) {
+    assert.match(
+      validateReviewCheckpoint({
+        ...review,
+        truthCertificationExpiresAt: nonCanonicalExpiry,
+      }, {
+        ...reviewContext,
+        truthCertificationExpiresAt: nonCanonicalExpiry,
+      }).join('\n'),
+      /truthCertificationExpiresAt must be an ISO-8601 date-time/,
+    );
+  }
+  const siblingOnlyMemberRuns = [
+    { memberId: 202, runId: 402, memberVersion: 4, inspectionEpoch: 2 },
+  ];
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: siblingOnlyMemberRuns,
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }, {
+      ...reviewContext,
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }).join('\n'),
+    /truth certification must cover the current member/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: [
+        ...siblingOnlyMemberRuns,
+        { memberId: 201, runId: 401, memberVersion: 8, inspectionEpoch: 2 },
+      ],
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }, {
+      ...reviewContext,
+      truthCertificationRunSetHash: memberRunsHash(siblingOnlyMemberRuns),
+    }).join('\n'),
+    /truthCertificationMemberRuns must match truthCertificationRunSetHash/,
+  );
+  for (const memberOverride of [{ memberVersion: 7 }, { inspectionEpoch: 1 }]) {
+    const staleMemberRuns = review.truthCertificationMemberRuns.map((member) => (
+      member.memberId === review.memberId ? { ...member, ...memberOverride } : member
+    ));
+    assert.match(
+      validateReviewCheckpoint({
+        ...review,
+        truthCertificationMemberRuns: staleMemberRuns,
+        truthCertificationRunSetHash: memberRunsHash(staleMemberRuns),
+      }, {
+        ...reviewContext,
+        truthCertificationRunSetHash: memberRunsHash(staleMemberRuns),
+      }).join('\n'),
+      /truth certification must cover the current member/,
+    );
+  }
+  const duplicateMemberRuns = [
+    ...review.truthCertificationMemberRuns,
+    { memberId: 201, runId: 499, memberVersion: 2, inspectionEpoch: 2 },
+  ];
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: duplicateMemberRuns,
+      truthCertificationRunSetHash: memberRunsHash(duplicateMemberRuns),
+    }, {
+      ...reviewContext,
+      truthCertificationRunSetHash: memberRunsHash(duplicateMemberRuns),
+    }).join('\n'),
+    /memberId values must be unique/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationMemberRuns: [{
+        ...review.truthCertificationMemberRuns[1],
+        answerSnapshotHash: 'private',
+      }],
+    }, reviewContext).join('\n'),
+    /entries must contain only/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationExpiresAt: '2026-08-27T01:59:59.999Z',
+    }, {
+      ...reviewContext,
+      truthCertificationExpiresAt: '2026-08-27T01:59:59.999Z',
+    }).join('\n'),
+    /truthCertificationExpiresAt must be later than validation time/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationExpiresAt: '2026-08-27T02:00:00.000Z',
+    }, {
+      ...reviewContext,
+      truthCertificationExpiresAt: '2026-08-27T02:00:00.000Z',
+    }).join('\n'),
+    /truthCertificationExpiresAt must be later than validation time/,
+  );
+  assert.match(
+    validateReviewCheckpoint(review, reviewContext, null).join('\n'),
+    /priorFill is required for review/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      profileRevision: 999,
+      formInventoryFingerprint: 'f'.repeat(64),
+    }, {
+      ...reviewContext,
+      profileRevision: 999,
+      formInventoryFingerprint: 'f'.repeat(64),
+    }).join('\n'),
+    /must match the validated priorFill receipt/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      formInventoryFingerprint: 'f'.repeat(64),
+    }, reviewContext).join('\n'),
+    /formInventoryFingerprint must match expectedContext/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      profileRevision: review.profileRevision + 1,
+    }, reviewContext).join('\n'),
+    /profileRevision must match expectedContext/,
+  );
+  const reviewExpectedFields = [
+    'checkpointAction',
+    'continuationAllowed',
+    'resolvedActionCount',
+    'resolvedActionIdsFingerprint',
+    'checkpointStatus',
+    'checkpointMemberVersion',
+    'checkpointInspectionEpoch',
+    'checkpointLifecycle',
+    'checkpointActionCount',
+    'checkpointActionIdsFingerprint',
+    'profileRevision',
+    'formInventoryFingerprint',
+    'truthCertificationAttestationId',
+    'truthCertificationDependencyHash',
+    'truthCertificationExpiresAt',
+    'truthCertificationRunSetHash',
+    'truthCertificationStatus',
+    'browserBindingHash',
+    'handoffEvidenceFingerprint',
+    'handoffEvidenceType',
+  ];
   const { executionId: omittedReviewExecutionId, ...fixedReview } = review;
+  const fixedFillReceipt = {
+    ...fixedFill,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+    profileRevision: 0,
+    committedControlCount: 12,
+    typedExceptionCount: 0,
+    controlAccounting: {
+      ...fixedFill.controlAccounting,
+      filledExactProfile: 9,
+      missingFact: 0,
+    },
+  };
+  const fixedFillContext = {
+    ...fixedExpectedContext,
+    workMode: 'fixed_inspection',
+    inspectionEpoch: 0,
+    profileRevision: 0,
+    canonicalEducationRecordCount: 2,
+    canonicalEmploymentPositionCount: 6,
+    formInventoryFingerprint: fill.formInventoryFingerprint,
+    resumeControl: 'required',
+  };
+  const fixedTruthCertificationMemberRuns = review.truthCertificationMemberRuns.map((member) => (
+    member.memberId === review.memberId ? { ...member, inspectionEpoch: 0 } : member
+  ));
+  const fixedTruthCertificationRunSetHash = memberRunsHash(fixedTruthCertificationMemberRuns);
   assert.equal(omittedReviewExecutionId, 301);
-  assert.deepEqual(validateCheckpoint('review', {
+  assert.deepEqual(validateReviewCheckpoint({
     ...fixedReview,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
+    profileRevision: 0,
+    checkpointInspectionEpoch: 0,
+    truthCertificationMemberRuns: fixedTruthCertificationMemberRuns,
+    truthCertificationRunSetHash: fixedTruthCertificationRunSetHash,
   }, {
     ...fixedExpectedContext,
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
-  }), []);
+    ...Object.fromEntries(reviewExpectedFields.map((field) => [field, reviewContext[field]])),
+    profileRevision: 0,
+    checkpointInspectionEpoch: 0,
+    truthCertificationMemberRuns: fixedTruthCertificationMemberRuns,
+    truthCertificationRunSetHash: fixedTruthCertificationRunSetHash,
+  }, { receipt: fixedFillReceipt, expectedContext: fixedFillContext }), []);
   assert.match(
-    validateCheckpoint('review', { ...review, submitActivated: true }, expectedContext).join('\n'),
+    validateReviewCheckpoint({ ...review, submitActivated: true }, reviewContext).join('\n'),
     /submitActivated/
   );
   assert.match(
-    validateCheckpoint('review', { ...review, inspectionEpoch: 3 }, expectedContext).join('\n'),
+    validateReviewCheckpoint({ ...review, inspectionEpoch: 3 }, reviewContext).join('\n'),
     /inspectionEpoch must match expectedContext/
+  );
+  assert.match(
+    validateReviewCheckpoint({ ...review, checkpointStatus: 'fabricated' }, reviewContext).join('\n'),
+    /checkpointStatus/
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      checkpointInspectionEpoch: 3,
+    }, {
+      ...reviewContext,
+      checkpointInspectionEpoch: 3,
+    }).join('\n'),
+    /checkpointInspectionEpoch must equal inspectionEpoch/
+  );
+  assert.deepEqual(validateReviewCheckpoint({
+    ...review,
+    checkpointActionCount: 1,
+    checkpointActionIdsFingerprint: 'f'.repeat(64),
+  }, {
+    ...reviewContext,
+    checkpointActionCount: 1,
+    checkpointActionIdsFingerprint: 'f'.repeat(64),
+  }), []);
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      checkpointActionCount: 2,
+    }, {
+      ...reviewContext,
+      checkpointActionCount: 2,
+    }).join('\n'),
+    /must contain exactly one action/,
+  );
+  assert.match(
+    validateReviewCheckpoint(review, {
+      ...reviewContext,
+      resolvedActionCount: 1,
+    }).join('\n'),
+    /resolvedActionCount must match expectedContext/
+  );
+  assert.match(
+    validateReviewCheckpoint({ ...review, continuationAllowed: true }, reviewContext).join('\n'),
+    /continuationAllowed must be false for review\/manual_submit/
+  );
+  assert.match(
+    validateReviewCheckpoint(review, {
+      ...reviewContext,
+      checkpointAction: 'captcha/at_submit',
+    }).join('\n'),
+    /checkpointAction must match expectedContext/
+  );
+  assert.match(
+    validateReviewCheckpoint(review, {
+      ...reviewContext,
+      continuationAllowed: true,
+    }).join('\n'),
+    /continuationAllowed must match expectedContext/
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      resolvedActionIds: ['private-action-id'],
+    }, reviewContext).join('\n'),
+    /receipt contains an unexpected field/
+  );
+
+  const handoff = {
+    workMode: 'accessible_execution',
+    executionId: 301,
+    batchId: 501,
+    memberId: 201,
+    jobId: 101,
+    runId: 401,
+    inspectionEpoch: 2,
+    employerApplicationState: 'review_state_prepared',
+    tracklyMemberState: 'review_ready',
+    tracklyJobState: 'check_later',
+    browserTabState: 'controller_owned',
+    handoffVisibility: 'unverified',
+    reviewReadyClaimed: false,
+  };
+  const handoffContext = {
+    ...expectedContext,
+    employerApplicationState: handoff.employerApplicationState,
+    tracklyMemberState: handoff.tracklyMemberState,
+    tracklyJobState: handoff.tracklyJobState,
+  };
+  assert.deepEqual(validateCheckpoint('handoff', handoff, handoffContext), []);
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      employerApplicationState: 'manually_submitted',
+      tracklyMemberState: 'submitted',
+      tracklyJobState: 'applied_confirmed',
+    }, handoffContext).join('\n'),
+    /employerApplicationState must match expectedContext[\s\S]*tracklyMemberState must match expectedContext[\s\S]*tracklyJobState must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('handoff', { ...handoff, reviewReadyClaimed: true }, handoffContext).join('\n'),
+    /reviewReadyClaimed must be false when handoff visibility is unverified/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      browserBindingHash: 'f'.repeat(64),
+      handoffEvidenceFingerprint: '1'.repeat(64),
+      handoffEvidenceType: 'visible_tab_inventory',
+    }, handoffContext).join('\n'),
+    /handoff evidence fields must be omitted when visibility is unverified/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      checkpointStatus: 'recorded',
+      checkpointMemberVersion: 8,
+      checkpointInspectionEpoch: 2,
+      checkpointLifecycle: 'review_ready',
+    }, handoffContext).join('\n'),
+    /checkpoint authority fields must be omitted when reviewReadyClaimed is false/
+  );
+  const visibleHandoff = {
+    ...handoff,
+    tracklyMemberState: 'awaiting_manual_submit',
+    browserTabState: 'visible',
+    handoffVisibility: 'verified',
+    reviewReadyClaimed: true,
+    browserBindingHash: 'f'.repeat(64),
+    handoffEvidenceFingerprint: '1'.repeat(64),
+    handoffEvidenceType: 'visible_presentation_receipt',
+    checkpointStatus: 'recorded',
+    checkpointMemberVersion: 8,
+    checkpointInspectionEpoch: 2,
+    checkpointLifecycle: 'review_ready',
+    checkpointAction: 'review/manual_submit',
+    checkpointActionCount: 1,
+  };
+  const visibleHandoffContext = {
+    ...expectedContext,
+    employerApplicationState: visibleHandoff.employerApplicationState,
+    tracklyMemberState: visibleHandoff.tracklyMemberState,
+    tracklyJobState: visibleHandoff.tracklyJobState,
+    browserBindingHash: visibleHandoff.browserBindingHash,
+    handoffEvidenceFingerprint: visibleHandoff.handoffEvidenceFingerprint,
+    handoffEvidenceType: visibleHandoff.handoffEvidenceType,
+    checkpointStatus: visibleHandoff.checkpointStatus,
+    checkpointMemberVersion: visibleHandoff.checkpointMemberVersion,
+    checkpointInspectionEpoch: visibleHandoff.checkpointInspectionEpoch,
+    checkpointLifecycle: visibleHandoff.checkpointLifecycle,
+    checkpointAction: visibleHandoff.checkpointAction,
+    checkpointActionCount: visibleHandoff.checkpointActionCount,
+  };
+  assert.deepEqual(validateCheckpoint('handoff', visibleHandoff, visibleHandoffContext), []);
+  for (const [field, value] of [
+    ['browserBindingHash', 'e'.repeat(64)],
+    ['handoffEvidenceFingerprint', '2'.repeat(64)],
+    ['handoffEvidenceType', 'user_visible_handoff_receipt'],
+  ]) {
+    assert.match(
+      validateCheckpoint('handoff', { ...visibleHandoff, [field]: value }, visibleHandoffContext).join('\n'),
+      new RegExp(`${field} must match expectedContext`),
+    );
+  }
+  assert.deepEqual(validateCheckpoint('handoff', {
+    ...visibleHandoff,
+    handoffEvidenceType: 'user_visible_handoff_receipt',
+  }, {
+    ...visibleHandoffContext,
+    handoffEvidenceType: 'user_visible_handoff_receipt',
+  }), []);
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      handoffEvidenceType: 'visible_tab_inventory',
+    }, {
+      ...visibleHandoffContext,
+      handoffEvidenceType: 'visible_tab_inventory',
+    }).join('\n'),
+    /handoffEvidenceType must identify visible presentation/
+  );
+  const durableHandoff = {
+    ...visibleHandoff,
+    tracklyMemberState: 'review_ready',
+    browserTabState: 'durable_handoff_proven',
+    handoffVisibility: 'verified',
+    reviewReadyClaimed: true,
+    browserBindingHash: '2'.repeat(64),
+    handoffEvidenceFingerprint: '3'.repeat(64),
+    handoffEvidenceType: 'durable_handoff_receipt',
+  };
+  assert.match(validateCheckpoint('handoff', durableHandoff, {
+    ...expectedContext,
+    employerApplicationState: durableHandoff.employerApplicationState,
+    tracklyMemberState: durableHandoff.tracklyMemberState,
+    tracklyJobState: durableHandoff.tracklyJobState,
+    browserBindingHash: durableHandoff.browserBindingHash,
+    handoffEvidenceFingerprint: durableHandoff.handoffEvidenceFingerprint,
+    handoffEvidenceType: durableHandoff.handoffEvidenceType,
+    checkpointStatus: durableHandoff.checkpointStatus,
+    checkpointMemberVersion: durableHandoff.checkpointMemberVersion,
+    checkpointInspectionEpoch: durableHandoff.checkpointInspectionEpoch,
+    checkpointLifecycle: durableHandoff.checkpointLifecycle,
+    checkpointAction: durableHandoff.checkpointAction,
+    checkpointActionCount: durableHandoff.checkpointActionCount,
+  }).join('\n'), /awaiting_manual_submit/);
+  assert.match(validateCheckpoint('handoff', {
+    ...visibleHandoff,
+    tracklyMemberState: 'review_ready',
+  }, {
+    ...visibleHandoffContext,
+    tracklyMemberState: 'review_ready',
+  }).join('\n'), /awaiting_manual_submit/);
+  assert.match(validateCheckpoint('handoff', {
+    ...visibleHandoff,
+    checkpointAction: 'captcha/at_submit',
+  }, {
+    ...visibleHandoffContext,
+    checkpointAction: 'captcha/at_submit',
+  }).join('\n'), /review\/manual_submit/);
+  assert.match(validateCheckpoint('handoff', {
+    ...visibleHandoff,
+    checkpointActionCount: 2,
+  }, {
+    ...visibleHandoffContext,
+    checkpointActionCount: 2,
+  }).join('\n'), /checkpointActionCount 1/);
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...durableHandoff,
+      handoffEvidenceType: 'visible_presentation_receipt',
+    }, {
+      ...expectedContext,
+      employerApplicationState: durableHandoff.employerApplicationState,
+      tracklyMemberState: durableHandoff.tracklyMemberState,
+      tracklyJobState: durableHandoff.tracklyJobState,
+      browserBindingHash: durableHandoff.browserBindingHash,
+      handoffEvidenceFingerprint: durableHandoff.handoffEvidenceFingerprint,
+      handoffEvidenceType: 'visible_presentation_receipt',
+      checkpointStatus: durableHandoff.checkpointStatus,
+      checkpointMemberVersion: durableHandoff.checkpointMemberVersion,
+      checkpointInspectionEpoch: durableHandoff.checkpointInspectionEpoch,
+      checkpointLifecycle: durableHandoff.checkpointLifecycle,
+    }).join('\n'),
+    /durable_handoff_proven requires durable_handoff_receipt evidence/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      browserTabState: 'controller_owned',
+      handoffVisibility: 'verified',
+      reviewReadyClaimed: false,
+      browserBindingHash: '4'.repeat(64),
+      handoffEvidenceFingerprint: '5'.repeat(64),
+      handoffEvidenceType: 'visible_presentation_receipt',
+    }, {
+      ...expectedContext,
+      employerApplicationState: handoff.employerApplicationState,
+      tracklyMemberState: handoff.tracklyMemberState,
+      tracklyJobState: handoff.tracklyJobState,
+      browserBindingHash: '4'.repeat(64),
+      handoffEvidenceFingerprint: '5'.repeat(64),
+      handoffEvidenceType: 'visible_presentation_receipt',
+    }).join('\n'),
+    /verified handoff requires a visible or durably handed-off browser tab/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      browserTabState: 'durable_handoff_proven',
+      handoffVisibility: 'unverified',
+      reviewReadyClaimed: false,
+    }, {
+      ...expectedContext,
+      employerApplicationState: handoff.employerApplicationState,
+      tracklyMemberState: handoff.tracklyMemberState,
+      tracklyJobState: handoff.tracklyJobState,
+    }).join('\n'),
+    /durable_handoff_proven requires verified visibility/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      browserTabState: 'closed_verified',
+      handoffVisibility: 'unverified',
+      reviewReadyClaimed: false,
+    }, handoffContext).join('\n'),
+    /closed_verified is reserved for reconciliation receipts/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...handoff,
+      browserTabState: 'closed_verified',
+      handoffVisibility: 'verified',
+      reviewReadyClaimed: true,
+      browserBindingHash: '4'.repeat(64),
+      handoffEvidenceFingerprint: '5'.repeat(64),
+      handoffEvidenceType: 'visible_presentation_receipt',
+      checkpointStatus: 'recorded',
+      checkpointMemberVersion: 8,
+      checkpointInspectionEpoch: 2,
+      checkpointLifecycle: 'review_ready',
+    }, {
+      ...expectedContext,
+      employerApplicationState: 'review_state_prepared',
+      tracklyMemberState: 'review_ready',
+      tracklyJobState: 'check_later',
+      browserBindingHash: '4'.repeat(64),
+      handoffEvidenceFingerprint: '5'.repeat(64),
+      handoffEvidenceType: 'visible_presentation_receipt',
+      checkpointStatus: 'recorded',
+      checkpointMemberVersion: 8,
+      checkpointInspectionEpoch: 2,
+      checkpointLifecycle: 'review_ready',
+    }).join('\n'),
+    /verified handoff requires a visible or durably handed-off browser tab/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      employerApplicationState: 'partially_filled',
+    }, visibleHandoffContext).join('\n'),
+    /reviewReadyClaimed requires prepared employer state/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      tracklyMemberState: 'needs_input',
+    }, visibleHandoffContext).join('\n'),
+    /reviewReadyClaimed requires prepared employer state/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      tracklyJobState: 'not_interested',
+    }, {
+      ...visibleHandoffContext,
+      tracklyJobState: 'not_interested',
+    }).join('\n'),
+    /reviewReadyClaimed requires prepared employer state, awaiting_manual_submit member state, check_later job state/
+  );
+  assert.match(
+    validateCheckpoint('handoff', visibleHandoff, {
+      ...visibleHandoffContext,
+      tracklyMemberState: 'needs_input',
+      checkpointLifecycle: 'needs_input',
+    }).join('\n'),
+    /tracklyMemberState must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('handoff', visibleHandoff, {
+      ...visibleHandoffContext,
+      checkpointMemberVersion: 9,
+    }).join('\n'),
+    /checkpointMemberVersion must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('handoff', {
+      ...visibleHandoff,
+      checkpointInspectionEpoch: 3,
+    }, {
+      ...visibleHandoffContext,
+      checkpointInspectionEpoch: 3,
+    }).join('\n'),
+    /checkpointInspectionEpoch must equal inspectionEpoch/
+  );
+  assert.match(
+    validateCheckpoint('handoff', visibleHandoff, {
+      ...visibleHandoffContext,
+      tracklyJobState: 'applied_confirmed',
+    }).join('\n'),
+    /tracklyJobState must match expectedContext/
   );
 
   const reconciliation = {
@@ -385,21 +1341,42 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     closeReceiptRecorded: true,
     postCloseUnionAbsenceProven: true,
   };
-  assert.deepEqual(validateCheckpoint('reconciliation', reconciliation, expectedContext), []);
+  const reconciliationContext = {
+    ...expectedContext,
+    positiveSubmissionEvidenceRecorded: true,
+    memberLifecycle: 'submitted',
+    tracklyJobStatus: 'applied_confirmed',
+  };
+  assert.deepEqual(validateCheckpoint('reconciliation', reconciliation, reconciliationContext), []);
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, tracklyJobStatus: 'applied' }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, tracklyJobStatus: 'applied' }, reconciliationContext).join('\n'),
     /tracklyJobStatus/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, completeTabInventoryRecorded: false }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', reconciliation, {
+      ...reconciliationContext,
+      memberLifecycle: 'awaiting_manual_submit',
+      tracklyJobStatus: 'check_later',
+    }).join('\n'),
+    /memberLifecycle must match expectedContext[\s\S]*tracklyJobStatus must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('reconciliation', reconciliation, {
+      ...reconciliationContext,
+      positiveSubmissionEvidenceRecorded: false,
+    }).join('\n'),
+    /positiveSubmissionEvidenceRecorded must match expectedContext/
+  );
+  assert.match(
+    validateCheckpoint('reconciliation', { ...reconciliation, completeTabInventoryRecorded: false }, reconciliationContext).join('\n'),
     /completeTabInventoryRecorded/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, cleanupPreference: 'never' }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, cleanupPreference: 'never' }, reconciliationContext).join('\n'),
     /cannot be closed_verified/
   );
   assert.match(
-    validateCheckpoint('reconciliation', { ...reconciliation, runId: 402 }, expectedContext).join('\n'),
+    validateCheckpoint('reconciliation', { ...reconciliation, runId: 402 }, reconciliationContext).join('\n'),
     /runId must match expectedContext/
   );
   for (const browserTabStatus of ['open', 'missing', 'closure_unverified']) {
@@ -407,14 +1384,14 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     delete pending.completeTabInventoryRecorded;
     delete pending.closeReceiptRecorded;
     delete pending.postCloseUnionAbsenceProven;
-    assert.deepEqual(validateCheckpoint('reconciliation', pending, expectedContext), []);
+    assert.deepEqual(validateCheckpoint('reconciliation', pending, reconciliationContext), []);
   }
   assert.match(
     validateCheckpoint('reconciliation', {
       ...reconciliation,
       browserTabStatus: 'open',
       closeReceiptRecorded: 'private text',
-    }, expectedContext).join('\n'),
+    }, reconciliationContext).join('\n'),
     /closeReceiptRecorded must be false or omitted/
   );
 });
@@ -428,6 +1405,25 @@ test('phase checkpoint CLI rejects oversized receipts before parsing', () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /at most 65536 bytes/);
+});
+
+test('phase checkpoint input stops reading as soon as the byte limit is exceeded', async () => {
+  const { readReceiptInput } = require('../skills/trackly-apply/scripts/validate-phase-checkpoint');
+  let readPastLimit = false;
+  let iteratorClosed = false;
+  async function* oversizedInput() {
+    try {
+      yield Buffer.alloc((64 * 1024) + 1);
+      readPastLimit = true;
+      yield Buffer.alloc(1);
+    } finally {
+      iteratorClosed = true;
+    }
+  }
+
+  assert.deepEqual(await readReceiptInput(oversizedInput()), { input: '', oversized: true });
+  assert.equal(readPastLimit, false);
+  assert.equal(iteratorClosed, true);
 });
 
 test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async () => {
@@ -481,8 +1477,44 @@ test('phase checkpoint CLI decodes multi-byte UTF-8 split across writes', async 
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /unexpected field: é/);
+  assert.match(result.stderr, /receipt contains an unexpected field/);
+  assert.doesNotMatch(result.stderr, /é/);
   assert.doesNotMatch(result.stderr, /valid JSON/);
+});
+
+test('phase checkpoint CLI never echoes secret-shaped or terminal-control receipt data', () => {
+  const validator = path.join(root, 'skills/trackly-apply/scripts/validate-phase-checkpoint.js');
+  const secret = 'sk-test-private-value';
+  const terminalControl = '\u001b[31mprivate-field\u001b[0m';
+  const result = spawnSync(process.execPath, [validator, 'selection'], {
+    input: JSON.stringify({
+      receipt: {
+        workMode: 'accessible_execution',
+        executionId: 301,
+        batchId: 501,
+        latestExplicitTarget: 1,
+        approvedJobIds: [101],
+        approvalRecorded: true,
+        noFormMutationBeforeApproval: true,
+        queueExhausted: false,
+        [secret]: terminalControl,
+      },
+      expectedContext: {
+        workMode: 'accessible_execution',
+        executionId: 301,
+        batchId: 501,
+        latestExplicitTarget: 1,
+        selectableJobIds: [101],
+        queueExhausted: false,
+      },
+    }),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /receipt contains an unexpected field/);
+  assert.doesNotMatch(result.stderr, /sk-test-private-value/);
+  assert.doesNotMatch(result.stderr, /private-field|\u001b/);
 });
 
 test('phase checkpoint CLI validates envelopes from a non-skill working directory', () => {
@@ -559,7 +1591,17 @@ test('phase checkpoint CLI validates envelopes from a non-skill working director
     encoding: 'utf8',
   });
   assert.equal(extraEnvelopeField.status, 1);
-  assert.match(extraEnvelopeField.stderr, /unexpected envelope field: rawAnswer/);
+  assert.equal(extraEnvelopeField.stderr, 'input envelope contains unsupported fields\n');
+  assert.doesNotMatch(extraEnvelopeField.stderr, /rawAnswer|private text/);
+
+  const secretShapedEnvelopeField = spawnSync(process.execPath, [validator, 'selection'], {
+    cwd: path.dirname(root),
+    input: JSON.stringify({ receipt, expectedContext, 'sk-test-sensitive-envelope-key\u001b[31m': true }),
+    encoding: 'utf8',
+  });
+  assert.equal(secretShapedEnvelopeField.status, 1);
+  assert.equal(secretShapedEnvelopeField.stderr, 'input envelope contains unsupported fields\n');
+  assert.doesNotMatch(secretShapedEnvelopeField.stderr, /sk-test|\u001b/);
 
   const missingSelectionContext = spawnSync(process.execPath, [validator, 'selection'], {
     cwd: path.dirname(root),
@@ -603,6 +1645,10 @@ test('public plugin adaptation preserves the operational reliability gates', () 
   assert.match(pluginOperations, /fill[\s\S]*known[\s\S]*before[\s\S]*question packet/i);
   assert.match(pluginOperations, /Humanizer/i);
   assert.match(pluginOperations, /submitted[\s\S]*applied_confirmed[\s\S]*closed_verified/i);
+  assert.match(pluginOperations, /whole-form[\s\S]*control accounting/i);
+  assert.match(pluginOperations, /resume[\s\S]*pre-attach[\s\S]*parser[\s\S]*final sweep/i);
+  assert.match(pluginOperations, /position-level[\s\S]*date precision/i);
+  assert.match(pluginOperations, /visibility unverified/i);
   assert.ok(
     pluginOperations.indexOf('**Access:**') < pluginOperations.indexOf('**Selection:**'),
     'access proof must precede accessible-set approval',
@@ -612,15 +1658,19 @@ test('public plugin adaptation preserves the operational reliability gates', () 
   assert.match(pluginProbe, /authentication_required/);
   assert.match(pluginProbe, /account_creation_required/);
   assert.match(pluginProbe, /never[\s\S]*private\s+data[\s\S]*probe/i);
+
+  const pluginResolver = read('plugins/trackly/skills/trackly-apply/references/answer-resolution.md');
+  assert.match(pluginResolver, /run-only[\s\S]*exact question[\s\S]*office[\s\S]*jurisdiction[\s\S]*company[\s\S]*provider[\s\S]*global/i);
+  assert.match(pluginResolver, /before asking/i);
 });
 
 test('MCP reliability prompt surfaces the new operating gates before execution', () => {
   const tools = read('mcp/apply-tools.js');
-  assert.match(tools, /skill 4\.7\.0 reliability gate:[^']*latest explicit target/i);
-  assert.match(tools, /skill 4\.7\.0 reliability gate:[^']*genuine applicant fields/i);
-  assert.match(tools, /skill 4\.7\.0 reliability gate:[^']*exact accessible jobs[^']*before form mutation/i);
-  assert.match(tools, /skill 4\.7\.0 reliability gate:[^']*deterministic fields[^']*question packet/i);
-  assert.match(tools, /skill 4\.7\.0 reliability gate:[^']*phase checkpoint/i);
-  assert.match(tools, /run the skill 4\.7\.0 deterministic answer resolver/i);
+  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*latest explicit target/i);
+  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*genuine applicant fields/i);
+  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*exact accessible jobs[^']*before form mutation/i);
+  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*deterministic fields[^']*question packet/i);
+  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*phase checkpoint/i);
+  assert.match(tools, /run the skill 4\.7\.1 deterministic answer resolver/i);
   assert.doesNotMatch(tools, /run the skill 4\.6 deterministic answer resolver/i);
 });

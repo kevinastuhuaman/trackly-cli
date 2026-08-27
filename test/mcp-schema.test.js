@@ -23,7 +23,10 @@ const http = require('node:http');
 const path = require('node:path');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
+const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { createServer } = require('../mcp/server');
+const { registerApplyTools } = require('../mcp/apply-tools');
+const APPLY_CONTRACT = require('../contracts/trackly-apply-tools.json');
 
 const SERVER_SRC = fs.readFileSync(
   path.join(__dirname, '..', 'mcp', 'server.js'),
@@ -61,6 +64,210 @@ test('MCP server delegates the focused Apply surface below 1,000 lines', () => {
   assert.ok(SERVER_SRC.split('\n').length < 1000);
   assert.match(SERVER_SRC, /registerApplyTools\(server,/);
   assert.match(APPLY_SRC, /function registerApplyTools\(/);
+});
+
+test('checkpoint tool enforces canonical continuation, question, and lifecycle semantics', async (t) => {
+  const canonicalContinuationByAction = APPLY_CONTRACT.constants
+    .applyCheckpointContinuationByAction;
+  const requests = [];
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = new McpServer({ name: 'checkpoint-schema-test', version: '1.0.0' });
+  registerApplyTools(server, {
+    applyApiRequest: async (...args) => {
+      requests.push(args);
+      return { success: true };
+    },
+    mcpUserAgent: 'trackly-mcp/test',
+    throwMcpResourceError: (error) => { throw error; },
+    wrapTool: (handler) => async (params) => ({
+      content: [{ type: 'text', text: JSON.stringify(await handler(params)) }],
+    }),
+  });
+  const client = new Client({ name: 'checkpoint-schema-test', version: '1.0.0' });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  t.after(async () => {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+  });
+
+  const { tools } = await client.listTools();
+  const checkpointTool = tools.find((tool) => tool.name === 'trackly_checkpoint_apply_batch');
+  const actionItems = checkpointTool.inputSchema
+    .properties.checkpoints.items.properties.actions.items;
+  const variants = actionItems.oneOf ?? actionItems.anyOf;
+  assert.equal(variants.length, 12);
+  assert.deepEqual(Object.fromEntries(variants.map((variant) => [
+    variant.properties.actionCode.const,
+    variant.properties.continuationAllowed.const,
+  ])), canonicalContinuationByAction);
+
+  const checkpointArguments = (actionCode, continuationAllowed, sequence, overrides = {}) => ({
+    batchId: 7,
+    leaseToken: 'lease-token',
+    checkpoints: [{
+      memberId: 11,
+      runId: 13,
+      expectedMemberVersion: 2,
+      expectedInspectionEpoch: 3,
+      inspectionEpoch: 3,
+      knownFieldsCommitted: true,
+      idempotencyKey: `checkpoint-schema-${sequence}-1234567890`,
+      actions: [{
+        actionCode,
+        continuationAllowed,
+        ...(APPLY_CONTRACT.constants.applyCheckpointQuestionPacketByAction[actionCode]
+          ? { fieldFingerprint: 'a'.repeat(64) }
+          : {}),
+      }],
+      ...overrides,
+    }],
+  });
+
+  let sequence = 0;
+  for (const [actionCode, continuationAllowed] of Object.entries(canonicalContinuationByAction)) {
+    const overrides = {
+      knownFieldsCommitted: ![
+        'captcha/before_form',
+        'trust/origin_mismatch',
+      ].includes(actionCode),
+      ...(APPLY_CONTRACT.constants.applyCheckpointQuestionPacketByAction[actionCode]
+        ? { packetPhase: 'first_pass' }
+        : {}),
+    };
+    const canonical = await client.callTool({
+      name: 'trackly_checkpoint_apply_batch',
+      arguments: checkpointArguments(actionCode, continuationAllowed, sequence++, overrides),
+    });
+    assert.notEqual(canonical.isError, true, `${actionCode} canonical mapping was rejected`);
+    const inverted = await client.callTool({
+      name: 'trackly_checkpoint_apply_batch',
+      arguments: checkpointArguments(actionCode, !continuationAllowed, sequence++, overrides),
+    });
+    assert.equal(inverted.isError, true, `${actionCode} accepted inverted continuationAllowed`);
+  }
+  const question = await client.callTool({
+    name: 'trackly_checkpoint_apply_batch',
+    arguments: checkpointArguments('answer/unknown', true, 2, {
+      packetPhase: 'first_pass',
+      actions: [{
+        actionCode: 'answer/unknown',
+        continuationAllowed: true,
+        fieldFingerprint: 'a'.repeat(64),
+      }],
+    }),
+  });
+  assert.notEqual(question.isError, true, 'valid question packet was rejected');
+  const mixedQuestionAndBlocker = await client.callTool({
+    name: 'trackly_checkpoint_apply_batch',
+    arguments: checkpointArguments('answer/unknown', true, sequence++, {
+      packetPhase: 'first_pass',
+      actions: [
+        {
+          actionCode: 'answer/unknown',
+          continuationAllowed: true,
+          fieldFingerprint: 'a'.repeat(64),
+        },
+        { actionCode: 'auth/sign_in', continuationAllowed: true },
+      ],
+    }),
+  });
+  assert.notEqual(
+    mixedQuestionAndBlocker.isError,
+    true,
+    'local schema must delegate legacy mixed-packet replay authority to the backend',
+  );
+  const missingQuestionFingerprint = await client.callTool({
+    name: 'trackly_checkpoint_apply_batch',
+    arguments: checkpointArguments('answer/unknown', true, 3, {
+      packetPhase: 'first_pass',
+      actions: [{ actionCode: 'answer/unknown', continuationAllowed: true }],
+    }),
+  });
+  assert.equal(missingQuestionFingerprint.isError, true, 'missing question fingerprint was accepted');
+  const mixedLifecycle = await client.callTool({
+    name: 'trackly_checkpoint_apply_batch',
+    arguments: checkpointArguments('review/manual_submit', false, 4, {
+      actions: [
+        { actionCode: 'review/manual_submit', continuationAllowed: false },
+        { actionCode: 'trust/origin_mismatch', continuationAllowed: false },
+      ],
+    }),
+  });
+  assert.equal(mixedLifecycle.isError, true, 'mixed lifecycle checkpoint was accepted');
+  for (const arguments_ of [
+    checkpointArguments('captcha/before_form', true, sequence++, {
+      knownFieldsCommitted: true,
+    }),
+    checkpointArguments('captcha/before_form', true, sequence++, {
+      knownFieldsCommitted: false,
+      actions: [
+        { actionCode: 'captcha/before_form', continuationAllowed: true },
+        { actionCode: 'auth/otp', continuationAllowed: true },
+      ],
+    }),
+  ]) {
+    const legacyAccessBlocker = await client.callTool({
+      name: 'trackly_checkpoint_apply_batch',
+      arguments: arguments_,
+    });
+    assert.notEqual(
+      legacyAccessBlocker.isError,
+      true,
+      'local schema must let the backend authorize exact legacy access-blocker replays',
+    );
+  }
+  const invalidCheckpoints = [
+    ['missing actions', checkpointArguments('auth/otp', true, sequence++, {
+      actions: undefined,
+    })],
+    ['non-array actions', checkpointArguments('auth/otp', true, sequence++, {
+      actions: 'not-an-array',
+    })],
+    ['question without packetPhase', checkpointArguments('answer/unknown', true, sequence++, {})],
+    ['question before known fields commit', checkpointArguments('answer/unknown', true, sequence++, {
+      packetPhase: 'first_pass',
+      knownFieldsCommitted: false,
+    })],
+    ['non-question packetPhase', checkpointArguments('auth/otp', true, sequence++, {
+      packetPhase: 'delta',
+    })],
+    ['duplicate resolved action IDs', checkpointArguments('auth/otp', true, sequence++, {
+      resolvedActionIds: ['91', '91'],
+    })],
+    ['review-ready before known fields commit', checkpointArguments('review/manual_submit', false, sequence++, {
+      knownFieldsCommitted: false,
+    })],
+  ];
+  for (const [label, arguments_] of invalidCheckpoints) {
+    const result = await client.callTool({
+      name: 'trackly_checkpoint_apply_batch',
+      arguments: arguments_,
+    });
+    assert.equal(result.isError, true, `${label} was accepted`);
+  }
+  const stripped = await client.callTool({
+    name: 'trackly_checkpoint_apply_batch',
+    arguments: checkpointArguments('answer/unknown', true, sequence++, {
+      packetPhase: 'first_pass',
+      rawLabel: 'private question text',
+      actions: [{
+        actionCode: 'answer/unknown',
+        continuationAllowed: true,
+        fieldFingerprint: 'a'.repeat(64),
+        answerValue: 'private answer text',
+      }],
+    }),
+  });
+  assert.notEqual(stripped.isError, true, 'safe parsed checkpoint was rejected');
+  const forwardedBody = requests.at(-1)[2];
+  assert.equal(Object.hasOwn(forwardedBody.checkpoints[0], 'rawLabel'), false);
+  assert.equal(Object.hasOwn(forwardedBody.checkpoints[0].actions[0], 'answerValue'), false);
+  assert.equal(
+    requests.length,
+    Object.keys(canonicalContinuationByAction).length + 5,
+    'invalid checkpoint reached the API',
+  );
 });
 
 test('local MCP preference tools use the authoritative V2 and revision contracts', () => {
