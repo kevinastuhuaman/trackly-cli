@@ -201,6 +201,8 @@ const PHASE_FIELDS = {
     'checkpointMemberVersion',
     'checkpointInspectionEpoch',
     'checkpointLifecycle',
+    'checkpointAction',
+    'checkpointActionCount',
   ]),
   reconciliation: new Set([
     'workMode',
@@ -655,6 +657,8 @@ function validateHandoff(receipt, expectedContext) {
     'checkpointMemberVersion',
     'checkpointInspectionEpoch',
     'checkpointLifecycle',
+    'checkpointAction',
+    'checkpointActionCount',
   ];
   const reviewAuthorityFields = [...stateAuthorityFields, ...checkpointAuthorityFields];
   validateCurrentLineage(
@@ -728,10 +732,10 @@ function validateHandoff(receipt, expectedContext) {
   }
   if (receipt.reviewReadyClaimed === true
       && (receipt.employerApplicationState !== 'review_state_prepared'
-        || !['review_ready', 'awaiting_manual_submit'].includes(receipt.tracklyMemberState)
+        || receipt.tracklyMemberState !== 'awaiting_manual_submit'
         || receipt.tracklyJobState !== 'check_later'
         || receipt.handoffVisibility !== 'verified')) {
-    errors.push('reviewReadyClaimed requires prepared employer state, review_ready or awaiting_manual_submit member state, check_later job state, and verified visibility');
+    errors.push('reviewReadyClaimed requires prepared employer state, awaiting_manual_submit member state, check_later job state, and verified visibility');
   }
   if (receipt.reviewReadyClaimed === true) {
     if (!['recorded', 'replayed'].includes(receipt.checkpointStatus)) {
@@ -746,6 +750,12 @@ function validateHandoff(receipt, expectedContext) {
     }
     if (receipt.checkpointLifecycle !== 'review_ready') {
       errors.push('reviewReadyClaimed requires checkpointLifecycle review_ready');
+    }
+    if (receipt.checkpointAction !== 'review/manual_submit') {
+      errors.push('reviewReadyClaimed requires checkpointAction review/manual_submit');
+    }
+    if (receipt.checkpointActionCount !== 1) {
+      errors.push('reviewReadyClaimed requires checkpointActionCount 1');
     }
     if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
       for (const field of checkpointAuthorityFields) {

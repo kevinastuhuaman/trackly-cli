@@ -1,5 +1,5 @@
 {
-  "contractVersion": "3.7.5",
+  "contractVersion": "3.7.6",
   "constants": {
     "applyExecutionMaxTarget": 20,
     "applyScenarioCodes": ["browser_reclaim", "resume_upload", "resume_parser_recheck", "semantic_boolean_commit", "custom_select_commit", "multi_step_navigation", "free_text_voice", "required_error_sweep", "final_consent", "handoff_reclaim", "critical_contact_integrity", "manual_submit_boundary", "job_identity_match"],
@@ -29,7 +29,8 @@
   "toolInputInvariants": {
     "trackly_checkpoint_apply_batch": {
       "questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints": true,
-      "exactReplayOfPreviouslyAcceptedPayloadPreserved": true
+      "exactReplayOfPreviouslyAcceptedPayloadPreserved": true,
+      "preFormAuthenticationWallsRejectedAfterExactReplayLookup": true
     },
     "trackly_get_apply_execution_snapshot": {
       "officeProjectionMemberIdsMustExistInMemberIds": true

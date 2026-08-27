@@ -127,7 +127,10 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
   let sequence = 0;
   for (const [actionCode, continuationAllowed] of Object.entries(canonicalContinuationByAction)) {
     const overrides = {
-      knownFieldsCommitted: !['captcha/before_form', 'trust/origin_mismatch'].includes(actionCode),
+      knownFieldsCommitted: ![
+        'captcha/before_form',
+        'trust/origin_mismatch',
+      ].includes(actionCode),
       ...(APPLY_CONTRACT.constants.applyCheckpointQuestionPacketByAction[actionCode]
         ? { packetPhase: 'first_pass' }
         : {}),
@@ -172,7 +175,7 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
   assert.notEqual(
     mixedQuestionAndBlocker.isError,
     true,
-    'local schema must delegate mixed-packet replay authority to the backend',
+    'local schema must delegate legacy mixed-packet replay authority to the backend',
   );
   const missingQuestionFingerprint = await client.callTool({
     name: 'trackly_checkpoint_apply_batch',

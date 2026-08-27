@@ -11,11 +11,16 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '40fbd224e881d346e9199effd8b8c1969e11b4c5df8f8b677daa64340b4d10b0';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'bf980e3c48aa0817f8860a308dba4d5e054ca34f1e4b4bfdf1ace0402ad73799';
 const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
   applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
   applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
   applyCheckpointSchema: '4759f1b7e1533e95ec1b5872c8bfe805ea6a6fd1c6e24c14f9499cd536331d1a',
+});
+const HOSTED_APPLY_REPLAY_HELPER_AST_SHA256 = Object.freeze({
+  actionCodeFromStoredCheckpoint: 'b23c10235645aa732c28073adfa2fd72dec0a8f7770b461df8bd5f408f896c6d',
+  loadStoredApplyBatchCheckpoint: '598233925c66ca36c69ae3dfe75984ec1d7098f27b8356d51cd6a43a7947bfd6',
+  storedCheckpointResult: '41227684c75aa7be1a96f3891372b6c9677d2c3fcf91d5e589425396c1a6b052',
 });
 
 const parsedSourceCache = new Map();
@@ -4144,7 +4149,19 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
   return Object.keys(expected);
 }
 
-function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
+function assertReplayAwareMixedPacketOrdering(
+  source,
+  sourcePath,
+  expectedReplayHelperDigests = HOSTED_APPLY_REPLAY_HELPER_AST_SHA256,
+) {
+  for (const [helperName, expectedDigest] of Object.entries(expectedReplayHelperDigests)) {
+    const helperAst = activeNamedDefinitionAst(source, helperName, sourcePath);
+    assert.equal(
+      sha256ExactBytes(JSON.stringify(canonicalSchemaAst(helperAst))),
+      expectedDigest,
+      `${helperName} in ${sourcePath} must match its replay semantic lock`,
+    );
+  }
   const definition = activeNamedDefinitionAst(source, 'recordOneApplyBatchCheckpoint', sourcePath);
   assert.equal(definition?.type, 'FunctionDeclaration', `recordOneApplyBatchCheckpoint in ${sourcePath} must be a function`);
   const statements = definition.body.body;
@@ -4215,6 +4232,37 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
     `${sourcePath} checkpoint replay branch must contain its locked conflict guard and stored replay return`,
   );
 
+  const expectedAuthenticationGuard = [
+    "const preFormAuthenticationBlocked = checkpoint.actions.some((action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].stage === 'authentication');",
+    `if (
+      preFormAuthenticationBlocked
+      && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)
+    ) {
+      throw new ApplyBatchValidationError(
+        'Access-blocking checkpoints cannot report private-field commits or other actions.',
+      );
+    }`,
+  ].map((statement, index) => parseExpectedStatement(
+    statement,
+    `${sourcePath} authentication guard statement ${index + 1}`,
+  ));
+  const authenticationGuardIndex = statements.findIndex((statement) => (
+    statement.type === 'IfStatement'
+    && statementContainsString(
+      statement.consequent,
+      'Access-blocking checkpoints cannot report private-field commits or other actions.',
+    )
+  ));
+  assert.ok(
+    authenticationGuardIndex > replayIndex,
+    `${sourcePath} must reject new pre-form authentication walls only after exact replay lookup`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(statements.slice(replayIndex + 1, authenticationGuardIndex + 1)),
+    canonicalSchemaAst(expectedAuthenticationGuard),
+    `${sourcePath} must enforce the locked replay-aware pre-form authentication guard`,
+  );
+
   const expectedClassifiers = [
     'const hasQuestions = checkpoint.actions.some((action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket);',
     'const hasNonQuestions = checkpoint.actions.some((action) => !APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket);',
@@ -4244,8 +4292,8 @@ function assertReplayAwareMixedPacketOrdering(source, sourcePath) {
   assert.ok(mixedIndex >= 0, `${sourcePath} checkpoint execution must reject new mixed packets`);
   assert.deepEqual(
     canonicalSchemaAst(statements.slice(replayIndex + 1, mixedIndex)),
-    canonicalSchemaAst(classifierDeclarations),
-    `${sourcePath} must contain only locked classifiers between replay lookup and mixed-packet rejection`,
+    canonicalSchemaAst([...expectedAuthenticationGuard, ...classifierDeclarations]),
+    `${sourcePath} must contain only the locked authentication guard and classifiers between replay lookup and mixed-packet rejection`,
   );
   assert.deepEqual(
     canonicalSchemaAst(statements[mixedIndex].test),
@@ -4277,6 +4325,7 @@ function checkpointHelperSemanticDescriptor(
   replayAwareServiceSource = null,
   checkpointContractSource = null,
   checkpointContractSourcePath = null,
+  expectedReplayHelperDigests = HOSTED_APPLY_REPLAY_HELPER_AST_SHA256,
 ) {
   const hostedMappings = checkpointContractSource === null
     ? null
@@ -4299,6 +4348,12 @@ function checkpointHelperSemanticDescriptor(
   const checkpointSchemaAst = activeNamedDefinitionAst(
     source,
     'applyCheckpointSchema',
+    sourcePath,
+    declarationStatements,
+  );
+  const actionSchemaAst = activeNamedDefinitionAst(
+    source,
+    'applyCheckpointActionSchema',
     sourcePath,
     declarationStatements,
   );
@@ -4326,6 +4381,16 @@ function checkpointHelperSemanticDescriptor(
     variantReturn.arguments[0],
     `applyCheckpointActionVariant in ${sourcePath}`,
   );
+  assert.deepEqual(
+    Object.keys(variantProperties),
+    ['actionCode', 'continuationAllowed', 'fieldFingerprint'],
+    `${sourcePath} action variant must contain the exact reviewed fields`,
+  );
+  assert.deepEqual(
+    canonicalSchemaAst(variantProperties.actionCode),
+    canonicalSchemaAst(babelParser.parseExpression('z.literal(actionCode)', { plugins: ['typescript'] })),
+    `${sourcePath} actionCode must be the exact action-code literal`,
+  );
   const fingerprintSemantics = {
     pattern: '^[a-f0-9]{64}$',
     requiredWhenQuestionPacket: true,
@@ -4352,6 +4417,14 @@ function checkpointHelperSemanticDescriptor(
     assert.match(variant, /z\.literal\(APPLY_CHECKPOINT_CONTINUATION_BY_ACTION\[actionCode\]\)/);
     assert.match(variant, /APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[actionCode\]/);
     assert.match(actionSchema, /APPLY_CHECKPOINT_ACTION_CODES\.map\(applyCheckpointActionVariant\)/);
+    assert.deepEqual(
+      canonicalSchemaAst(actionSchemaAst),
+      canonicalSchemaAst(babelParser.parseExpression(
+        "z.discriminatedUnion('actionCode', APPLY_CHECKPOINT_ACTION_CODES.map(applyCheckpointActionVariant))",
+        { plugins: ['typescript'] },
+      )),
+      `${sourcePath} action schema must be the exact discriminated union`,
+    );
     assertBabelPropertyExpression(
       variantProperties,
       'fieldFingerprint',
@@ -4389,6 +4462,14 @@ function checkpointHelperSemanticDescriptor(
       /applyCheckpointActionVariant\('([^']+)'\)/g,
     )].map((match) => match[1]);
     assert.deepEqual(declaredActionCodes, actionCodes);
+    assert.deepEqual(
+      canonicalSchemaAst(actionSchemaAst),
+      canonicalSchemaAst(babelParser.parseExpression(
+        `z.discriminatedUnion('actionCode', [${actionCodes.map((code) => `applyCheckpointActionVariant('${code}')`).join(',')}])`,
+        { plugins: ['typescript'] },
+      )),
+      `${sourcePath} action schema must be the exact discriminated union`,
+    );
     assert.match(checkpointSchema, /mappings\.map\(\(\{ lifecycleState \}\) => lifecycleState\)/);
     assert.match(checkpointSchema, /mappings\.some\(\(\{ questionPacket \}\) => questionPacket\)/);
     if (checkpointSchema.includes('hasNonQuestions')) {
@@ -4405,6 +4486,7 @@ function checkpointHelperSemanticDescriptor(
   assert.deepEqual(checkpointInvariant, {
     questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
     exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
+    preFormAuthenticationWallsRejectedAfterExactReplayLookup: true,
   });
   const localMixedPacketCondition = canonicalSchemaAst(babelParser.parseExpression(
     'hasQuestions && hasNonQuestions',
@@ -4421,7 +4503,11 @@ function checkpointHelperSemanticDescriptor(
     ));
   if (!hasLocalMixedPacketPreflight) {
     assert.equal(typeof replayAwareServiceSource, 'string', `${sourcePath} must delegate mixed-packet enforcement to a replay-aware service`);
-    assertReplayAwareMixedPacketOrdering(replayAwareServiceSource, `${sourcePath} replay-aware service`);
+    assertReplayAwareMixedPacketOrdering(
+      replayAwareServiceSource,
+      `${sourcePath} replay-aware service`,
+      expectedReplayHelperDigests,
+    );
   } else {
     assert.fail(`${sourcePath} contains an unmodeled local mixed-packet preflight`);
   }
@@ -4432,6 +4518,15 @@ function checkpointHelperSemanticDescriptor(
     lifecycleByAction,
     questionPacketByAction,
     fingerprintSemantics,
+    actionVariantSchema: {
+      fields: ['actionCode', 'continuationAllowed', 'fieldFingerprint'],
+      actionCode: 'exact-literal',
+    },
+    actionSchema: {
+      discriminator: 'actionCode',
+      actionCodes,
+      exactUnion: true,
+    },
     checkpointBaseSchema: canonicalSchemaAst(checkpointBaseSchema),
     mixedPacketEnforcement: hasLocalMixedPacketPreflight
       ? 'local-preflight'
@@ -4707,6 +4802,7 @@ function assertCoordinatedCheckpointHelperSemantics({
   hostedCheckpointContractSource = null,
   sourcePaths = {},
   expectedHostedDigests = HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256,
+  expectedReplayHelperDigests = HOSTED_APPLY_REPLAY_HELPER_AST_SHA256,
 }) {
   const localApplyPath = sourcePaths.localApply || 'local Apply source';
   const hostedApplyPath = sourcePaths.hostedApply || 'hosted Apply source';
@@ -4732,6 +4828,9 @@ function assertCoordinatedCheckpointHelperSemantics({
       localContract,
       localApplyPath,
       hostedBatchServiceSource,
+      null,
+      null,
+      expectedReplayHelperDigests,
     ),
     checkpointHelperSemanticDescriptor(
       hostedApplySource,
@@ -4740,6 +4839,7 @@ function assertCoordinatedCheckpointHelperSemantics({
       hostedBatchServiceSource,
       hostedCheckpointContractSource,
       sourcePaths.hostedCheckpointContract,
+      expectedReplayHelperDigests,
     ),
     'Local and hosted checkpoint helpers drifted from one language-neutral semantic contract',
   );

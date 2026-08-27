@@ -839,6 +839,8 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointMemberVersion: 8,
     checkpointInspectionEpoch: 2,
     checkpointLifecycle: 'review_ready',
+    checkpointAction: 'review/manual_submit',
+    checkpointActionCount: 1,
   };
   const visibleHandoffContext = {
     ...expectedContext,
@@ -852,6 +854,8 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointMemberVersion: visibleHandoff.checkpointMemberVersion,
     checkpointInspectionEpoch: visibleHandoff.checkpointInspectionEpoch,
     checkpointLifecycle: visibleHandoff.checkpointLifecycle,
+    checkpointAction: visibleHandoff.checkpointAction,
+    checkpointActionCount: visibleHandoff.checkpointActionCount,
   };
   assert.deepEqual(validateCheckpoint('handoff', visibleHandoff, visibleHandoffContext), []);
   for (const [field, value] of [
@@ -891,7 +895,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     handoffEvidenceFingerprint: '3'.repeat(64),
     handoffEvidenceType: 'durable_handoff_receipt',
   };
-  assert.deepEqual(validateCheckpoint('handoff', durableHandoff, {
+  assert.match(validateCheckpoint('handoff', durableHandoff, {
     ...expectedContext,
     employerApplicationState: durableHandoff.employerApplicationState,
     tracklyMemberState: durableHandoff.tracklyMemberState,
@@ -903,7 +907,18 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointMemberVersion: durableHandoff.checkpointMemberVersion,
     checkpointInspectionEpoch: durableHandoff.checkpointInspectionEpoch,
     checkpointLifecycle: durableHandoff.checkpointLifecycle,
-  }), []);
+    checkpointAction: durableHandoff.checkpointAction,
+    checkpointActionCount: durableHandoff.checkpointActionCount,
+  }).join('\n'), /awaiting_manual_submit/);
+  assert.match(validateCheckpoint('handoff', {
+    ...visibleHandoff,
+    tracklyMemberState: 'review_ready',
+    checkpointAction: 'captcha/at_submit',
+  }, {
+    ...visibleHandoffContext,
+    tracklyMemberState: 'review_ready',
+    checkpointAction: 'captcha/at_submit',
+  }).join('\n'), /awaiting_manual_submit|review\/manual_submit/);
   assert.match(
     validateCheckpoint('handoff', {
       ...durableHandoff,
@@ -1016,7 +1031,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
       ...visibleHandoffContext,
       tracklyJobState: 'not_interested',
     }).join('\n'),
-    /reviewReadyClaimed requires prepared employer state, review_ready or awaiting_manual_submit member state, check_later job state/
+    /reviewReadyClaimed requires prepared employer state, awaiting_manual_submit member state, check_later job state/
   );
   assert.match(
     validateCheckpoint('handoff', visibleHandoff, {

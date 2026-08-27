@@ -57,6 +57,82 @@ test('checkpoint helper semantics match their versioned AST digests', () => {
 test('hosted checkpoint helper drift fails coordinated semantic parity even when the tool alias is unchanged', () => {
   const helperSource = source;
   const replayAwareServiceSource = `
+    function actionCodeFromStoredCheckpoint(
+      stored: StoredApplyBatchCheckpoint,
+    ): ApplyBatchCheckpointActionCode | undefined {
+      return APPLY_BATCH_CHECKPOINT_ACTION_CODES.find((code) => {
+        const mapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[code];
+        return (
+          mapping.actionType === stored.actionType
+          && mapping.continuationCode === stored.continuationCode
+        );
+      });
+    }
+
+    async function loadStoredApplyBatchCheckpoint(
+      queryable: ApplyBatchQueryable,
+      userId: number,
+      idempotencyKeyHashes: string[],
+    ): Promise<StoredApplyBatchCheckpoint[]> {
+      const result = await queryable.query(
+        \`SELECT action.id::TEXT AS "actionId",
+                action.action_version AS "actionVersion",
+                action.idempotency_payload_hash AS "idempotencyPayloadHash",
+                action.member_id AS "memberId",
+                member.frozen_job_id AS "jobId",
+                member.company_name_snapshot AS "companyName",
+                member.job_title_snapshot AS "roleTitle",
+                action.run_id AS "runId",
+                member.member_version AS "memberVersion",
+                member.inspection_epoch AS "inspectionEpoch",
+                member.lifecycle_state AS "lifecycleState",
+                action.action_type AS "actionType",
+                action.continuation_code AS "continuationCode",
+                action.field_fingerprint AS "fieldFingerprint",
+                action.metadata
+           FROM public.user_apply_human_actions AS action
+           JOIN public.user_apply_batch_members AS member
+             ON member.id = action.member_id
+            AND member.user_id = action.user_id
+          WHERE action.user_id = $1
+            AND action.idempotency_key_hash = ANY($2::TEXT[])
+          ORDER BY action.action_version ASC\`,
+        [userId, idempotencyKeyHashes],
+      );
+      return result.rows as unknown as StoredApplyBatchCheckpoint[];
+    }
+
+    function storedCheckpointResult(
+      stored: StoredApplyBatchCheckpoint[],
+      status: 'recorded' | 'replayed',
+    ): ApplyBatchCheckpointResult {
+      const member = stored[0]!;
+      return {
+        memberId: Number(member.memberId),
+        status,
+        actions: stored.flatMap((action) => {
+          const actionCode = actionCodeFromStoredCheckpoint(action);
+          if (!actionCode) return [];
+          const packetPhase = action.metadata?.source_code;
+          return [{
+            actionId: action.actionId,
+            actionCode,
+            fieldFingerprint: action.fieldFingerprint ?? undefined,
+            packetPhase: packetPhase === 'first_pass' || packetPhase === 'delta'
+              ? packetPhase
+              : undefined,
+          }];
+        }),
+        lifecycleState: member.lifecycleState,
+        memberVersion: Number(member.memberVersion),
+        inspectionEpoch: Number(member.inspectionEpoch),
+        jobId: Number(member.jobId),
+        companyName: member.companyName,
+        roleTitle: member.roleTitle,
+        runId: Number(member.runId),
+      };
+    }
+
     async function recordOneApplyBatchCheckpoint() {
       const checkpointMapping = APPLY_BATCH_CHECKPOINT_ACTION_MAP[
         checkpoint.actions[0]!.actionCode
@@ -85,6 +161,17 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         }
         return storedCheckpointResult(existing, 'replayed');
       }
+      const preFormAuthenticationBlocked = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].stage === 'authentication',
+      );
+      if (
+        preFormAuthenticationBlocked
+        && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)
+      ) {
+        throw new ApplyBatchValidationError(
+          'Access-blocking checkpoints cannot report private-field commits or other actions.',
+        );
+      }
       const hasQuestions = checkpoint.actions.some(
         (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].questionPacket,
       );
@@ -104,6 +191,15 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   const expectedDigests = Object.fromEntries(helperNames.map((name) => [
     name,
     activeFunctionDigest(helperSource, name, 'checkpoint helper fixture'),
+  ]));
+  const replayHelperNames = [
+    'actionCodeFromStoredCheckpoint',
+    'loadStoredApplyBatchCheckpoint',
+    'storedCheckpointResult',
+  ];
+  const expectedReplayHelperDigests = Object.fromEntries(replayHelperNames.map((name) => [
+    name,
+    activeFunctionDigest(replayAwareServiceSource, name, 'replay helper fixture'),
   ]));
   const reviewedRoutingByAction = {
     'answer/unknown': ['complete_field', 'application', 'unknown_answer'],
@@ -150,6 +246,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     hostedBatchServiceSource: replayAwareServiceSource,
     hostedCheckpointContractSource,
     expectedHostedDigests: expectedDigests,
+    expectedReplayHelperDigests,
   };
 
   assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
@@ -236,6 +333,28 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     }),
     /mixed-packet classifiers|reject new mixed packets/,
   );
+  const missingAuthenticationGuardSource = replayAwareServiceSource.replace(
+    `      const preFormAuthenticationBlocked = checkpoint.actions.some(
+        (action) => APPLY_BATCH_CHECKPOINT_ACTION_MAP[action.actionCode].stage === 'authentication',
+      );
+      if (
+        preFormAuthenticationBlocked
+        && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)
+      ) {
+        throw new ApplyBatchValidationError(
+          'Access-blocking checkpoints cannot report private-field commits or other actions.',
+        );
+      }
+`,
+    '',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: missingAuthenticationGuardSource,
+    }),
+    /replay-aware pre-form authentication guard|pre-form authentication walls/,
+  );
   const weakenedFingerprintSource = helperSource.replace(
     "z.string().regex(/^[a-f0-9]{64}$/)",
     "z.string().regex(/^[a-f0-9]{32}$/)",
@@ -253,6 +372,43 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       localApplySource: weakenedFingerprintSource,
     }),
     /canonical question-packet fingerprint semantics/,
+  );
+  const widenedActionCodeSource = helperSource.replace(
+    'actionCode: z.literal(actionCode)',
+    'actionCode: z.any()',
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(widenedActionCodeSource, name, 'widened action-code fixture'),
+        ])),
+      },
+      localApplySource: widenedActionCodeSource,
+    }),
+    /actionCode.*literal|exact action variant/i,
+  );
+  const wrappedActionSchemaSource = helperSource.replace(
+    "const applyCheckpointActionSchema = z.discriminatedUnion(\n  'actionCode',\n  APPLY_CHECKPOINT_ACTION_CODES.map(applyCheckpointActionVariant),\n);",
+    "const applyCheckpointActionSchema = z.discriminatedUnion(\n  'actionCode',\n  APPLY_CHECKPOINT_ACTION_CODES.map(applyCheckpointActionVariant),\n).or(z.any());",
+  );
+  assert.notEqual(wrappedActionSchemaSource, helperSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      localContract: {
+        ...contract,
+        schemaDigests: Object.fromEntries(helperNames.map((name) => [
+          name,
+          activeFunctionDigest(wrappedActionSchemaSource, name, 'wrapped action-schema fixture'),
+        ])),
+      },
+      localApplySource: wrappedActionSchemaSource,
+    }),
+    /exact discriminated union/i,
   );
   const commentBypassFingerprintSource = weakenedFingerprintSource.replace(
     'const applyCheckpointActionVariant',
@@ -388,7 +544,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         }
       `,
     }),
-    /checkpoint execution must use only its locked pre-replay computations|mixed-packet classifiers must use the locked action mappings|only after exact replay lookup/,
+    /must have exactly one active top-level variable or function definition|checkpoint execution must use only its locked pre-replay computations|mixed-packet classifiers must use the locked action mappings|only after exact replay lookup/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
@@ -400,6 +556,29 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     }),
     /must contain its locked conflict guard and stored replay return/,
   );
+  for (const [driftedReplaySource, expectedError] of [
+    [replayAwareServiceSource.replace(
+      'return result.rows as unknown as StoredApplyBatchCheckpoint[];',
+      'return (result.rows as unknown as StoredApplyBatchCheckpoint[]).slice(0, 1);',
+    ), /loadStoredApplyBatchCheckpoint.*semantic lock/i],
+    [replayAwareServiceSource.replace(
+      'actions: stored.flatMap((action) => {',
+      'actions: stored.slice(0, 1).flatMap((action) => {',
+    ), /storedCheckpointResult.*semantic lock/i],
+    [replayAwareServiceSource.replace(
+      'mapping.continuationCode === stored.continuationCode',
+      'mapping.continuationCode !== stored.continuationCode',
+    ), /actionCodeFromStoredCheckpoint.*semantic lock/i],
+  ]) {
+    assert.notEqual(driftedReplaySource, replayAwareServiceSource);
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        hostedBatchServiceSource: driftedReplaySource,
+      }),
+      expectedError,
+    );
+  }
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
@@ -428,7 +607,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
         'sideEffect();\n      const hasQuestions = checkpoint.actions.some(',
       ),
     }),
-    /must contain only locked classifiers between replay lookup and mixed-packet rejection/,
+    /must contain only the locked authentication guard and classifiers between replay lookup and mixed-packet rejection/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
@@ -607,7 +786,7 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.7.5');
+  assert.equal(contract.contractVersion, '3.7.6');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -619,6 +798,7 @@ test('Apply contract publishes mixed-packet and replay invariants', () => {
   assert.deepEqual(contract.toolInputInvariants.trackly_checkpoint_apply_batch, {
     questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
     exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
+    preFormAuthenticationWallsRejectedAfterExactReplayLookup: true,
   });
 });
 
