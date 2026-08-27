@@ -342,6 +342,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     'let runtimeGlobal; runtimeGlobal = globalThis; runtimeGlobal.Set = class FakeSet {};',
     'Set.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
     "Object.defineProperty(Set.prototype, 'add', { value(value) { this[value] = true; return this; } });",
+    'const intrinsicPatch = { Set: class FakeSet {} }; Object.assign(globalThis, intrinsicPatch);',
   ]) {
     assert.throws(
       () => assertCoordinatedCheckpointHelperSemantics({
@@ -1733,6 +1734,7 @@ test('checkpoint route lock binds the live endpoint to the reviewed bulk writer'
     "const getRouter = () => router; getRouter().post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
     "router.post.call(router, '/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.end());",
     "router.param('id', (_req, res) => res.sendStatus(403));",
+    "if (true) { router.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.sendStatus(403)); }",
   ]) {
     assert.throws(
       () => assertCheckpointRouteCallChain(

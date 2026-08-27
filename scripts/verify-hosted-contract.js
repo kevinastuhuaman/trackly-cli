@@ -3160,10 +3160,11 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
     `${sourcePath} reviewed Apply middleware`,
   );
   const reviewedApplyMiddlewareAst = JSON.stringify(canonicalSchemaAst(reviewedApplyMiddleware));
-  const earlierShadowingRoutes = earlierStatements.filter((statement) => {
-    if (routerAliasStatements.has(statement)) return true;
-    if (statement.type === 'VariableDeclaration') {
-      return statement.declarations.some((declaration) => {
+  function nodeContainsShadowingRoute(node) {
+    if (node === null || typeof node !== 'object') return false;
+    if (Array.isArray(node)) return node.some(nodeContainsShadowingRoute);
+    if (node.type === 'VariableDeclaration') {
+      if (node.declarations.some((declaration) => {
         const initializer = unwrapTransparentExpression(declaration.init);
         const callee = initializer?.type === 'CallExpression'
           ? unwrapTransparentExpression(initializer.callee)
@@ -3176,17 +3177,27 @@ function assertCheckpointRouteCallChain(source, sourcePath) {
         }
         const routePath = initializer.arguments[0];
         return routePath?.type !== 'StringLiteral' || staticRouteCovers(routePath.value, 'post');
-      });
+      })) return true;
     }
-    const registration = routeRegistration(statement);
-    if (!registration) return false;
-    if (JSON.stringify(canonicalSchemaAst(statement)) === reviewedApplyMiddlewareAst) return false;
-    if (registration.method === 'param') {
-      return registration.pathArgument?.type !== 'StringLiteral'
-        || registration.pathArgument.value === 'id';
+    if (node.type === 'ExpressionStatement') {
+      const registration = routeRegistration(node);
+      if (registration) {
+        if (JSON.stringify(canonicalSchemaAst(node)) === reviewedApplyMiddlewareAst) return false;
+        if (registration.method === 'param') {
+          return registration.pathArgument?.type !== 'StringLiteral'
+            || registration.pathArgument.value === 'id';
+        }
+        if (registration.pathArgument?.type !== 'StringLiteral') return true;
+        if (staticRouteCovers(registration.pathArgument.value, registration.method)) return true;
+      }
     }
-    if (registration.pathArgument?.type !== 'StringLiteral') return true;
-    return staticRouteCovers(registration.pathArgument.value, registration.method);
+    return Object.entries(node).some(([key, child]) => (
+      !AST_METADATA_FIELDS.has(key) && nodeContainsShadowingRoute(child)
+    ));
+  }
+  const earlierShadowingRoutes = earlierStatements.filter((statement) => {
+    if (routerAliasStatements.has(statement)) return true;
+    return nodeContainsShadowingRoute(statement);
   });
   assert.equal(
     earlierShadowingRoutes.length,
@@ -3668,7 +3679,8 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
   }
   function objectDefinesIntrinsic(node) {
     const value = unwrapStaticExpression(node);
-    return value?.type === 'ObjectExpression' && value.properties.some((property) => {
+    if (value?.type !== 'ObjectExpression') return true;
+    return value.properties.some((property) => {
       if (property.type !== 'ObjectProperty' && property.type !== 'Property') return true;
       const key = property.computed ? staticString(property.key) : property.key?.name ?? property.key?.value;
       return key === null || key === intrinsicName;
