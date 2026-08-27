@@ -43,7 +43,150 @@ test('outputJobs renders title, company, id, and postedAt (human/TTY)', () => {
 
 test('outputJobs falls back to firstSeenAt when postedAt is absent', () => {
   const out = capture(() => fmt.outputJobs([{ id: 1, title: 'X', companyName: 'Y', firstSeenAt: '2025-12-31' }]), { tty: true });
+  assert.match(out, /Found:/);
   assert.match(out, /2025-12-31/);
+});
+
+test('outputJobs prefers the server display date and labels reposts explicitly', () => {
+  const out = capture(() => fmt.outputJobs([{
+    id: 8,
+    title: 'Product Manager',
+    companyName: 'Stripe',
+    postedAt: '2026-01-02T00:00:00.000Z',
+    firstSeenAt: '2026-01-03T00:00:00.000Z',
+    displayDate: '2026-02-04T00:00:00.000Z',
+    displayDateKind: 'reposted',
+  }]), { tty: true });
+  assert.match(out, /Reposted:/);
+  assert.match(out, /2026-02-04/);
+});
+
+test('jobDateDetailLines preserves a legacy posted date for a projected repost', () => {
+  assert.deepEqual(fmt.jobDateDetailLines({
+    postedAt: '2026-01-02T00:00:00.000Z',
+    firstSeenAt: '2026-01-03T00:00:00.000Z',
+    repostedAt: '2026-02-04T00:00:00.000Z',
+    displayDate: '2026-02-04T00:00:00.000Z',
+    displayDateKind: 'reposted',
+  }), [
+    'Posted: 2026-01-02',
+    'Found: 2026-01-03',
+    'Reposted: 2026-02-04',
+  ]);
+});
+
+test('outputJobs renders collision-only requirement IDs', () => {
+  const out = capture(() => fmt.outputJobs([{
+    id: 81,
+    title: 'Product Manager',
+    companyName: 'Apple',
+    firstSeenAt: '2026-02-04T00:00:00.000Z',
+    sourceReference: { label: 'Req', value: ' 200664582-3956 ', disambiguatesTitle: true },
+  }]), { tty: true });
+  assert.match(out, /Req:/);
+  assert.match(out, /200664582-3956/);
+});
+
+test('job date presentation preserves source calendar days and rejects malformed new fields', () => {
+  assert.deepEqual(fmt.jobDatePresentation({
+    displayDate: '2026-05-20T00:58:19.519Z',
+    displayDateKind: 'posted',
+    sourceDateMeta: {
+      original: { precision: 'day', timezone: 'America/Los_Angeles', calendarDay: '2026-05-20' },
+      repost: null,
+    },
+  }), { label: 'Posted', value: '2026-05-20' });
+  assert.deepEqual(fmt.jobDatePresentation({
+    displayDate: 'not-a-date',
+    displayDateKind: 'reposted',
+    firstSeenAt: '2026-06-17T01:00:00.000Z',
+  }), { label: 'Found', value: '2026-06-17' });
+  assert.deepEqual(fmt.jobDatePresentation({
+    postedAt: '2026-02-30T00:00:00.000Z',
+    firstSeenAt: '2026-03-03T00:00:00.000Z',
+  }), { label: 'Found', value: '2026-03-03' });
+  assert.deepEqual(fmt.jobDatePresentation({
+    postedAt: '2026-06-16T23:30:00-07:00',
+  }), { label: 'Posted', value: '2026-06-16' });
+});
+
+test('malformed or missing projected dates use one coherent legacy fallback', () => {
+  for (const projected of [
+    { displayDateKind: 'reposted', displayDate: 'not-a-date' },
+    { displayDateKind: 'reposted' },
+    { displayDateKind: 'found', displayDate: 'not-a-date' },
+    { displayDateKind: 'found' },
+  ]) {
+    const job = {
+      postedAt: '2026-01-02T00:00:00.000Z',
+      firstSeenAt: '2026-01-03T00:00:00.000Z',
+      ...projected,
+    };
+    assert.deepEqual(fmt.jobDatePresentation(job), {
+      label: 'Posted',
+      value: '2026-01-02',
+    });
+    assert.deepEqual(fmt.jobDateDetailLines(job), [
+      'Posted: 2026-01-02',
+      'Found: 2026-01-03',
+    ]);
+  }
+});
+
+test('job detail date lines include original and repost timeline plus collision-only requisition', () => {
+  assert.deepEqual(fmt.jobDateDetailLines({
+    originalPostedAt: '2026-05-20T00:58:19.519Z',
+    firstSeenAt: '2026-05-21T01:00:00.000Z',
+    repostedAt: '2026-06-16T16:32:42.248Z',
+    sourceDateMeta: {
+      original: { precision: 'day', timezone: 'America/Los_Angeles', calendarDay: '2026-05-20' },
+      repost: { precision: 'day', timezone: 'America/Los_Angeles', calendarDay: '2026-06-16' },
+    },
+    sourceReference: { label: 'Req', value: '200664582-3956', disambiguatesTitle: true },
+  }), [
+    'Posted: 2026-05-20',
+    'Found: 2026-05-21',
+    'Reposted: 2026-06-16',
+    'Req: 200664582-3956',
+  ]);
+  assert.deepEqual(fmt.jobDateDetailLines({
+    firstSeenAt: '2026-06-17T01:00:00.000Z',
+    sourceReference: { label: 'Req', value: 'hidden', disambiguatesTitle: false },
+  }), ['Found: 2026-06-17']);
+  assert.deepEqual(fmt.jobDateDetailLines({
+    firstSeenAt: '2026-05-21T01:00:00.000Z',
+    repostedAt: '2026-06-16T16:32:42.248Z',
+  }), [
+    'Original posting date unavailable',
+    'Found: 2026-05-21',
+    'Reposted: 2026-06-16',
+  ]);
+  assert.deepEqual(fmt.jobDateDetailLines({
+    postedAt: '2026-06-16T16:32:42.248Z',
+    firstSeenAt: '2026-06-17T01:00:00.000Z',
+  }), [
+    'Posted: 2026-06-16',
+    'Found: 2026-06-17',
+  ]);
+  assert.deepEqual(fmt.jobDateDetailLines({
+    postedAt: '2026-06-16T16:32:42.248Z',
+    firstSeenAt: '2026-06-17T01:00:00.000Z',
+    displayDate: '2026-06-17T01:00:00.000Z',
+    displayDateKind: 'found',
+  }), ['Found: 2026-06-17']);
+  assert.deepEqual(fmt.jobDateDetailLines({
+    postedAt: '2026-06-15T16:32:42.248Z',
+    firstSeenAt: '2026-06-17T01:00:00.000Z',
+    displayDate: '2026-06-16T16:32:42.248Z',
+    displayDateKind: 'posted',
+  }), [
+    'Posted: 2026-06-16',
+    'Found: 2026-06-17',
+  ]);
+  assert.deepEqual(fmt.jobDateDetailLines({
+    displayDate: '2026-06-16T16:32:42.248Z',
+    displayDateKind: 'posted',
+  }), ['Posted: 2026-06-16']);
 });
 
 test('outputJobs formats funding valuation as $M and $B', () => {
@@ -54,10 +197,18 @@ test('outputJobs formats funding valuation as $M and $B', () => {
 });
 
 test('outputJobs JSON mode emits parseable JSON with fields preserved (non-TTY)', () => {
-  const out = capture(() => fmt.outputJobs([{ id: 9, title: 'PM' }]), { tty: false });
+  const out = capture(() => fmt.outputJobs([{
+    id: 9,
+    title: 'PM',
+    displayDate: '2026-02-04T00:00:00.000Z',
+    displayDateKind: 'reposted',
+    sourceReference: { label: 'Req', value: 'req-9', disambiguatesTitle: true },
+  }]), { tty: false });
   const parsed = JSON.parse(out);
   assert.equal(parsed[0].id, 9);
   assert.equal(parsed[0].title, 'PM');
+  assert.equal(parsed[0].displayDateKind, 'reposted');
+  assert.equal(parsed[0].sourceReference.value, 'req-9');
 });
 
 test('outputJobs is null/undefined-safe and reports empty results', () => {
