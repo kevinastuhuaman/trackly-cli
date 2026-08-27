@@ -343,6 +343,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     'Set.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
     "Object.defineProperty(Set.prototype, 'add', { value(value) { this[value] = true; return this; } });",
     'const SetAlias = Set; SetAlias.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
+    'const { Set: SetAlias } = globalThis; SetAlias.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
     "Object.defineProperty.call(Object, globalThis, 'Set', { value: class FakeSet {} });",
     'const intrinsicPatch = { Set: class FakeSet {} }; Object.assign(globalThis, intrinsicPatch);',
   ]) {

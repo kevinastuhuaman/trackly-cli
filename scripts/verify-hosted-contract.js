@@ -3659,6 +3659,19 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
       && isGlobalReference(member.object)
       && (propertyName === intrinsicName || (member.computed && propertyName === null));
   }
+  function objectPatternSelectsGlobalIntrinsic(pattern, value) {
+    if (pattern?.type !== 'ObjectPattern' || !isGlobalReference(value)) return false;
+    return pattern.properties.some((property) => {
+      if (property.type === 'RestElement') return true;
+      if (property.type !== 'ObjectProperty' && property.type !== 'Property') return true;
+      const key = property.computed
+        ? property.key?.type === 'StringLiteral' || property.key?.type === 'Literal'
+          ? property.key.value
+          : null
+        : property.key?.name ?? property.key?.value;
+      return key === intrinsicName || key === null;
+    });
+  }
   const intrinsicAliases = new Set([intrinsicName]);
   let discoveredIntrinsicAlias = true;
   while (discoveredIntrinsicAlias) {
@@ -3676,6 +3689,9 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
           : null;
       const target = binding?.[0];
       const value = unwrapStaticExpression(binding?.[1]);
+      if (objectPatternSelectsGlobalIntrinsic(target, value)) {
+        forbiddenBindings.push(node);
+      }
       const aliasesIntrinsic = value?.type === 'Identifier'
         ? intrinsicAliases.has(value.name)
         : isGlobalIntrinsicMember(value);
