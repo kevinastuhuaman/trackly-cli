@@ -114,15 +114,6 @@ const applyCheckpointSchema = z.object({
       message: 'packetPhase is only valid for grouped questions',
     });
   }
-  const accessBlocked = actionCodes.includes('captcha/before_form')
-    || actionCodes.includes('trust/origin_mismatch');
-  if (accessBlocked && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['actions'],
-      message: 'Access-blocking checkpoints cannot report private-field commits or other actions',
-    });
-  }
   const reviewReady = actionCodes.includes('captcha/at_submit')
     || actionCodes.includes('review/manual_submit');
   if (reviewReady && !checkpoint.knownFieldsCommitted) {

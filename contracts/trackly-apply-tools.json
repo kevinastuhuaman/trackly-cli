@@ -39,7 +39,7 @@
   "schemaDigests": {
     "applyCheckpointActionVariant": "db6b69924b791b3e50c4c7464519fa1a786c7b39ed86c3cc9482e18c211553d2",
     "applyCheckpointActionSchema": "99baf25b27ae4bd41183bf47f8e1eb7522e1d471156f6090a784362d5b248e95",
-    "applyCheckpointSchema": "4875190ed9d2d8dd2145f2d08c4bb6159a0ce9f751b1e41246c93f33d652c99c"
+    "applyCheckpointSchema": "101c5d7606cb902e89e677773fa45fbbdc9b38de99b452d641806bac90004274"
   },
   "tools": {
     "trackly_get_apply_queue": "{limit:z.number().int().min(1).max(100).optional(),cursor:z.string().min(1).max(2048).optional()}",

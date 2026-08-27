@@ -195,6 +195,28 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
     }),
   });
   assert.equal(mixedLifecycle.isError, true, 'mixed lifecycle checkpoint was accepted');
+  for (const arguments_ of [
+    checkpointArguments('captcha/before_form', true, sequence++, {
+      knownFieldsCommitted: true,
+    }),
+    checkpointArguments('captcha/before_form', true, sequence++, {
+      knownFieldsCommitted: false,
+      actions: [
+        { actionCode: 'captcha/before_form', continuationAllowed: true },
+        { actionCode: 'auth/otp', continuationAllowed: true },
+      ],
+    }),
+  ]) {
+    const legacyAccessBlocker = await client.callTool({
+      name: 'trackly_checkpoint_apply_batch',
+      arguments: arguments_,
+    });
+    assert.notEqual(
+      legacyAccessBlocker.isError,
+      true,
+      'local schema must let the backend authorize exact legacy access-blocker replays',
+    );
+  }
   const invalidCheckpoints = [
     ['missing actions', checkpointArguments('auth/otp', true, sequence++, {
       actions: undefined,
@@ -212,16 +234,6 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
     })],
     ['duplicate resolved action IDs', checkpointArguments('auth/otp', true, sequence++, {
       resolvedActionIds: ['91', '91'],
-    })],
-    ['access blocker after private commit', checkpointArguments('captcha/before_form', true, sequence++, {
-      knownFieldsCommitted: true,
-    })],
-    ['access blocker mixed with another action', checkpointArguments('captcha/before_form', true, sequence++, {
-      knownFieldsCommitted: false,
-      actions: [
-        { actionCode: 'captcha/before_form', continuationAllowed: true },
-        { actionCode: 'auth/otp', continuationAllowed: true },
-      ],
     })],
     ['review-ready before known fields commit', checkpointArguments('review/manual_submit', false, sequence++, {
       knownFieldsCommitted: false,
@@ -253,7 +265,7 @@ test('checkpoint tool enforces canonical continuation, question, and lifecycle s
   assert.equal(Object.hasOwn(forwardedBody.checkpoints[0].actions[0], 'answerValue'), false);
   assert.equal(
     requests.length,
-    Object.keys(canonicalContinuationByAction).length + 3,
+    Object.keys(canonicalContinuationByAction).length + 5,
     'invalid checkpoint reached the API',
   );
 });

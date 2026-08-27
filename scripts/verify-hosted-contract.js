@@ -4636,11 +4636,13 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
     'Question checkpoints require a packet phase': 'hasQuestions && checkpoint.packetPhase === undefined',
     'Question checkpoints require committed known fields': 'hasQuestions && !checkpoint.knownFieldsCommitted',
     'packetPhase is only valid for grouped questions': '!hasQuestions && checkpoint.packetPhase !== undefined',
-    'Access-blocking checkpoints cannot report private-field commits or other actions': 'accessBlocked && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)',
     'Review checkpoints require all known fields to be committed': 'reviewReady && !checkpoint.knownFieldsCommitted',
   };
   const expected = {
     ...common,
+    ...(shape === 'hosted-map' ? {
+      'Access-blocking checkpoints cannot report private-field commits or other actions': 'accessBlocked && (checkpoint.knownFieldsCommitted || checkpoint.actions.length !== 1)',
+    } : {}),
     'Actions in one inspection checkpoint must share one lifecycle': shape === 'hosted-map'
       ? 'new Set(mappings.map(({ lifecycleState }) => lifecycleState)).size !== 1'
       : 'new Set(actionCodes.map((code) => APPLY_CHECKPOINT_LIFECYCLE_BY_ACTION[code])).size !== 1',
@@ -4691,7 +4693,6 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
   ] : [
     'const actionCodes = checkpoint.actions.map(({ actionCode }) => actionCode);',
     'const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);',
-    "const accessBlocked = actionCodes.includes('captcha/before_form') || actionCodes.includes('trust/origin_mismatch');",
     "const reviewReady = actionCodes.includes('captcha/at_submit') || actionCodes.includes('review/manual_submit');",
   ];
   const declarations = callback.body.body.filter((statement) => statement.type === 'VariableDeclaration');
@@ -4726,7 +4727,9 @@ function assertCheckpointRefinementConditions(source, sourcePath, shape) {
     'Question checkpoints require a packet phase': ['hasQuestions'],
     'Question checkpoints require committed known fields': ['hasQuestions'],
     'packetPhase is only valid for grouped questions': ['hasQuestions'],
-    'Access-blocking checkpoints cannot report private-field commits or other actions': ['accessBlocked'],
+    ...(shape === 'hosted-map' ? {
+      'Access-blocking checkpoints cannot report private-field commits or other actions': ['accessBlocked'],
+    } : {}),
     'Review checkpoints require all known fields to be committed': ['reviewReady'],
   };
   for (const [message, dependencies] of Object.entries(dependenciesByMessage)) {
@@ -5294,7 +5297,6 @@ function checkpointHelperSemanticDescriptor(
     if (checkpointSchema.includes('hasNonQuestions')) {
       assert.match(checkpointSchema, /actionCodes\.some\(\(code\) => !APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION\[code\]\)/);
     }
-    assert.match(checkpointSchema, /actionCodes\.includes\('captcha\/before_form'\)/);
     assert.match(checkpointSchema, /actionCodes\.includes\('review\/manual_submit'\)/);
     assertCheckpointRefinementConditions(source, sourcePath, 'local-map');
   } else if (usesHostedActionMap) {
