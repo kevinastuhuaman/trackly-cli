@@ -212,7 +212,12 @@ Required fields:
   lineage, profile revision, and form inventory baseline from that receipt, so
   matching caller-authored Review values alone cannot satisfy the gate;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
-  `reviewTabPreserved`, and `userVisibleHandoffProven` all true; and
+  `reviewTabPreserved`, and `userVisibleHandoffProven` all true. A bare truth
+  boolean is insufficient: bind `truthCertificationAttestationId`,
+  `truthCertificationDependencyHash`, `truthCertificationExpiresAt`, and
+  `truthCertificationStatus` (`recorded` or `replayed`) in both the receipt and
+  authoritative `expectedContext` to the value-free backend certification
+  result; and
 - bind `checkpointAction: review/manual_submit` and
   `continuationAllowed: false` in both the receipt and `expectedContext` to the
   exact backend-accepted action result; a

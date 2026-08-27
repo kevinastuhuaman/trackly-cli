@@ -166,6 +166,10 @@ const PHASE_FIELDS = {
     'formInventoryFingerprint',
     'finalIntegrityPassed',
     'truthConfirmationRecorded',
+    'truthCertificationAttestationId',
+    'truthCertificationDependencyHash',
+    'truthCertificationExpiresAt',
+    'truthCertificationStatus',
     'submitActivated',
     'reviewTabPreserved',
     'userVisibleHandoffProven',
@@ -246,6 +250,18 @@ function requireCount(errors, receipt, field) {
 function requireFingerprint(errors, value, field) {
   if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
     errors.push(`${field} must be a lowercase SHA-256 fingerprint`);
+  }
+}
+
+function requirePositiveDecimalId(errors, value, field) {
+  if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) {
+    errors.push(`${field} must be a positive decimal identifier`);
+  }
+}
+
+function requireIsoDateTime(errors, value, field) {
+  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+    errors.push(`${field} must be an ISO-8601 date-time`);
   }
 }
 
@@ -566,12 +582,23 @@ function validateReview(receipt, expectedContext, priorFill) {
     'checkpointActionCount',
     'checkpointActionIdsFingerprint',
   ];
+  const truthCertificationFields = [
+    'truthCertificationAttestationId',
+    'truthCertificationDependencyHash',
+    'truthCertificationExpiresAt',
+    'truthCertificationStatus',
+  ];
   validateCurrentLineage(
     errors,
     receipt,
     expectedContext,
     'approvedJobIds',
-    [...fillBaselineFields, ...resolutionFields, ...checkpointFields],
+    [
+      ...fillBaselineFields,
+      ...resolutionFields,
+      ...checkpointFields,
+      ...truthCertificationFields,
+    ],
   );
   if (receipt.workMode === 'accessible_execution') {
     requireTracklyId(errors, receipt, 'profileRevision');
@@ -607,6 +634,24 @@ function validateReview(receipt, expectedContext, priorFill) {
   }
   requireTrue(errors, receipt, 'finalIntegrityPassed');
   requireTrue(errors, receipt, 'truthConfirmationRecorded');
+  requirePositiveDecimalId(
+    errors,
+    receipt.truthCertificationAttestationId,
+    'truthCertificationAttestationId',
+  );
+  requireFingerprint(
+    errors,
+    receipt.truthCertificationDependencyHash,
+    'truthCertificationDependencyHash',
+  );
+  requireIsoDateTime(
+    errors,
+    receipt.truthCertificationExpiresAt,
+    'truthCertificationExpiresAt',
+  );
+  if (!['recorded', 'replayed'].includes(receipt.truthCertificationStatus)) {
+    errors.push('truthCertificationStatus must be recorded or replayed');
+  }
   requireFalse(errors, receipt, 'submitActivated');
   requireTrue(errors, receipt, 'reviewTabPreserved');
   requireTrue(errors, receipt, 'userVisibleHandoffProven');
@@ -637,7 +682,12 @@ function validateReview(receipt, expectedContext, priorFill) {
   }
   requireFingerprint(errors, receipt.checkpointActionIdsFingerprint, 'checkpointActionIdsFingerprint');
   if (expectedContext && typeof expectedContext === 'object' && !Array.isArray(expectedContext)) {
-    for (const field of [...fillBaselineFields, ...resolutionFields, ...checkpointFields]) {
+    for (const field of [
+      ...fillBaselineFields,
+      ...resolutionFields,
+      ...checkpointFields,
+      ...truthCertificationFields,
+    ]) {
       if (receipt[field] !== expectedContext[field]) errors.push(`${field} must match expectedContext`);
     }
   }

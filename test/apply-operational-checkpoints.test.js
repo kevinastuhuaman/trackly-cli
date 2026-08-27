@@ -586,6 +586,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     formInventoryFingerprint: fill.formInventoryFingerprint,
     finalIntegrityPassed: true,
     truthConfirmationRecorded: true,
+    truthCertificationAttestationId: '901',
+    truthCertificationDependencyHash: 'a'.repeat(64),
+    truthCertificationExpiresAt: '2026-08-28T03:00:00.000Z',
+    truthCertificationStatus: 'recorded',
     submitActivated: false,
     reviewTabPreserved: true,
     userVisibleHandoffProven: true,
@@ -604,6 +608,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...expectedContext,
     profileRevision: fill.profileRevision,
     formInventoryFingerprint: fill.formInventoryFingerprint,
+    truthCertificationAttestationId: '901',
+    truthCertificationDependencyHash: 'a'.repeat(64),
+    truthCertificationExpiresAt: '2026-08-28T03:00:00.000Z',
+    truthCertificationStatus: 'recorded',
     checkpointAction: 'review/manual_submit',
     continuationAllowed: false,
     resolvedActionCount: 2,
@@ -622,6 +630,23 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     fillEvidence = priorFill,
   ) => validateCheckpoint('review', receiptCandidate, contextCandidate, fillEvidence);
   assert.deepEqual(validateReviewCheckpoint(review, reviewContext), []);
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationAttestationId: undefined,
+      truthCertificationDependencyHash: undefined,
+      truthCertificationExpiresAt: undefined,
+      truthCertificationStatus: undefined,
+    }, reviewContext).join('\n'),
+    /truthCertificationAttestationId must be a positive decimal identifier/,
+  );
+  assert.match(
+    validateReviewCheckpoint({
+      ...review,
+      truthCertificationDependencyHash: 'b'.repeat(64),
+    }, reviewContext).join('\n'),
+    /truthCertificationDependencyHash must match expectedContext/,
+  );
   assert.match(
     validateReviewCheckpoint(review, reviewContext, null).join('\n'),
     /priorFill is required for review/,
@@ -665,6 +690,10 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     'checkpointActionIdsFingerprint',
     'profileRevision',
     'formInventoryFingerprint',
+    'truthCertificationAttestationId',
+    'truthCertificationDependencyHash',
+    'truthCertificationExpiresAt',
+    'truthCertificationStatus',
   ];
   const { executionId: omittedReviewExecutionId, ...fixedReview } = review;
   const fixedFillReceipt = {
