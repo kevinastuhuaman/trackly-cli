@@ -3393,6 +3393,55 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
   return importedBinding;
 }
 
+function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
+  const ast = parseFullSource(source, sourcePath);
+  const forbiddenBindings = [];
+  function patternContainsName(pattern) {
+    if (!pattern) return false;
+    if (pattern.type === 'Identifier') return pattern.name === intrinsicName;
+    if (pattern.type === 'AssignmentPattern') return patternContainsName(pattern.left);
+    if (pattern.type === 'RestElement') return patternContainsName(pattern.argument);
+    if (pattern.type === 'ArrayPattern') return pattern.elements.some(patternContainsName);
+    if (pattern.type === 'ObjectPattern') return pattern.properties.some((property) => (
+      property.type === 'RestElement'
+        ? patternContainsName(property.argument)
+        : patternContainsName(property.value)
+    ));
+    return false;
+  }
+  function visit(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node.type === 'VariableDeclarator' && patternContainsName(node.id)) forbiddenBindings.push(node);
+    if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
+        && node.id?.name === intrinsicName) forbiddenBindings.push(node);
+    if ((node.type === 'FunctionDeclaration'
+        || node.type === 'FunctionExpression'
+        || node.type === 'ArrowFunctionExpression')
+        && node.params.some(patternContainsName)) forbiddenBindings.push(node);
+    if (node.type === 'CatchClause' && patternContainsName(node.param)) forbiddenBindings.push(node);
+    if ((node.type === 'ImportSpecifier'
+        || node.type === 'ImportDefaultSpecifier'
+        || node.type === 'ImportNamespaceSpecifier')
+        && node.local?.name === intrinsicName) forbiddenBindings.push(node);
+    if (node.type === 'AssignmentExpression' && patternContainsName(node.left)) forbiddenBindings.push(node);
+    if (node.type === 'UpdateExpression' && patternContainsName(node.argument)) forbiddenBindings.push(node);
+    for (const [key, child] of Object.entries(node)) {
+      if (AST_METADATA_FIELDS.has(key)) continue;
+      visit(child);
+    }
+  }
+  visit(ast);
+  assert.equal(
+    forbiddenBindings.length,
+    0,
+    `${intrinsicName} in ${sourcePath} must be the unshadowed intrinsic`,
+  );
+}
+
 function assertImportedFunctionCallInventory(source, name, moduleName, expectedCallSites, sourcePath) {
   const ast = parseFullSource(source, sourcePath);
   const importedBinding = assertImportBinding(source, name, name, moduleName, sourcePath);
@@ -5328,6 +5377,15 @@ function assertCoordinatedCheckpointHelperSemantics({
   const localApplyPath = sourcePaths.localApply || 'local Apply source';
   const hostedApplyPath = sourcePaths.hostedApply || 'hosted Apply source';
   const helperNames = Object.keys(expectedHostedDigests);
+  assertUnshadowedIntrinsicBinding(localApplySource, 'Set', localApplyPath);
+  assertUnshadowedIntrinsicBinding(hostedApplySource, 'Set', hostedApplyPath);
+  if (typeof hostedBatchServiceSource === 'string') {
+    assertUnshadowedIntrinsicBinding(
+      hostedBatchServiceSource,
+      'Set',
+      sourcePaths.hostedBatchService || 'hosted replay service',
+    );
+  }
   assert.deepEqual(
     Object.keys(localContract.schemaDigests || {}),
     helperNames,

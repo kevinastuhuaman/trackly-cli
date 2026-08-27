@@ -296,6 +296,15 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   };
 
   assert.doesNotThrow(() => assertCoordinatedCheckpointHelperSemantics(fixture));
+  for (const sourceKey of ['localApplySource', 'hostedApplySource', 'hostedBatchServiceSource']) {
+    assert.throws(
+      () => assertCoordinatedCheckpointHelperSemantics({
+        ...fixture,
+        [sourceKey]: `const Set = class FakeSet { constructor() { return { size: 1 }; } };\n${fixture[sourceKey]}`,
+      }),
+      /Set .* must be the unshadowed intrinsic/,
+    );
+  }
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
