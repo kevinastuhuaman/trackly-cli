@@ -281,7 +281,7 @@ function canonicalJson(value) {
   if (typeof value === 'string') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
     .join(',')}}`;
 }
@@ -654,6 +654,7 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
     'truthCertificationAttestationId',
     'truthCertificationDependencyHash',
     'truthCertificationExpiresAt',
+    'truthCertificationMemberRuns',
     'truthCertificationRunSetHash',
     'truthCertificationStatus',
   ];
@@ -725,6 +726,17 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
     'truthCertificationRunSetHash',
   );
   validateTruthCertificationMemberRuns(errors, receipt.truthCertificationMemberRuns, receipt);
+  validateTruthCertificationMemberRuns(
+    errors,
+    expectedContext?.truthCertificationMemberRuns,
+    expectedContext || {},
+  );
+  if (Array.isArray(receipt.truthCertificationMemberRuns)
+      && Array.isArray(expectedContext?.truthCertificationMemberRuns)
+      && canonicalJson(receipt.truthCertificationMemberRuns)
+        !== canonicalJson(expectedContext.truthCertificationMemberRuns)) {
+    errors.push('truthCertificationMemberRuns must match the authoritative expectedContext');
+  }
   if (!['recorded', 'replayed'].includes(receipt.truthCertificationStatus)) {
     errors.push('truthCertificationStatus must be recorded or replayed');
   }

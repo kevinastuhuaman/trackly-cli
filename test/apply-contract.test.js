@@ -19,6 +19,7 @@ const {
   assertCoordinatedCheckpointHelperSemantics,
   assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
+  assertUnshadowedImportBinding,
   assertInstallProcessGuardsSemantics,
   assertPluginRoutePrecedence: assertPluginRoutePrecedenceProduction,
   assertServerListenSemantics,
@@ -33,6 +34,34 @@ const {
   sha256ExactBytes,
   verifyHostedContract,
 } = require('../scripts/verify-hosted-contract.js');
+
+test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {
+  const reviewedSource = `
+    import { z } from 'zod';
+    const schema = z.object({ value: z.string() });
+  `;
+  assert.doesNotThrow(() => assertUnshadowedImportBinding(
+    reviewedSource,
+    'z',
+    'z',
+    'zod',
+    'reviewed import fixture',
+  ));
+  assert.throws(() => assertUnshadowedImportBinding(
+    reviewedSource.replace("from 'zod'", "from './lookalike.js'"),
+    'z',
+    'z',
+    'zod',
+    'lookalike import fixture',
+  ), /must import z as z exactly once from zod/);
+  assert.throws(() => assertUnshadowedImportBinding(
+    `${reviewedSource}\nfunction bypass(z) { return z; }`,
+    'z',
+    'z',
+    'zod',
+    'shadowed import fixture',
+  ), /must not shadow or reassign z/);
+});
 
 const assertPluginRoutePrecedence = (...args) => assertPluginRoutePrecedenceProduction(
   ...args,

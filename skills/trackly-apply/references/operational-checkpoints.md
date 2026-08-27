@@ -220,9 +220,10 @@ Required fields:
   authoritative `expectedContext` to the value-free backend certification
   result. The certification expiry must still be later than local validation
   time. Preserve the accepted value-free `truthCertificationMemberRuns`,
-  recompute the backend's canonical run-set hash, and prove the current member,
-  run, checkpoint version, and inspection epoch occur exactly once in that
-  certified subset; and
+  bind that exact member-run list into `expectedContext`, recompute the backend's
+  canonical run-set hash, and prove the current member, run, checkpoint version,
+  and inspection epoch occur exactly once in that certified subset. A receipt
+  must never replace or extend the authoritative certified member-run list; and
 - bind `checkpointAction: review/manual_submit` and
   `continuationAllowed: false` in both the receipt and `expectedContext` to the
   exact backend-accepted action result; a

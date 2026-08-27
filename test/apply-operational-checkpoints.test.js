@@ -15,7 +15,7 @@ function canonicalJson(value) {
   if (typeof value === 'string') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
     .join(',')}}`;
 }
@@ -635,6 +635,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     truthCertificationAttestationId: '901',
     truthCertificationDependencyHash: 'a'.repeat(64),
     truthCertificationExpiresAt: '2026-08-28T03:00:00.000Z',
+    truthCertificationMemberRuns: review.truthCertificationMemberRuns,
     truthCertificationRunSetHash: review.truthCertificationRunSetHash,
     truthCertificationStatus: 'recorded',
     checkpointAction: 'review/manual_submit',
@@ -867,6 +868,7 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     ...Object.fromEntries(reviewExpectedFields.map((field) => [field, reviewContext[field]])),
     profileRevision: 0,
     checkpointInspectionEpoch: 0,
+    truthCertificationMemberRuns: fixedTruthCertificationMemberRuns,
     truthCertificationRunSetHash: fixedTruthCertificationRunSetHash,
   }, { receipt: fixedFillReceipt, expectedContext: fixedFillContext }), []);
   assert.match(
@@ -1084,12 +1086,24 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
   assert.match(validateCheckpoint('handoff', {
     ...visibleHandoff,
     tracklyMemberState: 'review_ready',
-    checkpointAction: 'captcha/at_submit',
   }, {
     ...visibleHandoffContext,
     tracklyMemberState: 'review_ready',
+  }).join('\n'), /awaiting_manual_submit/);
+  assert.match(validateCheckpoint('handoff', {
+    ...visibleHandoff,
     checkpointAction: 'captcha/at_submit',
-  }).join('\n'), /awaiting_manual_submit|review\/manual_submit/);
+  }, {
+    ...visibleHandoffContext,
+    checkpointAction: 'captcha/at_submit',
+  }).join('\n'), /review\/manual_submit/);
+  assert.match(validateCheckpoint('handoff', {
+    ...visibleHandoff,
+    checkpointActionCount: 2,
+  }, {
+    ...visibleHandoffContext,
+    checkpointActionCount: 2,
+  }).join('\n'), /checkpointActionCount 1/);
   assert.match(
     validateCheckpoint('handoff', {
       ...durableHandoff,
