@@ -655,7 +655,17 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     checkpointActionCount: 1,
     checkpointActionIdsFingerprint: 'e'.repeat(64),
   };
-  const priorFill = { receipt: fill, expectedContext: fillContext };
+  const resolvedFill = {
+    ...fill,
+    committedControlCount: 12,
+    typedExceptionCount: 0,
+    controlAccounting: {
+      ...fill.controlAccounting,
+      filledExactProfile: 9,
+      missingFact: 0,
+    },
+  };
+  const priorFill = { receipt: resolvedFill, expectedContext: fillContext };
   const reviewValidationTimeMs = Date.parse('2026-08-27T02:00:00.000Z');
   const validateReviewCheckpoint = (
     receiptCandidate,
@@ -670,6 +680,13 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     validationTimeMs,
   );
   assert.deepEqual(validateReviewCheckpoint(review, reviewContext), []);
+  assert.match(
+    validateReviewCheckpoint(review, reviewContext, {
+      receipt: fill,
+      expectedContext: fillContext,
+    }).join('\n'),
+    /priorFill\.controlAccounting\.missingFact must be 0 before review/,
+  );
   assert.match(
     validateReviewCheckpoint({
       ...review,
@@ -886,6 +903,13 @@ test('phase checkpoint validator accepts complete value-free receipts and reject
     workMode: 'fixed_inspection',
     inspectionEpoch: 0,
     profileRevision: 0,
+    committedControlCount: 12,
+    typedExceptionCount: 0,
+    controlAccounting: {
+      ...fixedFill.controlAccounting,
+      filledExactProfile: 9,
+      missingFact: 0,
+    },
   };
   const fixedFillContext = {
     ...fixedExpectedContext,

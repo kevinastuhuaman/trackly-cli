@@ -3659,9 +3659,43 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
       && isGlobalReference(member.object)
       && (propertyName === intrinsicName || (member.computed && propertyName === null));
   }
+  const intrinsicAliases = new Set([intrinsicName]);
+  let discoveredIntrinsicAlias = true;
+  while (discoveredIntrinsicAlias) {
+    discoveredIntrinsicAlias = false;
+    function discoverIntrinsicAliases(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const child of node) discoverIntrinsicAliases(child);
+        return;
+      }
+      const binding = node.type === 'VariableDeclarator'
+        ? [node.id, node.init]
+        : node.type === 'AssignmentExpression' && node.operator === '='
+          ? [node.left, node.right]
+          : null;
+      const target = binding?.[0];
+      const value = unwrapStaticExpression(binding?.[1]);
+      const aliasesIntrinsic = value?.type === 'Identifier'
+        ? intrinsicAliases.has(value.name)
+        : isGlobalIntrinsicMember(value);
+      if (target?.type === 'Identifier'
+          && aliasesIntrinsic
+          && !intrinsicAliases.has(target.name)) {
+        intrinsicAliases.add(target.name);
+        forbiddenBindings.push(node);
+        discoveredIntrinsicAlias = true;
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (AST_METADATA_FIELDS.has(key)) continue;
+        discoverIntrinsicAliases(child);
+      }
+    }
+    discoverIntrinsicAliases(ast);
+  }
   function isIntrinsicObjectPath(node) {
     const value = unwrapStaticExpression(node);
-    if (value?.type === 'Identifier' && value.name === intrinsicName) return true;
+    if (value?.type === 'Identifier' && intrinsicAliases.has(value.name)) return true;
     if (isGlobalIntrinsicMember(value)) return true;
     return (value?.type === 'MemberExpression' || value?.type === 'OptionalMemberExpression')
       && isIntrinsicObjectPath(value.object);
@@ -3672,6 +3706,15 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
     if (callee.object?.type !== 'Identifier') return null;
     const property = staticPropertyName(callee);
     return property === null ? null : `${callee.object.name}.${property}`;
+  }
+  function indirectCallName(node) {
+    const callee = unwrapStaticExpression(node?.callee);
+    const invocation = staticPropertyName(callee);
+    if ((invocation !== 'call' && invocation !== 'apply')
+        || (callee?.type !== 'MemberExpression' && callee?.type !== 'OptionalMemberExpression')) {
+      return null;
+    }
+    return callName({ callee: callee.object });
   }
   function staticString(node) {
     const value = unwrapStaticExpression(node);
@@ -3709,6 +3752,17 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
         && isIntrinsicObjectPath(node.argument.object)) forbiddenBindings.push(node);
     if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') {
       const mutationCall = callName(node);
+      const indirectMutationCall = indirectCallName(node);
+      const intrinsicMutationCalls = [
+        'Object.assign',
+        'Object.defineProperty',
+        'Object.defineProperties',
+        'Object.setPrototypeOf',
+        'Reflect.defineProperty',
+        'Reflect.set',
+        'Reflect.setPrototypeOf',
+      ];
+      if (intrinsicMutationCalls.includes(indirectMutationCall)) forbiddenBindings.push(node);
       if (['Object.defineProperty', 'Reflect.defineProperty', 'Reflect.set'].includes(mutationCall)
           && isGlobalReference(node.arguments[0])
           && (staticString(node.arguments[1]) === intrinsicName || staticString(node.arguments[1]) === null)) {
@@ -3720,15 +3774,7 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
       if (mutationCall === 'Object.assign'
           && isGlobalReference(node.arguments[0])
           && node.arguments.slice(1).some(objectDefinesIntrinsic)) forbiddenBindings.push(node);
-      if ([
-        'Object.assign',
-        'Object.defineProperty',
-        'Object.defineProperties',
-        'Object.setPrototypeOf',
-        'Reflect.defineProperty',
-        'Reflect.set',
-        'Reflect.setPrototypeOf',
-      ].includes(mutationCall) && isIntrinsicObjectPath(node.arguments[0])) {
+      if (intrinsicMutationCalls.includes(mutationCall) && isIntrinsicObjectPath(node.arguments[0])) {
         forbiddenBindings.push(node);
       }
     }
@@ -4938,6 +4984,7 @@ function assertReplayAwareMixedPacketOrdering(
 }
 
 function assertCheckpointWriterCallChain(source, sourcePath) {
+  assertUnshadowedIntrinsicBinding(source, 'Promise', sourcePath);
   const definition = activeNamedDefinitionAst(source, 'recordApplyBatchCheckpoints', sourcePath);
   assert.equal(definition?.type, 'FunctionDeclaration', `recordApplyBatchCheckpoints in ${sourcePath} must be a function`);
   assertExactParameters(

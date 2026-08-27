@@ -342,6 +342,8 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     'let runtimeGlobal; runtimeGlobal = globalThis; runtimeGlobal.Set = class FakeSet {};',
     'Set.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
     "Object.defineProperty(Set.prototype, 'add', { value(value) { this[value] = true; return this; } });",
+    'const SetAlias = Set; SetAlias.prototype.add = function add(value) { this[`wrapped:${value}`] = true; return this; };',
+    "Object.defineProperty.call(Object, globalThis, 'Set', { value: class FakeSet {} });",
     'const intrinsicPatch = { Set: class FakeSet {} }; Object.assign(globalThis, intrinsicPatch);',
   ]) {
     assert.throws(
@@ -885,6 +887,13 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
       ),
     }),
     /results declaration must not contain sibling bindings/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: `const Promise = { all: async () => [] };\n${replayAwareServiceSource}`,
+    }),
+    /Promise .* must be the unshadowed intrinsic/,
   );
   assert.throws(
     () => assertCoordinatedCheckpointHelperSemantics({

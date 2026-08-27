@@ -210,7 +210,11 @@ Required fields:
 - a `priorFill` object containing only the complete value-free Fill `receipt`
   and its `expectedContext`; Review reruns Fill validation and derives its
   lineage, profile revision, and form inventory baseline from that receipt, so
-  matching caller-authored Review values alone cannot satisfy the gate;
+  matching caller-authored Review values alone cannot satisfy the gate. This
+  final Fill receipt must report zero `missingFact`, `liveConsent`,
+  `authenticationBlocker`, `unobservableCommit`, and `unsupportedControl`
+  dispositions; `notApplicable` controls may remain accounted. Resolve true
+  gaps and live decisions in the browser before producing this final receipt;
 - `finalIntegrityPassed`, `truthConfirmationRecorded`,
   `reviewTabPreserved`, and `userVisibleHandoffProven` all true. Bind the
   receipt and authoritative `expectedContext` to the exact visible tab with

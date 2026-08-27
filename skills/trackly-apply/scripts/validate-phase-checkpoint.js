@@ -702,6 +702,17 @@ function validateReview(receipt, expectedContext, priorFill, validationTimeMs) {
       );
       errors.push(...priorFillErrors.map((error) => `priorFill: ${error}`));
       if (priorFill.receipt && typeof priorFill.receipt === 'object' && !Array.isArray(priorFill.receipt)) {
+        for (const field of [
+          'missingFact',
+          'liveConsent',
+          'authenticationBlocker',
+          'unobservableCommit',
+          'unsupportedControl',
+        ]) {
+          if (priorFill.receipt.controlAccounting?.[field] !== 0) {
+            errors.push(`priorFill.controlAccounting.${field} must be 0 before review`);
+          }
+        }
         const lineageFields = [...COMMON_LINEAGE_FIELDS];
         if (receipt.workMode === 'accessible_execution') lineageFields.push('executionId');
         for (const field of [...lineageFields, ...fillBaselineFields]) {

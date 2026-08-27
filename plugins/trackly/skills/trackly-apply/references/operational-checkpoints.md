@@ -40,6 +40,8 @@ receipts.
    recheck, and final sweep separately. Writing passed Humanizer when available
    and the local gate.
 4. **Review:** final integrity and per-run truth confirmation passed; the
+   final validated Fill receipt contains no unresolved fact, live consent,
+   authentication blocker, unobservable commit, or unsupported control;
    `review/manual_submit` action used literal `continuationAllowed: false` and
    the checkpoint was accepted under the current action
    contract; Submit was not activated; exact tabs were durably handed off and
