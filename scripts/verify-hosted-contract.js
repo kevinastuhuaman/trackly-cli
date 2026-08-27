@@ -3473,9 +3473,10 @@ function assertUnshadowedIntrinsicBinding(source, intrinsicName, sourcePath) {
   }
   function isGlobalIntrinsicMember(node) {
     const member = unwrapStaticExpression(node);
+    const propertyName = staticPropertyName(member);
     return (member?.type === 'MemberExpression' || member?.type === 'OptionalMemberExpression')
       && isGlobalReference(member.object)
-      && staticPropertyName(member) === intrinsicName;
+      && (propertyName === intrinsicName || (member.computed && propertyName === null));
   }
   function callName(node) {
     const callee = unwrapStaticExpression(node?.callee);

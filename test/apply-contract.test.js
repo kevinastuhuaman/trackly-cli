@@ -307,6 +307,7 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
   }
   for (const mutation of [
     'globalThis.Set = class FakeSet {};',
+    "globalThis['S' + 'et'] = class FakeSet {};",
     "Object.defineProperty(globalThis, 'Set', { value: class FakeSet {} });",
     "Reflect.defineProperty(globalThis, 'Set', { value: class FakeSet {} });",
     "Reflect.set(globalThis, 'Set', class FakeSet {});",
