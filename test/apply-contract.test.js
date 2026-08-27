@@ -15,6 +15,7 @@ const {
   HOSTED_GIT_MAX_BUFFER,
   activeNamedDefinitionAst,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertCheckpointRouteCallChain,
   assertCoordinatedCheckpointHelperSemantics,
   assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,
@@ -784,11 +785,57 @@ test('hosted checkpoint helper drift fails coordinated semantic parity even when
     () => assertCoordinatedCheckpointHelperSemantics({
       ...fixture,
       hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'const results = await Promise.all',
+        'return { results: [] };\n      const results = await Promise.all',
+      ),
+    }),
+    /must preserve only its locked validation prefix/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
+        'const results = await Promise.all',
+        'const bypass = sideEffect(), results = await Promise.all',
+      ),
+    }),
+    /results declaration must not contain sibling bindings/,
+  );
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: replayAwareServiceSource.replace(
         'throw error;',
         "return { memberId: checkpoint.memberId, status: 'recorded' };",
       ),
     }),
     /catch handler must preserve only its locked conflict mapping/,
+  );
+  const mixedWriterShape = replayAwareServiceSource.replace(
+    `} catch (error) {
+          throw error;
+        }`,
+    `} catch (error) {
+          if (error instanceof ApplyBatchIdempotencyConflictError) {
+            return { memberId: checkpoint.memberId, status: 'conflict' as const, errorCode: 'idempotency_payload_mismatch' as const };
+          }
+          if (error instanceof ApplyBatchConflictError) {
+            return { memberId: checkpoint.memberId, status: 'conflict' as const, errorCode: 'stale_member_state' as const };
+          }
+          throw error;
+        }`,
+  ).replace(
+    'return { results };',
+    `await completeApplyBatchIfTerminal(queryable, { userId: input.userId, batchId: input.batchId, now: input.now });
+      return { results, questionPacket: buildApplyBatchQuestionPacket(results) };`,
+  );
+  assert.notEqual(mixedWriterShape, replayAwareServiceSource);
+  assert.throws(
+    () => assertCoordinatedCheckpointHelperSemantics({
+      ...fixture,
+      hostedBatchServiceSource: mixedWriterShape,
+    }),
+    /must match one complete locked fixture or production shape/,
   );
   const hasQuestionsDeclaration = 'const hasQuestions = actionCodes.some((code) => APPLY_CHECKPOINT_QUESTION_PACKET_BY_ACTION[code]);';
   const packetPhaseBranch = `if (hasQuestions && checkpoint.packetPhase === undefined) {
@@ -1531,6 +1578,77 @@ test('review-ready persistence lock rejects route and atomic transaction drift',
     ),
     /must preserve its exact reviewed source bytes/,
   );
+});
+
+test('checkpoint route lock binds the live endpoint to the reviewed bulk writer', () => {
+  const routeStatement = `router.post('/jobscout/apply/batches/:id/checkpoints', requireAuth, requireApplyFeature, async (req, res) => {
+    try {
+      assertPlainBodyKeys(
+        req.body,
+        ['leaseToken', 'checkpoints'],
+        'Only leaseToken and redacted checkpoints are accepted; keep labels, options, and answers local',
+        'Apply checkpoint body must be a plain object',
+      );
+      const ownerId = userId(req)!;
+      const input = {
+        userId: ownerId,
+        batchId: positiveInteger(req.params.id, 'Apply batch id'),
+        leaseToken: boundedMachineInput(req.body.leaseToken, 'leaseToken'),
+        now: new Date(),
+        checkpoints: req.body.checkpoints as ApplyBatchCheckpointInput[],
+      };
+      const result = await withAuthorizedApplyMutation(
+        ownerId,
+        applyRunCallerContext(req),
+        (db) => recordApplyBatchCheckpoints(db, input),
+      );
+      res.json({ success: true, ...result });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });`;
+  const routeSource = `import { recordApplyBatchCheckpoints } from '../services/application-profile/batch-service';\n${routeStatement}`;
+  assert.doesNotThrow(() => assertCheckpointRouteCallChain(routeSource, 'checkpoint route fixture'));
+  assert.throws(
+    () => assertCheckpointRouteCallChain(
+      routeSource.replace(
+        '(db) => recordApplyBatchCheckpoints(db, input)',
+        '(db) => recordAlternateApplyBatchCheckpoints(db, input)',
+      ),
+      'rewired checkpoint route fixture',
+    ),
+    /must call imported recordApplyBatchCheckpoints exactly 1 times/,
+  );
+  assert.throws(
+    () => assertCheckpointRouteCallChain(
+      routeSource.replace('withAuthorizedApplyMutation(', 'withoutAuthorization('),
+      'unauthorized checkpoint route fixture',
+    ),
+    /fail-closed top-level statement/,
+  );
+  assert.throws(
+    () => assertCheckpointRouteCallChain(
+      `router.post('/jobscout/apply/batches/:id/checkpoints', (_req, res) => res.json({ success: true }));\n${routeSource}`,
+      'shadowed checkpoint route fixture',
+    ),
+    /must not register an earlier route that shadows the locked checkpoint endpoint/,
+  );
+  for (const shadowingRoute of [
+    "router.use('/jobscout/apply/batches', (_req, res) => res.json({ success: true }));",
+    "router.all('/jobscout/apply/batches/:id/*', (_req, res) => res.json({ success: true }));",
+    "router.post('/jobscout/apply/batches/:id/:action', (_req, res) => res.json({ success: true }));",
+    "router.route('/jobscout/apply/batches/:id/checkpoints').post((_req, res) => res.json({ success: true }));",
+    "router.route('/jobscout/apply/batches/:id/checkpoints').get((_req, res) => res.end()).post((_req, res) => res.json({ success: true }));",
+    "const shadowRoute = router.route('/jobscout/apply/batches/:id/checkpoints');",
+  ]) {
+    assert.throws(
+      () => assertCheckpointRouteCallChain(
+        `${shadowingRoute}\n${routeSource}`,
+        'covering checkpoint route fixture',
+      ),
+      /must not register an earlier route that shadows the locked checkpoint endpoint/,
+    );
+  }
 });
 
 test('Azure shared limiter helper source is exact-byte locked', () => {

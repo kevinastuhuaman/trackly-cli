@@ -1504,7 +1504,17 @@ test('phase checkpoint CLI validates envelopes from a non-skill working director
     encoding: 'utf8',
   });
   assert.equal(extraEnvelopeField.status, 1);
-  assert.match(extraEnvelopeField.stderr, /unexpected envelope field: rawAnswer/);
+  assert.equal(extraEnvelopeField.stderr, 'input envelope contains unsupported fields\n');
+  assert.doesNotMatch(extraEnvelopeField.stderr, /rawAnswer|private text/);
+
+  const secretShapedEnvelopeField = spawnSync(process.execPath, [validator, 'selection'], {
+    cwd: path.dirname(root),
+    input: JSON.stringify({ receipt, expectedContext, 'sk-test-sensitive-envelope-key\u001b[31m': true }),
+    encoding: 'utf8',
+  });
+  assert.equal(secretShapedEnvelopeField.status, 1);
+  assert.equal(secretShapedEnvelopeField.stderr, 'input envelope contains unsupported fields\n');
+  assert.doesNotMatch(secretShapedEnvelopeField.stderr, /sk-test|\u001b/);
 
   const missingSelectionContext = spawnSync(process.execPath, [validator, 'selection'], {
     cwd: path.dirname(root),

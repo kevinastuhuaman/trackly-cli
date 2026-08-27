@@ -2984,6 +2984,139 @@ function assertPluginReviewReadyPersistenceSemantics(
   }
 }
 
+function assertCheckpointRouteCallChain(source, sourcePath) {
+  assertImportedFunctionCallInventory(
+    source,
+    'recordApplyBatchCheckpoints',
+    '../services/application-profile/batch-service',
+    1,
+    sourcePath,
+  );
+  const canonicalRoute = assertActiveTopLevelStatementAst(
+    source,
+    `router.post('/jobscout/apply/batches/:id/checkpoints', requireAuth, requireApplyFeature, async (req, res) => {
+      try {
+        assertPlainBodyKeys(
+          req.body,
+          ['leaseToken', 'checkpoints'],
+          'Only leaseToken and redacted checkpoints are accepted; keep labels, options, and answers local',
+          'Apply checkpoint body must be a plain object',
+        );
+        const ownerId = userId(req)!;
+        const input = {
+          userId: ownerId,
+          batchId: positiveInteger(req.params.id, 'Apply batch id'),
+          leaseToken: boundedMachineInput(req.body.leaseToken, 'leaseToken'),
+          now: new Date(),
+          checkpoints: req.body.checkpoints as ApplyBatchCheckpointInput[],
+        };
+        const result = await withAuthorizedApplyMutation(
+          ownerId,
+          applyRunCallerContext(req),
+          (db) => recordApplyBatchCheckpoints(db, input),
+        );
+        res.json({ success: true, ...result });
+      } catch (error) {
+        sendError(res, error);
+      }
+    });`,
+    sourcePath,
+  );
+  const program = parseFullSource(source, sourcePath).program;
+  const canonicalRouteIndex = program.body.findIndex((statement) => (
+    JSON.stringify(canonicalSchemaAst(statement)) === JSON.stringify(canonicalSchemaAst(canonicalRoute))
+  ));
+  assert.ok(canonicalRouteIndex >= 0, `${sourcePath} must expose the locked checkpoint route at top level`);
+  const checkpointPath = '/jobscout/apply/batches/:id/checkpoints';
+  function routeRegistration(statement) {
+    const call = statement.type === 'ExpressionStatement' ? statement.expression : null;
+    const callee = call?.type === 'CallExpression' ? unwrapTransparentExpression(call.callee) : null;
+    const receiver = callee?.type === 'MemberExpression'
+      ? unwrapTransparentExpression(callee.object)
+      : null;
+    const method = staticMemberName(callee);
+    if (receiver?.type === 'Identifier' && receiver.name === 'router') {
+      if (!['post', 'all', 'use'].includes(method)) return null;
+      return { method, pathArgument: call.arguments[0] };
+    }
+    const chainedMethods = [];
+    let chainedCall = call;
+    while (chainedCall?.type === 'CallExpression') {
+      const chainedCallee = unwrapTransparentExpression(chainedCall.callee);
+      const chainedMethod = staticMemberName(chainedCallee);
+      const chainedReceiver = chainedCallee?.type === 'MemberExpression'
+        ? unwrapTransparentExpression(chainedCallee.object)
+        : null;
+      if (chainedMethod) chainedMethods.push(chainedMethod);
+      if (chainedReceiver?.type !== 'CallExpression') break;
+      const routeCallee = unwrapTransparentExpression(chainedReceiver.callee);
+      const routeOwner = routeCallee?.type === 'MemberExpression'
+        ? unwrapTransparentExpression(routeCallee.object)
+        : null;
+      if (
+        routeOwner?.type === 'Identifier'
+        && routeOwner.name === 'router'
+        && staticMemberName(routeCallee) === 'route'
+      ) {
+        if (!chainedMethods.some((candidate) => candidate === 'post' || candidate === 'all')) return null;
+        return { method: 'post', pathArgument: chainedReceiver.arguments[0] };
+      }
+      chainedCall = chainedReceiver;
+    }
+    return null;
+  }
+  function staticRouteCovers(candidatePath, method) {
+    if (candidatePath === '*') return true;
+    const candidateSegments = candidatePath.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+    const targetSegments = checkpointPath.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+    const wildcardIndex = candidateSegments.indexOf('*');
+    const comparedLength = wildcardIndex >= 0 ? wildcardIndex : candidateSegments.length;
+    if (method !== 'use' && wildcardIndex < 0 && candidateSegments.length !== targetSegments.length) return false;
+    if (comparedLength > targetSegments.length) return false;
+    for (let index = 0; index < comparedLength; index += 1) {
+      const candidate = candidateSegments[index];
+      const target = targetSegments[index];
+      if (candidate.startsWith(':')) continue;
+      if (/[^A-Za-z0-9_-]/.test(candidate)) return true;
+      if (candidate.toLowerCase() !== target.toLowerCase()) return false;
+    }
+    return method === 'use' || wildcardIndex >= 0 || candidateSegments.length === targetSegments.length;
+  }
+  const reviewedApplyMiddleware = parseExpectedStatement(
+    "router.use('/jobscout/apply', privateNoStore, requireAuth, requireTracklyAccess, applyAgentLimiter);",
+    `${sourcePath} reviewed Apply middleware`,
+  );
+  const reviewedApplyMiddlewareAst = JSON.stringify(canonicalSchemaAst(reviewedApplyMiddleware));
+  const earlierShadowingRoutes = program.body.slice(0, canonicalRouteIndex).filter((statement) => {
+    if (statement.type === 'VariableDeclaration') {
+      return statement.declarations.some((declaration) => {
+        const initializer = unwrapTransparentExpression(declaration.init);
+        const callee = initializer?.type === 'CallExpression'
+          ? unwrapTransparentExpression(initializer.callee)
+          : null;
+        const receiver = callee?.type === 'MemberExpression'
+          ? unwrapTransparentExpression(callee.object)
+          : null;
+        if (receiver?.type !== 'Identifier' || receiver.name !== 'router' || staticMemberName(callee) !== 'route') {
+          return false;
+        }
+        const routePath = initializer.arguments[0];
+        return routePath?.type !== 'StringLiteral' || staticRouteCovers(routePath.value, 'post');
+      });
+    }
+    const registration = routeRegistration(statement);
+    if (!registration) return false;
+    if (JSON.stringify(canonicalSchemaAst(statement)) === reviewedApplyMiddlewareAst) return false;
+    if (registration.pathArgument?.type !== 'StringLiteral') return true;
+    return staticRouteCovers(registration.pathArgument.value, registration.method);
+  });
+  assert.equal(
+    earlierShadowingRoutes.length,
+    0,
+    `${sourcePath} must not register an earlier route that shadows the locked checkpoint endpoint`,
+  );
+}
+
 function assertInternalSecretCompatibility(
   mcpTokenSource,
   jwtSource,
@@ -3178,6 +3311,7 @@ function assertActiveTopLevelStatementAst(source, expectedStatement, sourcePath)
     1,
     `${sourcePath} must execute its locked fail-closed top-level statement exactly once`,
   );
+  return matches[0];
 }
 
 function assertImportBinding(source, importedName, localName, moduleName, sourcePath) {
@@ -4444,6 +4578,11 @@ function assertCheckpointWriterCallChain(source, sourcePath) {
     && statement.declarations.some((declaration) => declaration.id?.type === 'Identifier' && declaration.id.name === 'results')
   ));
   assert.equal(resultDeclarations.length, 1, `${sourcePath} checkpoint writer must declare one results binding`);
+  assert.equal(
+    resultDeclarations[0].declarations.length,
+    1,
+    `${sourcePath} checkpoint writer results declaration must not contain sibling bindings`,
+  );
   const resultsDeclarator = resultDeclarations[0].declarations.find((declaration) => declaration.id.name === 'results');
   const resultsInitializer = unwrapStaticExpression(resultsDeclarator.init);
   assert.equal(resultsInitializer?.type, 'AwaitExpression', `${sourcePath} checkpoint writer results must await Promise.all`);
@@ -4525,6 +4664,52 @@ function assertCheckpointWriterCallChain(source, sourcePath) {
   );
 
   const resultIndex = definition.body.body.indexOf(resultDeclarations[0]);
+  const prefixStatements = definition.body.body.slice(0, resultIndex);
+  const fixturePrefix = [];
+  const productionPrefix = [
+    parseExpectedStatement(`
+      if (
+        !isPositiveInteger(input.userId)
+        || !isPositiveInteger(input.batchId)
+        || typeof input.leaseToken !== 'string'
+        || input.leaseToken.length < 1
+        || Buffer.byteLength(input.leaseToken, 'utf8') > 1_024
+        || !Number.isFinite(input.now.getTime())
+        || !Array.isArray(input.checkpoints)
+        || input.checkpoints.length < 1
+        || input.checkpoints.length > MAX_CHECKPOINTS_PER_REQUEST
+      ) {
+        throw new ApplyBatchValidationError(
+          \`Apply checkpoint request must contain 1-\${MAX_CHECKPOINTS_PER_REQUEST} bounded members.\`,
+        );
+      }
+    `, `${sourcePath} production writer request validation`),
+    parseExpectedStatement('const idempotencyKeys = new Set<string>();', `${sourcePath} idempotency set`),
+    parseExpectedStatement('const memberEpochs = new Set<string>();', `${sourcePath} member epoch set`),
+    parseExpectedStatement(`
+      for (const checkpoint of input.checkpoints) {
+        validateApplyBatchCheckpoint(checkpoint);
+        idempotencyKeys.add(checkpoint.idempotencyKey);
+        memberEpochs.add(\`\${checkpoint.memberId}:\${checkpoint.inspectionEpoch}\`);
+      }
+    `, `${sourcePath} production writer member validation`),
+    parseExpectedStatement(`
+      if (
+        idempotencyKeys.size !== input.checkpoints.length
+        || memberEpochs.size !== input.checkpoints.length
+      ) {
+        throw new ApplyBatchValidationError(
+          'Apply checkpoints require unique idempotency keys and member epochs.',
+        );
+      }
+    `, `${sourcePath} production writer uniqueness validation`),
+  ];
+  assert.ok(
+    [fixturePrefix, productionPrefix].some((expectedPrefix) => (
+      JSON.stringify(canonicalSchemaAst(prefixStatements)) === JSON.stringify(canonicalSchemaAst(expectedPrefix))
+    )),
+    `${sourcePath} checkpoint writer must preserve only its locked validation prefix`,
+  );
   const tailStatements = definition.body.body.slice(resultIndex + 1);
   const fixtureTail = [parseExpectedStatement('return { results };', `${sourcePath} fixture writer return`)];
   const productionTail = [
@@ -4547,6 +4732,17 @@ function assertCheckpointWriterCallChain(source, sourcePath) {
       JSON.stringify(canonicalSchemaAst(tailStatements)) === JSON.stringify(canonicalSchemaAst(expectedTail))
     )),
     `${sourcePath} checkpoint writer must return only its locked results and question packet`,
+  );
+  const matchesWriterShape = (prefix, catchBody, tail) => (
+    JSON.stringify(canonicalSchemaAst(prefixStatements)) === JSON.stringify(canonicalSchemaAst(prefix))
+    && JSON.stringify(canonicalSchemaAst(tryStatements[0].handler.body.body))
+      === JSON.stringify(canonicalSchemaAst(catchBody))
+    && JSON.stringify(canonicalSchemaAst(tailStatements)) === JSON.stringify(canonicalSchemaAst(tail))
+  );
+  assert.ok(
+    matchesWriterShape(fixturePrefix, fixtureCatchBody, fixtureTail)
+      || matchesWriterShape(productionPrefix, productionCatchBody, productionTail),
+    `${sourcePath} checkpoint writer must match one complete locked fixture or production shape`,
   );
 }
 
@@ -5833,6 +6029,7 @@ const hostedJobscoutFilterUtilsSource = fs.readFileSync(hostedJobscoutFilterUtil
 const hostedTracklyApplySource = fs.readFileSync(hostedTracklyApplyPath, 'utf8');
 
 verifyHostedSnapshotGitProvenance(cliRoot, backendRoot);
+assertCheckpointRouteCallChain(hostedTracklyApplySource, hostedTracklyApplyPath);
 assertLivePluginRouterMount(
   hostedApplicationSource,
   'tracklyPluginMcpRoutes',
@@ -8637,6 +8834,7 @@ module.exports = {
   activeNamedDefinitionAst,
   activeToolRegistrations,
   assertApplicationFieldByKeyReferenceSemantics,
+  assertCheckpointRouteCallChain,
   assertCoordinatedCheckpointHelperSemantics,
   assertExactHostedSourceSha256,
   assertInternalSecretCompatibility,

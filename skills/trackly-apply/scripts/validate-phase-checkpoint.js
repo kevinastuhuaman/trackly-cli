@@ -1005,7 +1005,7 @@ async function main() {
   const unexpectedEnvelopeFields = Object.keys(envelope)
     .filter((field) => !['receipt', 'expectedContext', 'priorFill'].includes(field));
   if (unexpectedEnvelopeFields.length > 0) {
-    process.stderr.write(`${unexpectedEnvelopeFields.map((field) => `unexpected envelope field: ${field}`).join('\n')}\n`);
+    process.stderr.write('input envelope contains unsupported fields\n');
     process.exitCode = 1;
     return;
   }
