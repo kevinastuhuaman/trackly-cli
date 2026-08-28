@@ -23,3 +23,9 @@ A durable receipt identifying the exact application members ready for human revi
 ## Manual Submit boundary
 
 The invariant that the agent prepares and verifies the application through final review while only the user activates the employer's submission control.
+
+## Service-authoritative safety guard
+
+A destructive-action invariant enforced by the backend operation that owns the mutation, so old, alternate, or faulty agent callers using backend-classified agent surfaces cannot bypass it by omitting newer client-side checks.
+
+Clients may present the challenge and relay confirmation, but they do not independently decide whether the destructive operation is permitted.
