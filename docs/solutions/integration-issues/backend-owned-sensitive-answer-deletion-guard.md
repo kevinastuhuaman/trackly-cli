@@ -40,7 +40,7 @@ Adding more checks to every caller would not close the version-skew hole. Compat
 
 ## Solution
 
-Move the mandatory challenge-and-confirm invariant to the backend operation that performs the deletion, then keep MCP callers as thin protocol adapters. The backend implementation is outside this repository; [close-ai PR #1296](https://github.com/trackly-app/close-ai/pull/1296) and [trackly-cli PR #90](https://github.com/trackly-app/trackly-cli/pull/90) record the service-authoritative design.
+Move the mandatory challenge-and-confirm invariant to the backend operation that performs the deletion, then keep MCP callers as thin protocol adapters. The backend implementation is outside this repository; internal/private [close-ai PR #1296](https://github.com/trackly-app/close-ai/pull/1296) and public [trackly-cli PR #90](https://github.com/trackly-app/trackly-cli/pull/90) record the service-authoritative design.
 
 The current CLI publishes `sensitiveRevocationConfirmToken` in the tool schema and forwards the complete request to the application-profile endpoint:
 
@@ -67,7 +67,7 @@ Every backend-classified agent caller, including stale CLI and MCP versions, mus
 
 The separation also removes semantic duplication. The backend owns the authoritative deletion decision, confirmation validity, revision binding, archive behavior, and mutation. MCP owns discoverability and transport: publish the token field, explain the two-step interaction, preserve the full request, and relay the service response.
 
-[close-ai issue #1314](https://github.com/trackly-app/close-ai/issues/1314) remains administratively open, but current backend main appears to satisfy its scoped-inventory acceptance criteria through merged [close-ai PR #1369](https://github.com/trackly-app/close-ai/pull/1369): the service inventories sensitive and restricted rows across scopes, serializes scope identity into `affectedKeys`, and uses the same user-and-sensitivity predicate for archival and deletion. Close the issue only after confirming the fix is deployed and behaviorally verified; an open tracker alone is not evidence of a current functional gap.
+Internal/private [close-ai issue #1314](https://github.com/trackly-app/close-ai/issues/1314) remains administratively open, but current backend main appears to satisfy its scoped-inventory acceptance criteria through merged internal/private [close-ai PR #1369](https://github.com/trackly-app/close-ai/pull/1369): the service inventories sensitive and restricted rows across scopes, serializes scope identity into `affectedKeys`, and uses the same user-and-sensitivity predicate for archival and deletion. Close the issue only after confirming the fix is deployed and behaviorally verified; an open tracker alone is not evidence of a current functional gap.
 
 ## Prevention
 
@@ -83,6 +83,6 @@ The separation also removes semantic duplication. The backend owns the authorita
 
 - [trackly-cli PR #89](https://github.com/trackly-app/trackly-cli/pull/89) — initial caller-owned guard, retained as the superseded attempt
 - [trackly-cli PR #90](https://github.com/trackly-app/trackly-cli/pull/90) — thin caller relay and service-authoritative correction
-- [close-ai PR #1296](https://github.com/trackly-app/close-ai/pull/1296) — backend enforcement recorded by the coordinated fix
-- [close-ai issue #1314](https://github.com/trackly-app/close-ai/issues/1314) and [close-ai PR #1369](https://github.com/trackly-app/close-ai/pull/1369) — tracker still open; current main contains the scoped-inventory fix pending deployment/behavior confirmation
+- Internal/private [close-ai PR #1296](https://github.com/trackly-app/close-ai/pull/1296) — backend enforcement recorded by the coordinated fix
+- Internal/private [close-ai issue #1314](https://github.com/trackly-app/close-ai/issues/1314) and [close-ai PR #1369](https://github.com/trackly-app/close-ai/pull/1369) — tracker still open; current main contains the scoped-inventory fix pending deployment/behavior confirmation
 - [Durable exact recovery after browser state loss](durable-exact-recovery-after-browser-state-loss.md) — related Trackly Apply authority-boundary learning
