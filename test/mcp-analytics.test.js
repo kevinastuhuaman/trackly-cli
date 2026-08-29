@@ -1363,7 +1363,7 @@ test('stdin EOF closes the MCP server once and exits cleanly', async () => {
   assert.equal(output.listenerCount('error'), 0);
 });
 
-test('stdout EPIPE is a clean disconnect but unrelated stream errors remain fatal', async () => {
+test('stdout EPIPE is clean but unrelated stream errors close and fail visibly', async () => {
   const signalTarget = new EventEmitter();
   const input = new EventEmitter();
   const output = new EventEmitter();
@@ -1387,17 +1387,47 @@ test('stdout EPIPE is a clean disconnect but unrelated stream errors remain fata
   assert.deepEqual(exits, [0]);
 
   const otherOutput = new EventEmitter();
-  const cleanup = installMcpSignalHandlers({}, {
+  const otherExits = [];
+  const reportedErrors = [];
+  const otherCloseServer = test.mock.fn(async () => {});
+  const otherShutdownAnalytics = test.mock.fn(async () => {});
+  installMcpSignalHandlers({}, {
     signalTarget: new EventEmitter(),
     input: new EventEmitter(),
     output: otherOutput,
-    closeServer: async () => {},
-    shutdownAnalytics: async () => {},
-    exit() {},
+    closeServer: otherCloseServer,
+    shutdownAnalytics: otherShutdownAnalytics,
+    reportOutputError: (error) => reportedErrors.push(error),
+    exit: (code) => otherExits.push(code),
   });
-  assert.throws(
-    () => otherOutput.emit('error', Object.assign(new Error('stream failed'), { code: 'EIO' })),
-    /stream failed/,
-  );
-  cleanup();
+  const streamError = Object.assign(new Error('stream failed'), { code: 'EIO' });
+  otherOutput.emit('error', streamError);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(reportedErrors, [streamError]);
+  assert.equal(otherCloseServer.mock.callCount(), 1);
+  assert.equal(otherShutdownAnalytics.mock.callCount(), 1);
+  assert.deepEqual(otherExits, [1]);
+});
+
+test('an output pipe closed before handler installation exits cleanly', async () => {
+  const output = new EventEmitter();
+  output.destroyed = true;
+  const exits = [];
+  const closeServer = test.mock.fn(async () => {});
+  const shutdownAnalytics = test.mock.fn(async () => {});
+
+  installMcpSignalHandlers({}, {
+    signalTarget: new EventEmitter(),
+    input: new EventEmitter(),
+    output,
+    closeServer,
+    shutdownAnalytics,
+    exit: (code) => exits.push(code),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(closeServer.mock.callCount(), 1);
+  assert.equal(shutdownAnalytics.mock.callCount(), 1);
+  assert.deepEqual(exits, [0]);
 });

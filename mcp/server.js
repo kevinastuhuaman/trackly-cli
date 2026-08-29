@@ -602,6 +602,10 @@ function installMcpSignalHandlers(server, options = {}) {
   const exit = options.exit || ((code) => process.exit(code));
   const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
   const closeServer = options.closeServer || (() => server.close());
+  const reportOutputError = options.reportOutputError || ((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`MCP stdout error: ${message}\n`);
+  });
   let terminating = false;
   const handlers = new Map();
   let inputEndHandler;
@@ -649,14 +653,16 @@ function installMcpSignalHandlers(server, options = {}) {
       terminate(0);
       return;
     }
-    cleanup();
-    throw error;
+    reportOutputError(error);
+    terminate(1);
   };
   output.on('error', outputErrorHandler);
 
-  // EOF may arrive while startMcpServer is awaiting transport connection,
+  // A pipe may close while startMcpServer is awaiting transport connection,
   // before these process-level handlers can be installed.
-  if (input.readableEnded || input.destroyed) terminate(0);
+  if (input.readableEnded || input.destroyed || output.writableEnded || output.destroyed) {
+    terminate(0);
+  }
   return cleanup;
 }
 
