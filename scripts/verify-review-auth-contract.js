@@ -12,6 +12,7 @@ const {
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,
+  redactSubprocessOutput,
   sha256ExactBytes,
 } = require('./review-auth-contract-ast.js');
 
@@ -366,8 +367,7 @@ try {
     { cwd: isolatedBackendRoot, encoding: 'utf8', env: installEnv, timeout: 600_000 },
   );
   assert.ifError(install.error);
-  const installFailure = `${install.stderr || ''}\n${install.stdout || ''}`
-    .replace(/(_authToken=)[^\s]+/gi, '$1[redacted]')
+  const installFailure = redactSubprocessOutput(`${install.stderr || ''}\n${install.stdout || ''}`)
     .trim()
     .slice(-4000);
   assert.equal(

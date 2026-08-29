@@ -30,6 +30,13 @@ const astSha256 = (node) => crypto
 
 const sha256ExactBytes = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
+const redactSubprocessOutput = (value) => String(value || '')
+  .replace(/\b(https?:\/\/)[^/\s@]+@/gi, '$1[redacted]@')
+  .replace(/(_authToken\s*=\s*)[^\s]+/gi, '$1[redacted]')
+  .replace(/\b((?:npm_)?(?:auth|access)_?token\s*[=:]\s*)[^\s]+/gi, '$1[redacted]')
+  .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+/gi, '$1[redacted]')
+  .replace(/([?&](?:auth|access)?_?token=)[^&#\s]+/gi, '$1[redacted]');
+
 const assertExactGitCheckout = (root, expectedCommit) => {
   const runGit = (args, label) => {
     const result = childProcess.spawnSync('git', ['-C', root, ...args], {
@@ -156,5 +163,6 @@ module.exports = {
   assertExactUnshadowedNamedImports,
   astSha256,
   canonicalAst,
+  redactSubprocessOutput,
   sha256ExactBytes,
 };

@@ -11,6 +11,7 @@ const {
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,
+  redactSubprocessOutput,
   sha256ExactBytes: reviewAuthSha256ExactBytes,
 } = require('../scripts/review-auth-contract-ast.js');
 
@@ -103,6 +104,21 @@ test('review-auth and hosted Apply contracts remain independently targetable', (
   const scripts = json('package.json').scripts;
   assert.equal(scripts['test:hosted-contract'], 'node scripts/verify-hosted-contract.js');
   assert.equal(scripts['test:review-auth-contract'], 'node scripts/verify-review-auth-contract.js');
+});
+
+test('review-auth subprocess diagnostics redact registry and token credentials', () => {
+  const fake = 'synthetic-reviewer-secret';
+  const diagnostic = [
+    `request to https://${fake}@registry.example.test/package failed`,
+    `//registry.example.test/:_authToken=${fake}`,
+    `NPM_ACCESS_TOKEN=${fake}`,
+    `Authorization: Bearer ${fake}`,
+    `https://registry.example.test/package?access_token=${fake}&mode=test`,
+  ].join('\n');
+  const redacted = redactSubprocessOutput(diagnostic);
+  assert.doesNotMatch(redacted, new RegExp(fake));
+  assert.match(redacted, /https:\/\/\[redacted\]@registry\.example\.test/);
+  assert.equal((redacted.match(/\[redacted\]/g) || []).length, 5);
 });
 
 test('review-auth verifier fails closed without a backend and skips only when explicitly allowed', () => {
