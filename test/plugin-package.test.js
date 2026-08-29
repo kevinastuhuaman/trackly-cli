@@ -151,6 +151,30 @@ test('review-auth import binding rejects aliases and lexical shadows', () => {
     ),
     /imports must not be aliased/,
   );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { authenticateReviewer } from './reviewer.js';\nexport const runner = { run(authenticateReviewer: () => boolean) { return authenticateReviewer(); } };"),
+      sourcePath,
+      names,
+    ),
+    /must resolve only to its reviewed import; rejected method parameter shadow/,
+  );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import type { authenticateReviewer } from './reviewer.js';\nexport type Review = typeof authenticateReviewer;"),
+      sourcePath,
+      names,
+    ),
+    /must provide runtime helper bindings/,
+  );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { type authenticateReviewer } from './reviewer.js';\nexport type Review = typeof authenticateReviewer;"),
+      sourcePath,
+      names,
+    ),
+    /helpers must be runtime value imports/,
+  );
 });
 
 function filesBelow(directory) {

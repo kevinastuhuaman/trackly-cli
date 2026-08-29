@@ -26,6 +26,7 @@ const astSha256 = (node) => crypto
 const boundNames = (pattern, names = []) => {
   if (!pattern || typeof pattern !== 'object') return names;
   if (pattern.type === 'Identifier') names.push(pattern.name);
+  else if (pattern.type === 'TSParameterProperty') boundNames(pattern.parameter, names);
   else if (pattern.type === 'RestElement') boundNames(pattern.argument, names);
   else if (pattern.type === 'AssignmentPattern') boundNames(pattern.left, names);
   else if (pattern.type === 'ArrayPattern') pattern.elements.forEach((element) => boundNames(element, names));
@@ -52,9 +53,11 @@ const assertExactUnshadowedNamedImports = (root, sourcePath, expectedNames) => {
   const imports = root.program.body.filter((node) => node.type === 'ImportDeclaration'
     && node.source?.value === sourcePath);
   assert.equal(imports.length, 1, `The active ${sourcePath} import must be unique`);
+  assert.equal(imports[0].importKind, 'value', `${sourcePath} must provide runtime helper bindings`);
   const reviewedSpecifiers = new Set(imports[0].specifiers);
   const names = imports[0].specifiers.map((specifier) => {
     assert.equal(specifier.type, 'ImportSpecifier', `${sourcePath} must use named imports only`);
+    assert.equal(specifier.importKind, 'value', `${sourcePath} helpers must be runtime value imports`);
     assert.equal(specifier.local?.name, specifier.imported?.name, `${sourcePath} imports must not be aliased`);
     return specifier.imported.name;
   }).sort();
@@ -75,6 +78,9 @@ const assertExactUnshadowedNamedImports = (root, sourcePath, expectedNames) => {
     else if (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression') {
       rejectProtected([node.id, ...node.params], 'function binding or parameter shadow');
     } else if (node.type === 'ArrowFunctionExpression') rejectProtected(node.params, 'function parameter shadow');
+    else if (['ObjectMethod', 'ClassMethod', 'ClassPrivateMethod', 'TSDeclareMethod'].includes(node.type)) {
+      rejectProtected(node.params, 'method parameter shadow');
+    }
     else if (node.type === 'ClassDeclaration' || node.type === 'ClassExpression') rejectProtected([node.id], 'class shadow');
     else if (node.type === 'CatchClause') rejectProtected([node.param], 'catch binding shadow');
     else if (node.type === 'AssignmentExpression') rejectProtected([node.left], 'assignment to imported binding');
