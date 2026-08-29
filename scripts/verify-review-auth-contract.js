@@ -152,8 +152,8 @@ assert.ok(
   'The active MCP identity guard must reject missing bindings and non-plugin resources',
 );
 assert.ok(
-  identityGuardStatements.includes('return userId === binding.userId && email === binding.email && authEpoch === binding.authEpoch && identity.is_test_account === true;'),
-  'The active MCP identity guard must conjunctively bind user ID, email, epoch, and synthetic-account status',
+  identityGuardStatements.includes("return userId === binding.userId && email === binding.email && authEpoch === binding.authEpoch && identity.auth_provider === 'review' && identity.is_test_account === true;"),
+  'The active MCP identity guard must conjunctively bind user ID, email, epoch, review provider, and synthetic-account status',
 );
 
 assert.match(auth.replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, ''), /name="provider" value="mcp_review"/, 'The consent page must expose direct plugin-review sign-in');
