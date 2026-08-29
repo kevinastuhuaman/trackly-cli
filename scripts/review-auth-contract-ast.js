@@ -68,11 +68,11 @@ const assertExactGitCheckout = (root, expectedCommit) => {
   const ignoredOutsideDependencies = runGit(
     ['status', '--porcelain=v1', '--ignored=matching', '--untracked-files=all'],
     'inspect ignored worktree state',
-  ).split('\n').filter(Boolean).filter((line) => !/^!! node_modules\/?$/.test(line));
+  ).split('\n').filter(Boolean).filter((line) => !/^!! (?:node_modules\/?|\.husky\/_\/?)$/.test(line));
   assert.deepEqual(
     ignoredOutsideDependencies,
     [],
-    'The reviewed backend checkout must have no ignored files outside node_modules',
+    'The reviewed backend checkout must have no ignored files outside dependency and hook install artifacts',
   );
 };
 

@@ -165,7 +165,7 @@ test('review-auth checkout and migration locks reject provenance drift', (t) => 
   fs.writeFileSync(path.join(directory, 'node_modules', 'dependency.js'), 'module.exports = true;\n');
   assert.doesNotThrow(() => assertExactGitCheckout(directory, commit));
   fs.writeFileSync(path.join(directory, 'ignored-auth.js'), 'module.exports = () => true;\n');
-  assert.throws(() => assertExactGitCheckout(directory, commit), /no ignored files outside node_modules/);
+  assert.throws(() => assertExactGitCheckout(directory, commit), /no ignored files outside dependency and hook install artifacts/);
   fs.rmSync(path.join(directory, 'ignored-auth.js'));
   childProcess.execFileSync('git', ['-C', directory, 'update-index', '--assume-unchanged', 'migration.sql']);
   fs.writeFileSync(fixture, 'SELECT 2;\n');

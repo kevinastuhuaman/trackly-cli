@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const babelParser = require('@babel/parser');
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const {
   assertExactGitCheckout,
@@ -338,22 +339,46 @@ for (const proof of [
   'rotates a dedicated MCP reviewer token only for the plugin resource',
 ]) assert.ok(oauthTests.has(proof), `Missing active OAuth test: ${proof}`);
 
-let vitestBin;
+const isolatedBackendRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-review-auth-backend-'));
 try {
-  vitestBin = path.join(path.dirname(require.resolve('vitest/package.json', { paths: [backendRoot] })), 'vitest.mjs');
-} catch {
-  throw new Error(`The reviewed backend checkout must have its pinned dependencies installed: ${backendRoot}`);
+  const archivePath = path.join(isolatedBackendRoot, 'backend.tar');
+  const archive = childProcess.spawnSync(
+    'git',
+    ['-C', backendRoot, 'archive', '--format=tar', '--output', archivePath, EXPECTED_DEPLOYED_BACKEND_COMMIT],
+    { encoding: 'utf8' },
+  );
+  assert.ifError(archive.error);
+  assert.equal(archive.status, 0, `Unable to export the pinned backend commit (exit ${archive.status ?? 'unknown'})`);
+  const extract = childProcess.spawnSync('tar', ['-xf', archivePath, '-C', isolatedBackendRoot], { encoding: 'utf8' });
+  assert.ifError(extract.error);
+  assert.equal(extract.status, 0, `Unable to extract the pinned backend commit (exit ${extract.status ?? 'unknown'})`);
+  fs.unlinkSync(archivePath);
+
+  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const install = childProcess.spawnSync(
+    npmCommand,
+    ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+    { cwd: isolatedBackendRoot, encoding: 'utf8', timeout: 600_000 },
+  );
+  assert.ifError(install.error);
+  assert.equal(install.status, 0, `The isolated pinned backend dependency install must succeed (exit ${install.status ?? 'unknown'})`);
+  const vitestBin = path.join(
+    path.dirname(require.resolve('vitest/package.json', { paths: [isolatedBackendRoot] })),
+    'vitest.mjs',
+  );
+  const backendTests = childProcess.spawnSync(
+    process.execPath,
+    [vitestBin, 'run', 'src/routes/__tests__/mcp-consent.test.ts', 'src/mcp/__tests__/mcp-oauth-provider.test.ts', '--no-file-parallelism'],
+    { cwd: isolatedBackendRoot, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' } },
+  );
+  assert.ifError(backendTests.error);
+  assert.equal(
+    backendTests.status,
+    0,
+    `The isolated focused backend consent and OAuth tests must execute successfully (exit ${backendTests.status ?? 'unknown'})`,
+  );
+} finally {
+  fs.rmSync(isolatedBackendRoot, { recursive: true, force: true });
 }
-const backendTests = childProcess.spawnSync(
-  process.execPath,
-  [vitestBin, 'run', 'src/routes/__tests__/mcp-consent.test.ts', 'src/mcp/__tests__/mcp-oauth-provider.test.ts', '--no-file-parallelism'],
-  { cwd: backendRoot, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' } },
-);
-assert.ifError(backendTests.error);
-assert.equal(
-  backendTests.status,
-  0,
-  `The focused backend consent and OAuth tests must execute successfully (exit ${backendTests.status ?? 'unknown'})`,
-);
 
 console.log('Dedicated MCP reviewer-auth contract passes: the fixture and direct password sign-in are synthetic, rate-limited, and plugin-resource-bound.');
