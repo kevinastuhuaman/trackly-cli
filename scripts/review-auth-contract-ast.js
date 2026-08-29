@@ -34,7 +34,7 @@ const redactSubprocessOutput = (value) => String(value || '')
   .replace(/\b(https?:\/\/)[^/\s@]+@/gi, '$1[redacted]@')
   .replace(/(_authToken\s*=\s*)[^\s]+/gi, '$1[redacted]')
   .replace(/\b(((?:node|npm)(?:_[a-z]+)*_token|(?:auth|access)_?token)\s*[=:]\s*)[^\s]+/gi, '$1[redacted]')
-  .replace(/((?:^|[/:])_(?:auth|password)\s*=\s*)[^\s]+/gim, '$1[redacted]')
+  .replace(/((?:^|[/:])(?:_(?:auth|password)|username)\s*=\s*)[^\s]+/gim, '$1[redacted]')
   .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+/gi, '$1[redacted]')
   .replace(/([?&](?:auth|access)?_?token=)[^&#\s]+/gi, '$1[redacted]');
 
