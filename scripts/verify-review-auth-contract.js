@@ -36,6 +36,7 @@ for (const envName of [
 }
 assert.match(identity, /isConfiguredReviewUserId\(userId\)/, 'MCP and App Store review identities must remain distinct');
 assert.match(identity, /identity\.is_test_account === true/, 'MCP review access must require a synthetic test account');
+assert.match(identity, /email === binding\.email/, 'MCP review access must bind the configured email to the immutable user row');
 assert.match(identity, /resource !== pluginResource/, 'MCP review access must be confined to the plugin resource');
 assert.match(identity, /crypto\.timingSafeEqual/, 'MCP reviewer passwords must use constant-time comparison');
 
