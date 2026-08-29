@@ -6,7 +6,7 @@ const babelParser = require('@babel/parser');
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { astSha256 } = require('./review-auth-contract-ast.js');
+const { assertExactUnshadowedNamedImports, astSha256 } = require('./review-auth-contract-ast.js');
 
 const backendDir = process.env.TRACKLY_BACKEND_DIR;
 if (!backendDir) {
@@ -192,18 +192,6 @@ const exactCallArguments = (source, root, name, expectedArguments) => {
   );
 };
 
-const exactNamedImports = (root, sourcePath, expectedNames) => {
-  const imports = root.program.body.filter((node) => node.type === 'ImportDeclaration'
-    && node.source?.value === sourcePath);
-  assert.equal(imports.length, 1, `The active ${sourcePath} import must be unique`);
-  const names = imports[0].specifiers.map((specifier) => {
-    assert.equal(specifier.type, 'ImportSpecifier', `${sourcePath} must use named imports only`);
-    assert.equal(specifier.local?.name, specifier.imported?.name, `${sourcePath} imports must not be aliased`);
-    return specifier.imported.name;
-  }).sort();
-  assert.deepEqual(names, [...expectedNames].sort(), `${sourcePath} must preserve its reviewed helper bindings`);
-};
-
 const routeCall = (root, routePath, method = 'post') => {
   const registration = `router.${method}`;
   const matches = callsBelow(root, registration).filter((call) => call.arguments[0]?.value === routePath);
@@ -240,12 +228,12 @@ assert.equal(
   '0f109314959fca6fc229f99ce18cbb71582c468c60e907747fb058f61755a4e3',
   'The complete MCP reviewer-identity module AST must preserve environment-only credentials and fail-closed identity binding',
 );
-exactNamedImports(authAst, '../services/mcp-review-identity.js', [
+assertExactUnshadowedNamedImports(authAst, '../services/mcp-review-identity.js', [
   'authenticateMcpReviewCredentials',
   'configuredMcpReviewBinding',
   'isMcpReviewIdentityAllowed',
 ]);
-exactNamedImports(providerAst, '../services/mcp-review-identity.js', [
+assertExactUnshadowedNamedImports(providerAst, '../services/mcp-review-identity.js', [
   'isConfiguredMcpReviewUserId',
   'isMcpReviewIdentityAllowed',
 ]);

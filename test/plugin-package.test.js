@@ -7,7 +7,7 @@ const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { astSha256 } = require('../scripts/review-auth-contract-ast.js');
+const { assertExactUnshadowedNamedImports, astSha256 } = require('../scripts/review-auth-contract-ast.js');
 
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
@@ -123,6 +123,33 @@ test('review-auth AST locks reject function and module-scope credential fallback
   assert.throws(
     () => assert.equal(astSha256(moduleFallback), reviewedDigest, 'environment-only credential contract'),
     /environment-only credential contract/,
+  );
+});
+
+test('review-auth import binding rejects aliases and lexical shadows', () => {
+  const parse = (source) => babelParser.parse(source, { sourceType: 'module', plugins: ['typescript'] });
+  const sourcePath = './reviewer.js';
+  const names = ['authenticateReviewer'];
+  assert.doesNotThrow(() => assertExactUnshadowedNamedImports(
+    parse("import { authenticateReviewer } from './reviewer.js';\nexport const run = () => authenticateReviewer();"),
+    sourcePath,
+    names,
+  ));
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { authenticateReviewer } from './reviewer.js';\nexport function run(authenticateReviewer: () => boolean) { return authenticateReviewer(); }"),
+      sourcePath,
+      names,
+    ),
+    /must resolve only to its reviewed import; rejected function binding or parameter shadow/,
+  );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { authenticateReviewer as check } from './reviewer.js';\nexport const run = () => check();"),
+      sourcePath,
+      names,
+    ),
+    /imports must not be aliased/,
   );
 });
 
