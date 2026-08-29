@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
+  REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,
@@ -345,11 +346,14 @@ try {
   const archive = childProcess.spawnSync(
     'git',
     ['-C', backendRoot, 'archive', '--format=tar', '--output', archivePath, EXPECTED_DEPLOYED_BACKEND_COMMIT],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', timeout: REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS },
   );
   assert.ifError(archive.error);
   assert.equal(archive.status, 0, `Unable to export the pinned backend commit (exit ${archive.status ?? 'unknown'})`);
-  const extract = childProcess.spawnSync('tar', ['-xf', archivePath, '-C', isolatedBackendRoot], { encoding: 'utf8' });
+  const extract = childProcess.spawnSync('tar', ['-xf', archivePath, '-C', isolatedBackendRoot], {
+    encoding: 'utf8',
+    timeout: REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
+  });
   assert.ifError(extract.error);
   assert.equal(extract.status, 0, `Unable to extract the pinned backend commit (exit ${extract.status ?? 'unknown'})`);
   fs.unlinkSync(archivePath);
@@ -362,14 +366,22 @@ try {
   );
   assert.ifError(install.error);
   assert.equal(install.status, 0, `The isolated pinned backend dependency install must succeed (exit ${install.status ?? 'unknown'})`);
-  const vitestBin = path.join(
-    path.dirname(require.resolve('vitest/package.json', { paths: [isolatedBackendRoot] })),
-    'vitest.mjs',
-  );
+  let vitestPackage;
+  try {
+    vitestPackage = require.resolve('vitest/package.json', { paths: [isolatedBackendRoot] });
+  } catch {
+    throw new Error('The isolated pinned backend dependency install must provide Vitest');
+  }
+  const vitestBin = path.join(path.dirname(vitestPackage), 'vitest.mjs');
   const backendTests = childProcess.spawnSync(
     process.execPath,
     [vitestBin, 'run', 'src/routes/__tests__/mcp-consent.test.ts', 'src/mcp/__tests__/mcp-oauth-provider.test.ts', '--no-file-parallelism'],
-    { cwd: isolatedBackendRoot, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' } },
+    {
+      cwd: isolatedBackendRoot,
+      encoding: 'utf8',
+      env: { ...process.env, NODE_ENV: 'test' },
+      timeout: REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
+    },
   );
   assert.ifError(backendTests.error);
   assert.equal(

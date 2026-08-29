@@ -6,6 +6,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS = 120_000;
+
 const OMITTED_AST_KEYS = new Set([
   'loc', 'start', 'end', 'leadingComments', 'trailingComments', 'innerComments', 'extra',
 ]);
@@ -30,7 +32,10 @@ const sha256ExactBytes = (value) => crypto.createHash('sha256').update(value).di
 
 const assertExactGitCheckout = (root, expectedCommit) => {
   const runGit = (args, label) => {
-    const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    const result = childProcess.spawnSync('git', ['-C', root, ...args], {
+      encoding: 'utf8',
+      timeout: REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
+    });
     assert.ifError(result.error);
     assert.equal(result.status, 0, `Unable to ${label} for reviewed backend checkout: ${result.stderr.trim()}`);
     return result.stdout.trim();
@@ -41,7 +46,10 @@ const assertExactGitCheckout = (root, expectedCommit) => {
     'The reviewed backend checkout must be the exact deployed merge commit',
   );
   assert.equal(runGit(['rev-parse', '--show-object-format'], 'resolve object format'), 'sha1', 'The reviewed backend checkout must use the audited Git object format');
-  const tracked = childProcess.spawnSync('git', ['-C', root, 'ls-files', '-s', '-z'], { encoding: 'buffer' });
+  const tracked = childProcess.spawnSync('git', ['-C', root, 'ls-files', '-s', '-z'], {
+    encoding: 'buffer',
+    timeout: REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
+  });
   assert.ifError(tracked.error);
   assert.equal(tracked.status, 0, `Unable to enumerate reviewed backend files: ${tracked.stderr.toString('utf8').trim()}`);
   for (const record of tracked.stdout.toString('utf8').split('\0').filter(Boolean)) {
@@ -143,6 +151,7 @@ const assertExactUnshadowedNamedImports = (root, sourcePath, expectedNames) => {
 };
 
 module.exports = {
+  REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,

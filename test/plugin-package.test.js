@@ -146,7 +146,7 @@ test('review-auth handler AST lock rejects conditional credential fallbacks', ()
 test('review-auth checkout and migration locks reject provenance drift', (t) => {
   const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-review-auth-git-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  childProcess.execFileSync('git', ['init', '--quiet', directory]);
+  childProcess.execFileSync('git', ['init', '--quiet', '--object-format=sha1', directory]);
   childProcess.execFileSync('git', ['-C', directory, 'config', 'user.email', 'review-test@example.com']);
   childProcess.execFileSync('git', ['-C', directory, 'config', 'user.name', 'Review Test']);
   const fixture = path.join(directory, 'migration.sql');
