@@ -358,3 +358,85 @@ test('trackly mcp starts and stays attached to stdio', async (t) => {
 
   await assert.doesNotReject(startup);
 });
+
+test('trackly mcp exits cleanly when its client closes stdin', { timeout: 5_000 }, async (t) => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-mcp-eof-test-'));
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  const child = spawn(process.execPath, [BIN_PATH, 'mcp'], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      TRACKLY_MCP_ANALYTICS_DISABLED: '1',
+      TRACKLY_CONFIG_DIR: configDir,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+  child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  });
+
+  const exited = once(child, 'exit');
+  child.stdin.end();
+  const [code, signal] = await exited;
+
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+  assert.equal(stdout, '');
+  assert.equal(stderr, '');
+});
+
+test('trackly mcp treats a closed client output pipe as a clean disconnect', { timeout: 5_000 }, async (t) => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-mcp-epipe-test-'));
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  const child = spawn(process.execPath, [BIN_PATH, 'mcp'], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      TRACKLY_MCP_ANALYTICS_DISABLED: '1',
+      TRACKLY_CONFIG_DIR: configDir,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  });
+
+  // Complete initialization first so this test does not depend on a startup
+  // delay, then reproduce a client that drops its response pipe mid-session.
+  const initialized = once(child.stdout, 'data');
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'epipe-test', version: '1.0.0' },
+    },
+  })}\n`);
+  await initialized;
+
+  child.stdout.destroy();
+  const exited = once(child, 'exit');
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'notifications/initialized',
+  })}\n${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/list',
+  })}\n`);
+  const [code, signal] = await exited;
+
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+  assert.equal(stderr, '');
+});

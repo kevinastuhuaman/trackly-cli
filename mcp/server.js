@@ -10,6 +10,7 @@ const { registerApplyTools } = require('./apply-tools');
 const { configureMcpAnalytics, shutdownMcpAnalytics } = require('./analytics');
 
 const MCP_USER_AGENT = `trackly-mcp/${PACKAGE_VERSION}`;
+const MCP_SHUTDOWN_TIMEOUT_MS = 2_000;
 const MCP_MAINTENANCE_ERROR_CODE = -32002;
 const MCP_ACCESS_ERROR_CODE = -32003;
 const MCP_AUTH_ERROR_CODE = -32004;
@@ -597,30 +598,97 @@ async function startMcpServer(options = {}) {
 
 function installMcpSignalHandlers(server, options = {}) {
   const signalTarget = options.signalTarget || process;
+  const input = options.input || process.stdin;
+  const output = options.output || process.stdout;
   const exit = options.exit || ((code) => process.exit(code));
   const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
+  const shutdownTimeoutMs = options.shutdownTimeoutMs ?? MCP_SHUTDOWN_TIMEOUT_MS;
+  const closeServer = options.closeServer || (() => server.close());
+  const reportInputError = options.reportInputError || ((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`MCP stdin error: ${message}\n`);
+  });
+  const reportOutputError = options.reportOutputError || ((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`MCP stdout error: ${message}\n`);
+  });
   let terminating = false;
   const handlers = new Map();
+  let inputEndHandler;
+  let inputCloseHandler;
+  let inputErrorHandler;
+  let outputErrorHandler;
   const cleanup = () => {
     for (const [signal, handler] of handlers) {
       signalTarget.removeListener(signal, handler);
     }
     handlers.clear();
+    if (inputEndHandler) input.removeListener('end', inputEndHandler);
+    if (inputCloseHandler) input.removeListener('close', inputCloseHandler);
+    if (inputErrorHandler) input.removeListener('error', inputErrorHandler);
+    if (outputErrorHandler) output.removeListener('error', outputErrorHandler);
+  };
+  const terminate = (exitCode) => {
+    if (terminating) return;
+    terminating = true;
+    let shutdownTimer;
+    const shutdown = Promise.resolve()
+      .then(() => closeServer())
+      .catch(() => {})
+      .then(() => shutdownAnalytics(server))
+      .catch(() => {});
+    const deadline = new Promise((resolve) => {
+      shutdownTimer = setTimeout(resolve, shutdownTimeoutMs);
+    });
+    void Promise.race([shutdown, deadline])
+      .finally(() => {
+        clearTimeout(shutdownTimer);
+        // Keep signal and pipe handlers installed until teardown settles so a
+        // repeated disconnect cannot restore Node's default early termination.
+        cleanup();
+        exit(exitCode);
+      });
   };
   for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
-    const handler = () => {
-      if (terminating) return;
-      terminating = true;
-      void Promise.resolve()
-        .then(() => shutdownAnalytics(server))
-        .catch(() => {})
-        .finally(() => {
-          cleanup();
-          exit(exitCode);
-        });
-    };
+    const handler = () => terminate(exitCode);
     handlers.set(signal, handler);
     signalTarget.on(signal, handler);
+  }
+
+  // A stdio client can disappear without sending a signal. Close the MCP
+  // transport explicitly so its onclose hooks run instead of relying on the
+  // Node event loop to happen to become empty.
+  inputEndHandler = () => terminate(0);
+  inputCloseHandler = () => terminate(0);
+  inputErrorHandler = (error) => {
+    reportInputError(error);
+    terminate(1);
+  };
+  input.on('end', inputEndHandler);
+  input.on('close', inputCloseHandler);
+  input.on('error', inputErrorHandler);
+
+  // A response racing with client teardown can reach a closed stdout pipe.
+  // Treat only EPIPE as a normal disconnect; preserve fail-fast behavior for
+  // every unrelated stream failure.
+  outputErrorHandler = (error) => {
+    if (error?.code === 'EPIPE') {
+      terminate(0);
+      return;
+    }
+    reportOutputError(error);
+    terminate(1);
+  };
+  output.on('error', outputErrorHandler);
+
+  // A pipe may close while startMcpServer is awaiting transport connection,
+  // before these process-level handlers can be installed.
+  if (input.errored) {
+    inputErrorHandler(input.errored);
+  } else if (output.errored) {
+    outputErrorHandler(output.errored);
+  } else if (input.readableEnded || input.destroyed || output.writableEnded || output.destroyed) {
+    terminate(0);
   }
   return cleanup;
 }

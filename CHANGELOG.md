@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `trackly mcp` now closes its server and flushes bounded analytics when the
+  parent client closes stdin or its output pipe, avoiding orphaned processes
+  and noisy `EPIPE` crashes during client shutdown.
+
 ## [0.17.1] - 2026-08-24
 
 ### Added
