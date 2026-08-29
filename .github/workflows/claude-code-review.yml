@@ -142,10 +142,8 @@ jobs:
       # to bound the prompt.
       - name: Precompute PR diff
         id: precompute
-        # continue-on-error: a diff-compute hiccup must not hard-fail the job
-        # (review is non-blocking). Review steps gate on the has_diff output and
-        # the tail steps surface any miss, so a failure here degrades to a
-        # visible no-review notice, never a bare red check. (Reliability.)
+        # continue-on-error lets the status and notice steps explain a diff-compute
+        # failure before the final verdict fails closed. (Reliability.)
         continue-on-error: true
         if: steps.review-workflow.outputs.changed != 'true'
         shell: bash
@@ -467,17 +465,19 @@ jobs:
         run: |
           if [ "${{ steps.precompute.outputs.has_diff }}" != "true" ]; then
             echo "::warning title=Claude review skipped::No diff computed (precompute outcome=${{ steps.precompute.outcome }}); no review attempted."
+            exit 1
           elif [ "${{ steps.claude-review.outcome }}" = "success" ]; then
             echo "Claude review posted via the primary (jimmygregorio) token."
           elif [ "${{ steps.claude-review-fallback.outcome }}" = "success" ]; then
             echo "::notice title=Claude review used fallback::Primary failed (${{ steps.claude-review.outcome }}); posted via the berkeley fallback token."
           else
             echo "::warning title=Claude review did not post::Both workflow auth attempts failed (primary=${{ steps.claude-review.outcome }}, fallback=${{ steps.claude-review-fallback.outcome }}). Inspect action logs for OAuth token, usage/quota, model availability, or action config. The step now fails loudly on a turn-1 SDK error (v1.0.176), so this is a real failure, not a masked one."
+            exit 1
           fi
 
       # A run-log ::warning:: does NOT surface on the PR conversation, so a
       # no-review run reads as a green "reviewed clean" check. When review could
-      # not run, post a VISIBLE non-blocking PR comment so the empty result is
+      # not run, post a VISIBLE PR comment so the empty result is
       # never mistaken for an approval. (Adversarial + Security.) Uses the job's
       # own github_token via the REST API (no gh dependency); python3 for safe
       # JSON encoding. Never fails the job.
@@ -496,7 +496,7 @@ jobs:
           else
             REASON="both workflow auth attempts failed"
           fi
-          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review could not run - ${REASON}. This is a NON-BLOCKING notice; it is NOT an approval and NOT a clean result. If review auth failed, inspect action logs for OAuth token, usage/quota, model availability, or action config before relying on this gate."
+          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review could not run - ${REASON}. This check fails closed; it is NOT an approval and NOT a clean result. If review auth failed, inspect action logs for OAuth token, usage/quota, model availability, or action config before relying on this gate."
           python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_notice.json" || { echo "::warning::could not build notice body"; exit 0; }
           curl -sS --fail -X POST \
             -H "Authorization: Bearer ${GH_TOKEN_POST}" \
