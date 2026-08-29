@@ -2,10 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const babelParser = require('@babel/parser');
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { astSha256 } = require('../scripts/review-auth-contract-ast.js');
 
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
@@ -110,10 +112,18 @@ test('review-auth verifier fails closed without a backend and skips only when ex
   assert.match(skipped.stdout, /explicitly skipped without TRACKLY_BACKEND_DIR/);
 });
 
-test('review-auth verifier locks the complete reviewer credential helper', () => {
-  const verifier = read('scripts/verify-review-auth-contract.js');
-  assert.match(verifier, /astSha256\(credentialFunctions\[0\]\)/);
-  assert.match(verifier, /environment-only password loading and constant-time validation/);
+test('review-auth AST locks reject function and module-scope credential fallbacks', () => {
+  const parse = (source) => babelParser.parse(source, { sourceType: 'module', plugins: ['typescript'] }).program;
+  const reviewed = parse("const password = process.env.MCP_REVIEW_LOGIN_PASSWORD;\nexport function authenticate(value: string) { return value === password; }");
+  const functionFallback = parse("const password = process.env.MCP_REVIEW_LOGIN_PASSWORD;\nexport function authenticate(value: string) { return value === (password || 'fallback'); }");
+  const moduleFallback = parse("const password = process.env.MCP_REVIEW_LOGIN_PASSWORD || 'fallback';\nexport function authenticate(value: string) { return value === password; }");
+  const reviewedDigest = astSha256(reviewed);
+  assert.notEqual(astSha256(functionFallback), reviewedDigest);
+  assert.notEqual(astSha256(moduleFallback), reviewedDigest);
+  assert.throws(
+    () => assert.equal(astSha256(moduleFallback), reviewedDigest, 'environment-only credential contract'),
+    /environment-only credential contract/,
+  );
 });
 
 function filesBelow(directory) {

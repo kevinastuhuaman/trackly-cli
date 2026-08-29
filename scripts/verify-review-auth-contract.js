@@ -4,9 +4,9 @@
 const assert = require('node:assert/strict');
 const babelParser = require('@babel/parser');
 const childProcess = require('node:child_process');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { astSha256 } = require('./review-auth-contract-ast.js');
 
 const backendDir = process.env.TRACKLY_BACKEND_DIR;
 if (!backendDir) {
@@ -138,19 +138,6 @@ const parseTypescript = (source, sourcePath) => {
   }
 };
 
-const canonicalAst = (value) => {
-  if (Array.isArray(value)) return value.map(canonicalAst);
-  if (!value || typeof value !== 'object') return value;
-  const result = {};
-  for (const key of Object.keys(value).sort()) {
-    if (['loc', 'start', 'end', 'leadingComments', 'trailingComments', 'innerComments', 'extra'].includes(key)) continue;
-    result[key] = canonicalAst(value[key]);
-  }
-  return result;
-};
-
-const astSha256 = (node) => crypto.createHash('sha256').update(JSON.stringify(canonicalAst(node))).digest('hex');
-
 const walk = (node, visitor, ancestors = []) => {
   if (!node || typeof node !== 'object') return;
   visitor(node, ancestors);
@@ -205,6 +192,18 @@ const exactCallArguments = (source, root, name, expectedArguments) => {
   );
 };
 
+const exactNamedImports = (root, sourcePath, expectedNames) => {
+  const imports = root.program.body.filter((node) => node.type === 'ImportDeclaration'
+    && node.source?.value === sourcePath);
+  assert.equal(imports.length, 1, `The active ${sourcePath} import must be unique`);
+  const names = imports[0].specifiers.map((specifier) => {
+    assert.equal(specifier.type, 'ImportSpecifier', `${sourcePath} must use named imports only`);
+    assert.equal(specifier.local?.name, specifier.imported?.name, `${sourcePath} imports must not be aliased`);
+    return specifier.imported.name;
+  }).sort();
+  assert.deepEqual(names, [...expectedNames].sort(), `${sourcePath} must preserve its reviewed helper bindings`);
+};
+
 const routeCall = (root, routePath, method = 'post') => {
   const registration = `router.${method}`;
   const matches = callsBelow(root, registration).filter((call) => call.arguments[0]?.value === routePath);
@@ -236,6 +235,20 @@ const identityGuardFunctions = namedFunctions(identityAst, 'isMcpReviewIdentityA
 assert.equal(bindingFunctions.length, 1, 'The active MCP binding helper must be unique');
 assert.equal(credentialFunctions.length, 1, 'The active MCP credential helper must be unique');
 assert.equal(identityGuardFunctions.length, 1, 'The active MCP identity guard must be unique');
+assert.equal(
+  astSha256(identityAst.program),
+  '0f109314959fca6fc229f99ce18cbb71582c468c60e907747fb058f61755a4e3',
+  'The complete MCP reviewer-identity module AST must preserve environment-only credentials and fail-closed identity binding',
+);
+exactNamedImports(authAst, '../services/mcp-review-identity.js', [
+  'authenticateMcpReviewCredentials',
+  'configuredMcpReviewBinding',
+  'isMcpReviewIdentityAllowed',
+]);
+exactNamedImports(providerAst, '../services/mcp-review-identity.js', [
+  'isConfiguredMcpReviewUserId',
+  'isMcpReviewIdentityAllowed',
+]);
 const activeBindingTokens = new Set();
 walk(bindingFunctions[0], (node) => {
   if (node.type === 'Identifier') activeBindingTokens.add(node.name);
@@ -256,11 +269,6 @@ assert.ok(activeBindingMembers.has('process.env.MCP_REVIEW_LOGIN_PASSWORD'), 'Th
 exactCallArguments(identity, bindingFunctions[0], 'configuredPositiveInteger', ["'MCP_REVIEW_LOGIN_USER_ID'"]);
 exactCallArguments(identity, bindingFunctions[0], 'parseAuthEpochSetting', ['process.env.MCP_REVIEW_LOGIN_AUTH_EPOCH']);
 assert.equal(callsBelow(bindingFunctions[0], 'isConfiguredReviewUserId').length, 1, 'MCP and App Store review identities must remain distinct');
-assert.equal(
-  astSha256(credentialFunctions[0]),
-  'd92037bc6c696c5d1a10b266101de34b5fc10497eae7b7d5f28d49d6dcca3625',
-  'The complete MCP credential helper AST must preserve environment-only password loading and constant-time validation',
-);
 assert.equal(callsBelow(credentialFunctions[0], 'crypto.timingSafeEqual').length, 1, 'MCP reviewer passwords must use constant-time comparison');
 assert.equal(
   astSha256(identityGuardFunctions[0]),
