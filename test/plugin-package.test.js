@@ -112,13 +112,17 @@ test('review-auth subprocess diagnostics redact registry and token credentials',
     `request to https://${fake}@registry.example.test/package failed`,
     `//registry.example.test/:_authToken=${fake}`,
     `NPM_ACCESS_TOKEN=${fake}`,
+    `NODE_AUTH_TOKEN=${fake}`,
+    `NPM_TOKEN=${fake}`,
+    `//registry.example.test/:_auth=${fake}`,
+    `//registry.example.test/:_password=${fake}`,
     `Authorization: Bearer ${fake}`,
     `https://registry.example.test/package?access_token=${fake}&mode=test`,
   ].join('\n');
   const redacted = redactSubprocessOutput(diagnostic);
   assert.doesNotMatch(redacted, new RegExp(fake));
   assert.match(redacted, /https:\/\/\[redacted\]@registry\.example\.test/);
-  assert.equal((redacted.match(/\[redacted\]/g) || []).length, 5);
+  assert.equal((redacted.match(/\[redacted\]/g) || []).length, 9);
 });
 
 test('review-auth verifier fails closed without a backend and skips only when explicitly allowed', () => {
