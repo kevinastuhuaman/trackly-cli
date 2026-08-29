@@ -38,6 +38,12 @@ const redactSubprocessOutput = (value) => String(value || '')
   .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+/gi, '$1[redacted]')
   .replace(/([?&](?:auth|access)?_?token=)[^&#\s]+/gi, '$1[redacted]');
 
+const formatSubprocessFailure = ({ error, stderr, stdout }, maxLength = 4000) => redactSubprocessOutput([
+  error?.message,
+  stderr,
+  stdout,
+].filter(Boolean).join('\n')).trim().slice(-maxLength);
+
 const assertExactGitCheckout = (root, expectedCommit) => {
   const runGit = (args, label) => {
     const result = childProcess.spawnSync('git', ['-C', root, ...args], {
@@ -164,6 +170,7 @@ module.exports = {
   assertExactUnshadowedNamedImports,
   astSha256,
   canonicalAst,
+  formatSubprocessFailure,
   redactSubprocessOutput,
   sha256ExactBytes,
 };

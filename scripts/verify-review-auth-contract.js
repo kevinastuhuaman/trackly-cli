@@ -12,7 +12,7 @@ const {
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,
-  redactSubprocessOutput,
+  formatSubprocessFailure,
   sha256ExactBytes,
 } = require('./review-auth-contract-ast.js');
 
@@ -366,10 +366,11 @@ try {
     ['ci', '--ignore-scripts', '--include=dev', '--no-audit', '--no-fund'],
     { cwd: isolatedBackendRoot, encoding: 'utf8', env: installEnv, timeout: 600_000 },
   );
-  assert.ifError(install.error);
-  const installFailure = redactSubprocessOutput(`${install.stderr || ''}\n${install.stdout || ''}`)
-    .trim()
-    .slice(-4000);
+  const installFailure = formatSubprocessFailure(install);
+  assert.ok(
+    !install.error,
+    `The isolated pinned backend dependency install process must start and finish: ${installFailure}`,
+  );
   assert.equal(
     install.status,
     0,

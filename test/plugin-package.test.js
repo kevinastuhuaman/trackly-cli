@@ -11,6 +11,7 @@ const {
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,
+  formatSubprocessFailure,
   redactSubprocessOutput,
   sha256ExactBytes: reviewAuthSha256ExactBytes,
 } = require('../scripts/review-auth-contract-ast.js');
@@ -124,6 +125,18 @@ test('review-auth subprocess diagnostics redact registry and token credentials',
   assert.doesNotMatch(redacted, new RegExp(fake));
   assert.match(redacted, /https:\/\/\[redacted\]@registry\.example\.test/);
   assert.equal((redacted.match(/\[redacted\]/g) || []).length, 10);
+});
+
+test('review-auth subprocess failure diagnostics include errors and stay bounded', () => {
+  const fake = 'synthetic-subprocess-secret';
+  const diagnostic = formatSubprocessFailure({
+    error: new Error(`NODE_AUTH_TOKEN=${fake}`),
+    stderr: `Authorization: Basic ${fake}`,
+    stdout: `${'x'.repeat(5000)}\n//registry.example.test/:_password=${fake}`,
+  });
+  assert.equal(diagnostic.length, 4000);
+  assert.doesNotMatch(diagnostic, new RegExp(fake));
+  assert.match(diagnostic, /\[redacted\]/);
 });
 
 test('review-auth verifier fails closed without a backend and skips only when explicitly allowed', () => {
