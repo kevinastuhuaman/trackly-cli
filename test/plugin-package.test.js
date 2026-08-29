@@ -110,6 +110,12 @@ test('review-auth verifier fails closed without a backend and skips only when ex
   assert.match(skipped.stdout, /explicitly skipped without TRACKLY_BACKEND_DIR/);
 });
 
+test('review-auth verifier locks the complete reviewer credential helper', () => {
+  const verifier = read('scripts/verify-review-auth-contract.js');
+  assert.match(verifier, /astSha256\(credentialFunctions\[0\]\)/);
+  assert.match(verifier, /environment-only password loading and constant-time validation/);
+});
+
 function filesBelow(directory) {
   const files = [];
   const visit = (current) => {

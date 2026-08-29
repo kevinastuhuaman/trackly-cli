@@ -256,6 +256,11 @@ assert.ok(activeBindingMembers.has('process.env.MCP_REVIEW_LOGIN_PASSWORD'), 'Th
 exactCallArguments(identity, bindingFunctions[0], 'configuredPositiveInteger', ["'MCP_REVIEW_LOGIN_USER_ID'"]);
 exactCallArguments(identity, bindingFunctions[0], 'parseAuthEpochSetting', ['process.env.MCP_REVIEW_LOGIN_AUTH_EPOCH']);
 assert.equal(callsBelow(bindingFunctions[0], 'isConfiguredReviewUserId').length, 1, 'MCP and App Store review identities must remain distinct');
+assert.equal(
+  astSha256(credentialFunctions[0]),
+  'd92037bc6c696c5d1a10b266101de34b5fc10497eae7b7d5f28d49d6dcca3625',
+  'The complete MCP credential helper AST must preserve environment-only password loading and constant-time validation',
+);
 assert.equal(callsBelow(credentialFunctions[0], 'crypto.timingSafeEqual').length, 1, 'MCP reviewer passwords must use constant-time comparison');
 assert.equal(
   astSha256(identityGuardFunctions[0]),
