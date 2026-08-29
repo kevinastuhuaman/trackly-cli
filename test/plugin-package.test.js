@@ -151,7 +151,8 @@ test('review-auth checkout and migration locks reject provenance drift', (t) => 
   childProcess.execFileSync('git', ['-C', directory, 'config', 'user.name', 'Review Test']);
   const fixture = path.join(directory, 'migration.sql');
   fs.writeFileSync(fixture, 'SELECT 1;\n');
-  childProcess.execFileSync('git', ['-C', directory, 'add', 'migration.sql']);
+  fs.writeFileSync(path.join(directory, '.gitignore'), 'node_modules/\nignored-auth.js\n');
+  childProcess.execFileSync('git', ['-C', directory, 'add', 'migration.sql', '.gitignore']);
   childProcess.execFileSync('git', ['-C', directory, 'commit', '--quiet', '-m', 'fixture']);
   const commit = childProcess.execFileSync('git', ['-C', directory, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   assert.doesNotThrow(() => assertExactGitCheckout(directory, commit));
@@ -160,6 +161,12 @@ test('review-auth checkout and migration locks reject provenance drift', (t) => 
   fs.writeFileSync(path.join(directory, 'untracked-auth.js'), 'module.exports = () => true;\n');
   assert.throws(() => assertExactGitCheckout(directory, commit), /untracked source/);
   fs.rmSync(path.join(directory, 'untracked-auth.js'));
+  fs.mkdirSync(path.join(directory, 'node_modules'));
+  fs.writeFileSync(path.join(directory, 'node_modules', 'dependency.js'), 'module.exports = true;\n');
+  assert.doesNotThrow(() => assertExactGitCheckout(directory, commit));
+  fs.writeFileSync(path.join(directory, 'ignored-auth.js'), 'module.exports = () => true;\n');
+  assert.throws(() => assertExactGitCheckout(directory, commit), /no ignored files outside node_modules/);
+  fs.rmSync(path.join(directory, 'ignored-auth.js'));
   childProcess.execFileSync('git', ['-C', directory, 'update-index', '--assume-unchanged', 'migration.sql']);
   fs.writeFileSync(fixture, 'SELECT 2;\n');
   assert.notEqual(reviewAuthSha256ExactBytes(fs.readFileSync(fixture)), reviewedDigest);

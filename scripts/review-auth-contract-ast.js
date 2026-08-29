@@ -65,6 +65,15 @@ const assertExactGitCheckout = (root, expectedCommit) => {
     '',
     'The reviewed backend checkout must have no tracked modifications or untracked source',
   );
+  const ignoredOutsideDependencies = runGit(
+    ['status', '--porcelain=v1', '--ignored=matching', '--untracked-files=all'],
+    'inspect ignored worktree state',
+  ).split('\n').filter(Boolean).filter((line) => !/^!! node_modules\/?$/.test(line));
+  assert.deepEqual(
+    ignoredOutsideDependencies,
+    [],
+    'The reviewed backend checkout must have no ignored files outside node_modules',
+  );
 };
 
 const boundNames = (pattern, names = []) => {
