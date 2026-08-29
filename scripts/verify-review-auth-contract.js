@@ -25,6 +25,9 @@ const authTests = read('src/routes/__tests__/mcp-consent.test.ts');
 const providerTests = read('src/mcp/__tests__/mcp-oauth-provider.test.ts');
 const migrationRoute = read('src/routes/run-migration-api.ts');
 const reviewerFixture = read('migrations/503_seed_openai_plugin_review_fixture.sql');
+const activeReviewerFixture = reviewerFixture
+  .replace(/--[^\r\n]*/g, '')
+  .replace(/\/\*[\s\S]*?\*\//g, '');
 
 for (const envName of [
   'MCP_REVIEW_LOGIN_EMAIL',
@@ -61,7 +64,11 @@ assert.match(provider, /decoded\.resource !== MCP_PLUGIN_RESOURCE/, 'MCP reviewe
 assert.match(reviewerFixture, /openai-review@usetrackly\.app/, 'The reviewer login must have a dedicated synthetic identity');
 assert.match(reviewerFixture, /is_test_account IS DISTINCT FROM TRUE/, 'The fixture must reject non-synthetic identity reuse');
 assert.match(reviewerFixture, /account_deletion_requests/, 'The fixture must reject deleted identity reuse');
-assert.doesNotMatch(reviewerFixture, /MCP_REVIEW_LOGIN_PASSWORD/, 'The reviewer password must never be stored in the fixture');
+assert.doesNotMatch(
+  activeReviewerFixture,
+  /\b(?:MCP_REVIEW_LOGIN_PASSWORD|OPENAI_REVIEW_PASSWORD|REVIEW_LOGIN_PASSWORD|REVIEW_PASSWORD|password(?:_hash|_digest)?|passwd|passphrase|pwd|credential_secret|client_secret)\b/i,
+  'The reviewer fixture must not contain password-bearing columns, variables, or alternate secret identifiers',
+);
 assert.match(migrationRoute, /'\/admin\/run-migration-503'/, 'The reviewer fixture must have a protected deployment route');
 assert.match(
   migrationRoute,
