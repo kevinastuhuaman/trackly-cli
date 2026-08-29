@@ -11,6 +11,8 @@ const {
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,
+  formatSubprocessFailure,
+  redactSubprocessOutput,
   sha256ExactBytes: reviewAuthSha256ExactBytes,
 } = require('../scripts/review-auth-contract-ast.js');
 
@@ -103,6 +105,40 @@ test('review-auth and hosted Apply contracts remain independently targetable', (
   const scripts = json('package.json').scripts;
   assert.equal(scripts['test:hosted-contract'], 'node scripts/verify-hosted-contract.js');
   assert.equal(scripts['test:review-auth-contract'], 'node scripts/verify-review-auth-contract.js');
+});
+
+test('review-auth subprocess diagnostics redact registry and token credentials', () => {
+  const fake = 'synthetic-reviewer-secret';
+  const diagnostic = [
+    `request to https://${fake}@registry.example.test/package failed`,
+    `//registry.example.test/:_authToken=${fake}`,
+    `NPM_ACCESS_TOKEN=${fake}`,
+    `NODE_AUTH_TOKEN=${fake}`,
+    `NPM_TOKEN=${fake}`,
+    `//registry.example.test/:_auth=${fake}`,
+    `//registry.example.test/:_password=${fake}`,
+    `//registry.example.test/:username=${fake}`,
+    `Authorization: Bearer ${fake}`,
+    `https://registry.example.test/package?access_token=${fake}&mode=test`,
+  ].join('\n');
+  const redacted = redactSubprocessOutput(diagnostic);
+  assert.doesNotMatch(redacted, new RegExp(fake));
+  assert.match(redacted, /https:\/\/\[redacted\]@registry\.example\.test/);
+  assert.equal((redacted.match(/\[redacted\]/g) || []).length, 10);
+});
+
+test('review-auth subprocess failure diagnostics include errors and stay bounded', () => {
+  const fake = 'synthetic-subprocess-secret';
+  const diagnostic = formatSubprocessFailure({
+    error: new Error(`ETIMEDOUT NODE_AUTH_TOKEN=${fake}`),
+    stderr: `npm failure Authorization: Basic ${fake}`,
+    stdout: `${'x'.repeat(5000)}\n//registry.example.test/:_password=${fake}`,
+  });
+  assert.ok(diagnostic.length <= 4000);
+  assert.doesNotMatch(diagnostic, new RegExp(fake));
+  assert.match(diagnostic, /\[error\]\nETIMEDOUT NODE_AUTH_TOKEN=\[redacted\]/);
+  assert.match(diagnostic, /\[stderr\]\nnpm failure Authorization: Basic \[redacted\]/);
+  assert.match(diagnostic, /\[stdout\][\s\S]*_password=\[redacted\]/);
 });
 
 test('review-auth verifier fails closed without a backend and skips only when explicitly allowed', () => {

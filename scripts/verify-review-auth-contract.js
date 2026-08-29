@@ -12,6 +12,7 @@ const {
   assertExactGitCheckout,
   assertExactUnshadowedNamedImports,
   astSha256,
+  formatSubprocessFailure,
   sha256ExactBytes,
 } = require('./review-auth-contract-ast.js');
 
@@ -359,13 +360,22 @@ try {
   fs.unlinkSync(archivePath);
 
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const installEnv = { ...process.env, NODE_ENV: 'development', npm_config_omit: '' };
   const install = childProcess.spawnSync(
     npmCommand,
-    ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
-    { cwd: isolatedBackendRoot, encoding: 'utf8', timeout: 600_000 },
+    ['ci', '--ignore-scripts', '--include=dev', '--no-audit', '--no-fund'],
+    { cwd: isolatedBackendRoot, encoding: 'utf8', env: installEnv, timeout: 600_000 },
   );
-  assert.ifError(install.error);
-  assert.equal(install.status, 0, `The isolated pinned backend dependency install must succeed (exit ${install.status ?? 'unknown'})`);
+  const installFailure = formatSubprocessFailure(install);
+  assert.ok(
+    !install.error,
+    `The isolated pinned backend dependency install process must start and finish: ${installFailure}`,
+  );
+  assert.equal(
+    install.status,
+    0,
+    `The isolated pinned backend dependency install must succeed (exit ${install.status ?? 'unknown'}): ${installFailure}`,
+  );
   let vitestPackage;
   try {
     vitestPackage = require.resolve('vitest/package.json', { paths: [isolatedBackendRoot] });

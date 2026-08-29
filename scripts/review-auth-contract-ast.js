@@ -30,6 +30,29 @@ const astSha256 = (node) => crypto
 
 const sha256ExactBytes = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
+const redactSubprocessOutput = (value) => String(value || '')
+  .replace(/\b(https?:\/\/)[^/\s@]+@/gi, '$1[redacted]@')
+  .replace(/(_authToken\s*=\s*)[^\s]+/gi, '$1[redacted]')
+  .replace(/\b(((?:node|npm)(?:_[a-z]+)*_token|(?:auth|access)_?token)\s*[=:]\s*)[^\s]+/gi, '$1[redacted]')
+  .replace(/((?:^|[/:])(?:_(?:auth|password)|username)\s*=\s*)[^\s]+/gim, '$1[redacted]')
+  .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+/gi, '$1[redacted]')
+  .replace(/([?&](?:auth|access)?_?token=)[^&#\s]+/gi, '$1[redacted]');
+
+const formatSubprocessFailure = ({ error, stderr, stdout }, maxLength = 4000) => {
+  const entries = [
+    ['error', error?.message],
+    ['stderr', stderr],
+    ['stdout', stdout],
+  ].filter(([, value]) => value);
+  if (entries.length === 0 || maxLength <= 0) return '';
+  const overhead = entries.reduce((total, [label]) => total + label.length + 3, entries.length - 1);
+  const perEntry = Math.max(0, Math.floor((maxLength - overhead) / entries.length));
+  return entries.map(([label, value]) => {
+    const redacted = redactSubprocessOutput(value).trim();
+    return `[${label}]\n${perEntry > 0 ? redacted.slice(-perEntry) : ''}`;
+  }).join('\n').slice(-maxLength);
+};
+
 const assertExactGitCheckout = (root, expectedCommit) => {
   const runGit = (args, label) => {
     const result = childProcess.spawnSync('git', ['-C', root, ...args], {
@@ -156,5 +179,7 @@ module.exports = {
   assertExactUnshadowedNamedImports,
   astSha256,
   canonicalAst,
+  formatSubprocessFailure,
+  redactSubprocessOutput,
   sha256ExactBytes,
 };
