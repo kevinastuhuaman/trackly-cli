@@ -3805,8 +3805,21 @@ test('submission fixtures cover six internal cases and the exact five-case porta
     'every portal positive case must resolve to a reviewed internal fixture',
   );
   assert.match(fixtures.reviewEnvironment.account, /synthetic reviewer account/i);
+  assert.deepEqual(fixtures.reviewEnvironment.authentication, {
+    mode: 'direct_email_password',
+    surface: 'The Trackly MCP consent page exposes the dedicated plugin-review sign-in only for the production plugin resource',
+    additionalSetupRequired: false,
+    thirdPartyIdentityProviderRequired: false,
+    credentialSource: 'The exact unexpired demo email and password entered in the OpenAI Platform reviewer-access fields',
+    requiredEvidence: 'A clean external browser must complete consent, direct sign-in, authorization-code exchange, MCP initialization, tools/list, and one read-only fixture using the submitted credentials',
+  });
   assert.match(fixtures.reviewEnvironment.submissionPolicy, /No fixture may submit/);
   assert.doesNotMatch(JSON.stringify(fixtures), /\b(?:Kevin|Astuhuaman)\b/i, 'submission fixtures must not leak a real reviewer identity');
+  assert.doesNotMatch(
+    JSON.stringify(fixtures.reviewEnvironment.authentication),
+    /google|apple|mfa|otp|verification code/i,
+    'review authentication must not depend on a third-party provider or verification challenge',
+  );
   for (const item of fixtures.positive) {
     assert.ok(item.fixture);
     assert.ok(item.expectedResultShape.length > 0);
