@@ -98,6 +98,18 @@ test('review-auth and hosted Apply contracts remain independently targetable', (
   assert.equal(scripts['test:review-auth-contract'], 'node scripts/verify-review-auth-contract.js');
 });
 
+test('review-auth verifier fails closed without a backend and skips only when explicitly allowed', () => {
+  const verifier = path.join(ROOT, 'scripts', 'verify-review-auth-contract.js');
+  const env = { ...process.env };
+  delete env.TRACKLY_BACKEND_DIR;
+  const denied = childProcess.spawnSync(process.execPath, [verifier], { encoding: 'utf8', env });
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /TRACKLY_BACKEND_DIR is required/);
+  const skipped = childProcess.spawnSync(process.execPath, [verifier, '--allow-missing-backend'], { encoding: 'utf8', env });
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.match(skipped.stdout, /explicitly skipped without TRACKLY_BACKEND_DIR/);
+});
+
 function filesBelow(directory) {
   const files = [];
   const visit = (current) => {

@@ -3,6 +3,8 @@
 
 const assert = require('node:assert/strict');
 const babelParser = require('@babel/parser');
+const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -29,9 +31,104 @@ const authTests = read('src/routes/__tests__/mcp-consent.test.ts');
 const providerTests = read('src/mcp/__tests__/mcp-oauth-provider.test.ts');
 const migrationRoute = read('src/routes/run-migration-api.ts');
 const reviewerFixture = read('migrations/503_seed_openai_plugin_review_fixture.sql');
-const activeReviewerFixture = reviewerFixture
-  .replace(/--[^\r\n]*/g, '')
-  .replace(/\/\*[\s\S]*?\*\//g, '');
+
+const stripPostgresComments = (source) => {
+  let output = '';
+  let index = 0;
+  let state = 'normal';
+  let blockDepth = 0;
+  let dollarDelimiter = null;
+  while (index < source.length) {
+    const current = source[index];
+    const next = source[index + 1];
+    if (state === 'line-comment') {
+      if (current === '\n' || current === '\r') {
+        output += current;
+        state = 'normal';
+      }
+      index += 1;
+      continue;
+    }
+    if (state === 'block-comment') {
+      if (current === '/' && next === '*') {
+        blockDepth += 1;
+        index += 2;
+      } else if (current === '*' && next === '/') {
+        blockDepth -= 1;
+        index += 2;
+        if (blockDepth === 0) state = 'normal';
+      } else {
+        if (current === '\n' || current === '\r') output += current;
+        index += 1;
+      }
+      continue;
+    }
+    if (state === 'dollar-quote') {
+      if (source.startsWith(dollarDelimiter, index)) {
+        output += dollarDelimiter;
+        index += dollarDelimiter.length;
+        state = 'normal';
+      } else {
+        output += current;
+        index += 1;
+      }
+      continue;
+    }
+    if (state === 'single-quote' || state === 'double-quote') {
+      const quote = state === 'single-quote' ? "'" : '"';
+      output += current;
+      if (current === '\\' && next !== undefined) {
+        output += next;
+        index += 2;
+      } else if (current === quote && next === quote) {
+        output += next;
+        index += 2;
+      } else {
+        index += 1;
+        if (current === quote) state = 'normal';
+      }
+      continue;
+    }
+    if (current === '-' && next === '-') {
+      state = 'line-comment';
+      index += 2;
+    } else if (current === '/' && next === '*') {
+      state = 'block-comment';
+      blockDepth = 1;
+      index += 2;
+    } else if (current === "'") {
+      output += current;
+      state = 'single-quote';
+      index += 1;
+    } else if (current === '"') {
+      output += current;
+      state = 'double-quote';
+      index += 1;
+    } else if (current === '$') {
+      const match = source.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/);
+      if (match) {
+        dollarDelimiter = match[0];
+        output += dollarDelimiter;
+        index += dollarDelimiter.length;
+        state = 'dollar-quote';
+      } else {
+        output += current;
+        index += 1;
+      }
+    } else {
+      output += current;
+      index += 1;
+    }
+  }
+  assert.notEqual(state, 'block-comment', 'Reviewer fixture contains an unterminated SQL block comment');
+  assert.notEqual(state, 'single-quote', 'Reviewer fixture contains an unterminated SQL string');
+  assert.notEqual(state, 'double-quote', 'Reviewer fixture contains an unterminated SQL identifier');
+  assert.notEqual(state, 'dollar-quote', 'Reviewer fixture contains an unterminated dollar-quoted SQL string');
+  return output;
+};
+
+const activeReviewerFixture = stripPostgresComments(reviewerFixture);
+assert.match(stripPostgresComments("SELECT '--', '/*'; -- removed\nSELECT $$-- kept /* kept */$$; /* outer /* nested */ done */ SELECT 1;"), /'--', '\/\*'; \nSELECT \$\$-- kept \/\* kept \*\/\$\$;\s+SELECT 1;/);
 
 const parseTypescript = (source, sourcePath) => {
   try {
@@ -40,6 +137,19 @@ const parseTypescript = (source, sourcePath) => {
     throw new Error(`Unable to parse ${sourcePath}: ${error.message}`);
   }
 };
+
+const canonicalAst = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalAst);
+  if (!value || typeof value !== 'object') return value;
+  const result = {};
+  for (const key of Object.keys(value).sort()) {
+    if (['loc', 'start', 'end', 'leadingComments', 'trailingComments', 'innerComments', 'extra'].includes(key)) continue;
+    result[key] = canonicalAst(value[key]);
+  }
+  return result;
+};
+
+const astSha256 = (node) => crypto.createHash('sha256').update(JSON.stringify(canonicalAst(node))).digest('hex');
 
 const walk = (node, visitor, ancestors = []) => {
   if (!node || typeof node !== 'object') return;
@@ -95,9 +205,10 @@ const exactCallArguments = (source, root, name, expectedArguments) => {
   );
 };
 
-const routeCall = (root, routePath) => {
-  const matches = callsBelow(root, 'router.post').filter((call) => call.arguments[0]?.value === routePath);
-  assert.equal(matches.length, 1, `${routePath} must have exactly one active router.post registration`);
+const routeCall = (root, routePath, method = 'post') => {
+  const registration = `router.${method}`;
+  const matches = callsBelow(root, registration).filter((call) => call.arguments[0]?.value === routePath);
+  assert.equal(matches.length, 1, `${routePath} must have exactly one active ${registration} registration`);
   return matches[0];
 };
 
@@ -146,21 +257,24 @@ exactCallArguments(identity, bindingFunctions[0], 'configuredPositiveInteger', [
 exactCallArguments(identity, bindingFunctions[0], 'parseAuthEpochSetting', ['process.env.MCP_REVIEW_LOGIN_AUTH_EPOCH']);
 assert.equal(callsBelow(bindingFunctions[0], 'isConfiguredReviewUserId').length, 1, 'MCP and App Store review identities must remain distinct');
 assert.equal(callsBelow(credentialFunctions[0], 'crypto.timingSafeEqual').length, 1, 'MCP reviewer passwords must use constant-time comparison');
-const identityGuardStatements = identityGuardFunctions[0].body.body.map((statement) => compactSource(identity, statement));
-assert.ok(
-  identityGuardStatements.includes('if (!binding || resource !== pluginResource) return false;'),
-  'The active MCP identity guard must reject missing bindings and non-plugin resources',
-);
-assert.ok(
-  identityGuardStatements.includes("return userId === binding.userId && email === binding.email && authEpoch === binding.authEpoch && identity.auth_provider === 'review' && identity.is_test_account === true;"),
-  'The active MCP identity guard must conjunctively bind user ID, email, epoch, review provider, and synthetic-account status',
+assert.equal(
+  astSha256(identityGuardFunctions[0]),
+  '2fe7a716547241f8fd2b68eb69150786da0c70e2675565957001e32580eb9d76',
+  'The complete MCP identity guard AST must preserve the reviewed fail-closed control flow and five-way identity binding',
 );
 
-assert.match(auth.replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, ''), /name="provider" value="mcp_review"/, 'The consent page must expose direct plugin-review sign-in');
 const consentRoute = routeCall(authAst, '/mcp-consent');
 assert.equal(consentRoute.arguments[1]?.name, 'reviewEmailAlertLimiter', 'The consent route must apply the email alert limiter first');
 assert.equal(consentRoute.arguments[2]?.name, 'reviewCredentialLimiter', 'The consent route must apply the credential limiter second');
 const consentHandler = consentRoute.arguments[3];
+const consentPageRoute = routeCall(authAst, '/mcp-consent', 'get');
+const consentPageHandler = consentPageRoute.arguments[1];
+const consentText = [];
+walk(consentPageHandler, (node) => {
+  if (node.type === 'StringLiteral') consentText.push(node.value);
+  if (node.type === 'TemplateElement') consentText.push(node.value.raw);
+});
+assert.ok(consentText.some((value) => value.includes('name="provider" value="mcp_review"')), 'The consent page must expose direct plugin-review sign-in');
 exactCallArguments(auth, consentHandler, 'authenticateMcpReviewCredentials', ['email', 'password']);
 exactCallArguments(auth, consentHandler, 'isMcpReviewIdentityAllowed', ['candidate', 'pending.rows[0].resource', 'MCP_PLUGIN_RESOURCE']);
 exactCallArguments(auth, consentHandler, 'generateMcpAuthCode', ['mcpReviewUser.id', 'pending_id', 'redirect_uri', 'state', 'res']);
@@ -171,6 +285,9 @@ const accessMethods = namedMethods(providerAst, 'verifyAccessToken');
 assert.equal(exchangeMethods.length, 1, 'The active authorization-code exchange method must be unique');
 assert.equal(refreshMethods.length, 1, 'The active refresh-token exchange method must be unique');
 assert.equal(accessMethods.length, 1, 'The active access-token verification method must be unique');
+assert.equal(astSha256(exchangeMethods[0]), '4dff4d36ecc3b4483c5ff14d23d41e9c939191e9b5c9e309d5c5055c3e9e2eb0', 'Authorization-code exchange must preserve the reviewed reviewer guard and token-operation control flow');
+assert.equal(astSha256(refreshMethods[0]), 'b3039b31c0ebadd0ee8962e34ae8ad40b8cae7e84bfad07c4a40d72a98f16849', 'Refresh-token exchange must preserve the reviewed reviewer guard and token-operation control flow');
+assert.equal(astSha256(accessMethods[0]), '8a6ec79367aea8906d1b3f5ce0e57da6775dbe5cd5b1aa448a608887d2863513', 'Access-token verification must preserve the reviewed reviewer guard and fail-closed control flow');
 assert.equal(callsBelow(exchangeMethods[0], 'isMcpReviewIdentityAllowed').length, 1, 'Authorization-code exchange must revalidate the MCP reviewer binding');
 assert.equal(callsBelow(refreshMethods[0], 'isMcpReviewIdentityAllowed').length, 1, 'Refresh-token exchange must revalidate the MCP reviewer binding');
 assert.equal(callsBelow(accessMethods[0], 'isMcpReviewIdentityAllowed').length, 1, 'Access-token verification must revalidate the MCP reviewer binding');
@@ -197,5 +314,23 @@ for (const proof of [
   'mints plugin-resource tokens for the dedicated synthetic MCP reviewer',
   'rotates a dedicated MCP reviewer token only for the plugin resource',
 ]) assert.ok(oauthTests.has(proof), `Missing active OAuth test: ${proof}`);
+
+let vitestBin;
+try {
+  vitestBin = path.join(path.dirname(require.resolve('vitest/package.json', { paths: [backendRoot] })), 'vitest.mjs');
+} catch {
+  throw new Error(`The reviewed backend checkout must have its pinned dependencies installed: ${backendRoot}`);
+}
+const backendTests = childProcess.spawnSync(
+  process.execPath,
+  [vitestBin, 'run', 'src/routes/__tests__/mcp-consent.test.ts', 'src/mcp/__tests__/mcp-oauth-provider.test.ts', '--no-file-parallelism'],
+  { cwd: backendRoot, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' } },
+);
+assert.ifError(backendTests.error);
+assert.equal(
+  backendTests.status,
+  0,
+  `The focused backend consent and OAuth tests must execute successfully (exit ${backendTests.status ?? 'unknown'})`,
+);
 
 console.log('Dedicated MCP reviewer-auth contract passes: the fixture and direct password sign-in are synthetic, rate-limited, and plugin-resource-bound.');
