@@ -268,6 +268,11 @@ const consentRoute = routeCall(authAst, '/mcp-consent');
 assert.equal(consentRoute.arguments[1]?.name, 'reviewEmailAlertLimiter', 'The consent route must apply the email alert limiter first');
 assert.equal(consentRoute.arguments[2]?.name, 'reviewCredentialLimiter', 'The consent route must apply the credential limiter second');
 const consentHandler = consentRoute.arguments[3];
+assert.equal(
+  astSha256(consentHandler),
+  '3c166ae60c37113bc6096b4cdea0b6178991b97947fccd011cf07fb41a2ad44a',
+  'The complete MCP consent handler AST must bind reviewer authentication directly to the reviewed credential result',
+);
 const consentPageRoute = routeCall(authAst, '/mcp-consent', 'get');
 const consentPageHandler = consentPageRoute.arguments[1];
 const consentText = [];

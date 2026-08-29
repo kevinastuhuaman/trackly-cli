@@ -126,6 +126,18 @@ test('review-auth AST locks reject function and module-scope credential fallback
   );
 });
 
+test('review-auth handler AST lock rejects conditional credential fallbacks', () => {
+  const parseHandler = (source) => babelParser.parseExpression(source, { plugins: ['typescript'] });
+  const reviewed = parseHandler('(email, password) => { const binding = authenticateReviewer(email, password); return binding; }');
+  const conditionalFallback = parseHandler("(email, password) => { const binding = password === 'public-fallback' ? configuredBinding() : authenticateReviewer(email, password); return binding; }");
+  const reviewedDigest = astSha256(reviewed);
+  assert.notEqual(astSha256(conditionalFallback), reviewedDigest);
+  assert.throws(
+    () => assert.equal(astSha256(conditionalFallback), reviewedDigest, 'reviewed credential result'),
+    /reviewed credential result/,
+  );
+});
+
 test('review-auth import binding rejects aliases and lexical shadows', () => {
   const parse = (source) => babelParser.parse(source, { sourceType: 'module', plugins: ['typescript'] });
   const sourcePath = './reviewer.js';
