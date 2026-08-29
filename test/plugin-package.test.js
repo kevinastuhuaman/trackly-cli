@@ -130,13 +130,15 @@ test('review-auth subprocess diagnostics redact registry and token credentials',
 test('review-auth subprocess failure diagnostics include errors and stay bounded', () => {
   const fake = 'synthetic-subprocess-secret';
   const diagnostic = formatSubprocessFailure({
-    error: new Error(`NODE_AUTH_TOKEN=${fake}`),
-    stderr: `Authorization: Basic ${fake}`,
+    error: new Error(`ETIMEDOUT NODE_AUTH_TOKEN=${fake}`),
+    stderr: `npm failure Authorization: Basic ${fake}`,
     stdout: `${'x'.repeat(5000)}\n//registry.example.test/:_password=${fake}`,
   });
-  assert.equal(diagnostic.length, 4000);
+  assert.ok(diagnostic.length <= 4000);
   assert.doesNotMatch(diagnostic, new RegExp(fake));
-  assert.match(diagnostic, /\[redacted\]/);
+  assert.match(diagnostic, /\[error\]\nETIMEDOUT NODE_AUTH_TOKEN=\[redacted\]/);
+  assert.match(diagnostic, /\[stderr\]\nnpm failure Authorization: Basic \[redacted\]/);
+  assert.match(diagnostic, /\[stdout\][\s\S]*_password=\[redacted\]/);
 });
 
 test('review-auth verifier fails closed without a backend and skips only when explicitly allowed', () => {
