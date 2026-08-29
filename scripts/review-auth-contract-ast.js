@@ -1,7 +1,12 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS = 120_000;
 
 const OMITTED_AST_KEYS = new Set([
   'loc', 'start', 'end', 'leadingComments', 'trailingComments', 'innerComments', 'extra',
@@ -22,6 +27,62 @@ const astSha256 = (node) => crypto
   .createHash('sha256')
   .update(JSON.stringify(canonicalAst(node)))
   .digest('hex');
+
+const sha256ExactBytes = (value) => crypto.createHash('sha256').update(value).digest('hex');
+
+const assertExactGitCheckout = (root, expectedCommit) => {
+  const runGit = (args, label) => {
+    const result = childProcess.spawnSync('git', ['-C', root, ...args], {
+      encoding: 'utf8',
+      timeout: REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, `Unable to ${label} for reviewed backend checkout: ${result.stderr.trim()}`);
+    return result.stdout.trim();
+  };
+  assert.equal(
+    runGit(['rev-parse', 'HEAD'], 'resolve HEAD'),
+    expectedCommit,
+    'The reviewed backend checkout must be the exact deployed merge commit',
+  );
+  assert.equal(runGit(['rev-parse', '--show-object-format'], 'resolve object format'), 'sha1', 'The reviewed backend checkout must use the audited Git object format');
+  const tracked = childProcess.spawnSync('git', ['-C', root, 'ls-files', '-s', '-z'], {
+    encoding: 'buffer',
+    timeout: REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
+  });
+  assert.ifError(tracked.error);
+  assert.equal(tracked.status, 0, `Unable to enumerate reviewed backend files: ${tracked.stderr.toString('utf8').trim()}`);
+  for (const record of tracked.stdout.toString('utf8').split('\0').filter(Boolean)) {
+    const separator = record.indexOf('\t');
+    const metadata = record.slice(0, separator).split(' ');
+    const relativePath = record.slice(separator + 1);
+    assert.equal(metadata[2], '0', `The reviewed backend checkout must not contain staged conflict entries: ${relativePath}`);
+    assert.ok(['100644', '100755', '120000'].includes(metadata[0]), `Unsupported reviewed backend file mode ${metadata[0]}: ${relativePath}`);
+    const absolutePath = path.join(root, relativePath);
+    const bytes = metadata[0] === '120000'
+      ? fs.readlinkSync(absolutePath, { encoding: 'buffer' })
+      : fs.readFileSync(absolutePath);
+    const actualBlob = crypto.createHash('sha1')
+      .update(`blob ${bytes.length}\0`)
+      .update(bytes)
+      .digest('hex');
+    assert.equal(actualBlob, metadata[1], `The reviewed backend tracked bytes must match the pinned commit: ${relativePath}`);
+  }
+  assert.equal(
+    runGit(['status', '--porcelain=v1', '--untracked-files=all'], 'inspect worktree state'),
+    '',
+    'The reviewed backend checkout must have no tracked modifications or untracked source',
+  );
+  const ignoredOutsideDependencies = runGit(
+    ['status', '--porcelain=v1', '--ignored=matching', '--untracked-files=all'],
+    'inspect ignored worktree state',
+  ).split('\n').filter(Boolean).filter((line) => !/^!! (?:node_modules\/?|\.husky\/_\/?)$/.test(line));
+  assert.deepEqual(
+    ignoredOutsideDependencies,
+    [],
+    'The reviewed backend checkout must have no ignored files outside dependency and hook install artifacts',
+  );
+};
 
 const boundNames = (pattern, names = []) => {
   if (!pattern || typeof pattern !== 'object') return names;
@@ -89,4 +150,11 @@ const assertExactUnshadowedNamedImports = (root, sourcePath, expectedNames) => {
   });
 };
 
-module.exports = { assertExactUnshadowedNamedImports, astSha256, canonicalAst };
+module.exports = {
+  REVIEW_AUTH_SUBPROCESS_TIMEOUT_MS,
+  assertExactGitCheckout,
+  assertExactUnshadowedNamedImports,
+  astSha256,
+  canonicalAst,
+  sha256ExactBytes,
+};

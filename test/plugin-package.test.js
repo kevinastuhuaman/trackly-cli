@@ -7,7 +7,12 @@ const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { assertExactUnshadowedNamedImports, astSha256 } = require('../scripts/review-auth-contract-ast.js');
+const {
+  assertExactGitCheckout,
+  assertExactUnshadowedNamedImports,
+  astSha256,
+  sha256ExactBytes: reviewAuthSha256ExactBytes,
+} = require('../scripts/review-auth-contract-ast.js');
 
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
@@ -136,6 +141,36 @@ test('review-auth handler AST lock rejects conditional credential fallbacks', ()
     () => assert.equal(astSha256(conditionalFallback), reviewedDigest, 'reviewed credential result'),
     /reviewed credential result/,
   );
+});
+
+test('review-auth checkout and migration locks reject provenance drift', (t) => {
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-review-auth-git-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  childProcess.execFileSync('git', ['init', '--quiet', '--object-format=sha1', directory]);
+  childProcess.execFileSync('git', ['-C', directory, 'config', 'user.email', 'review-test@example.com']);
+  childProcess.execFileSync('git', ['-C', directory, 'config', 'user.name', 'Review Test']);
+  const fixture = path.join(directory, 'migration.sql');
+  fs.writeFileSync(fixture, 'SELECT 1;\n');
+  fs.writeFileSync(path.join(directory, '.gitignore'), 'node_modules/\nignored-auth.js\n');
+  childProcess.execFileSync('git', ['-C', directory, 'add', 'migration.sql', '.gitignore']);
+  childProcess.execFileSync('git', ['-C', directory, 'commit', '--quiet', '-m', 'fixture']);
+  const commit = childProcess.execFileSync('git', ['-C', directory, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  assert.doesNotThrow(() => assertExactGitCheckout(directory, commit));
+  assert.throws(() => assertExactGitCheckout(directory, '0'.repeat(40)), /exact deployed merge commit/);
+  const reviewedDigest = reviewAuthSha256ExactBytes(fs.readFileSync(fixture));
+  fs.writeFileSync(path.join(directory, 'untracked-auth.js'), 'module.exports = () => true;\n');
+  assert.throws(() => assertExactGitCheckout(directory, commit), /untracked source/);
+  fs.rmSync(path.join(directory, 'untracked-auth.js'));
+  fs.mkdirSync(path.join(directory, 'node_modules'));
+  fs.writeFileSync(path.join(directory, 'node_modules', 'dependency.js'), 'module.exports = true;\n');
+  assert.doesNotThrow(() => assertExactGitCheckout(directory, commit));
+  fs.writeFileSync(path.join(directory, 'ignored-auth.js'), 'module.exports = () => true;\n');
+  assert.throws(() => assertExactGitCheckout(directory, commit), /no ignored files outside dependency and hook install artifacts/);
+  fs.rmSync(path.join(directory, 'ignored-auth.js'));
+  childProcess.execFileSync('git', ['-C', directory, 'update-index', '--assume-unchanged', 'migration.sql']);
+  fs.writeFileSync(fixture, 'SELECT 2;\n');
+  assert.notEqual(reviewAuthSha256ExactBytes(fs.readFileSync(fixture)), reviewedDigest);
+  assert.throws(() => assertExactGitCheckout(directory, commit), /tracked bytes must match the pinned commit/);
 });
 
 test('review-auth import binding rejects aliases and lexical shadows', () => {
