@@ -4,9 +4,9 @@
 const assert = require('node:assert/strict');
 const babelParser = require('@babel/parser');
 const childProcess = require('node:child_process');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { assertExactUnshadowedNamedImports, astSha256 } = require('./review-auth-contract-ast.js');
 
 const backendDir = process.env.TRACKLY_BACKEND_DIR;
 if (!backendDir) {
@@ -138,19 +138,6 @@ const parseTypescript = (source, sourcePath) => {
   }
 };
 
-const canonicalAst = (value) => {
-  if (Array.isArray(value)) return value.map(canonicalAst);
-  if (!value || typeof value !== 'object') return value;
-  const result = {};
-  for (const key of Object.keys(value).sort()) {
-    if (['loc', 'start', 'end', 'leadingComments', 'trailingComments', 'innerComments', 'extra'].includes(key)) continue;
-    result[key] = canonicalAst(value[key]);
-  }
-  return result;
-};
-
-const astSha256 = (node) => crypto.createHash('sha256').update(JSON.stringify(canonicalAst(node))).digest('hex');
-
 const walk = (node, visitor, ancestors = []) => {
   if (!node || typeof node !== 'object') return;
   visitor(node, ancestors);
@@ -236,6 +223,20 @@ const identityGuardFunctions = namedFunctions(identityAst, 'isMcpReviewIdentityA
 assert.equal(bindingFunctions.length, 1, 'The active MCP binding helper must be unique');
 assert.equal(credentialFunctions.length, 1, 'The active MCP credential helper must be unique');
 assert.equal(identityGuardFunctions.length, 1, 'The active MCP identity guard must be unique');
+assert.equal(
+  astSha256(identityAst.program),
+  '0f109314959fca6fc229f99ce18cbb71582c468c60e907747fb058f61755a4e3',
+  'The complete MCP reviewer-identity module AST must preserve environment-only credentials and fail-closed identity binding',
+);
+assertExactUnshadowedNamedImports(authAst, '../services/mcp-review-identity.js', [
+  'authenticateMcpReviewCredentials',
+  'configuredMcpReviewBinding',
+  'isMcpReviewIdentityAllowed',
+]);
+assertExactUnshadowedNamedImports(providerAst, '../services/mcp-review-identity.js', [
+  'isConfiguredMcpReviewUserId',
+  'isMcpReviewIdentityAllowed',
+]);
 const activeBindingTokens = new Set();
 walk(bindingFunctions[0], (node) => {
   if (node.type === 'Identifier') activeBindingTokens.add(node.name);
@@ -267,6 +268,11 @@ const consentRoute = routeCall(authAst, '/mcp-consent');
 assert.equal(consentRoute.arguments[1]?.name, 'reviewEmailAlertLimiter', 'The consent route must apply the email alert limiter first');
 assert.equal(consentRoute.arguments[2]?.name, 'reviewCredentialLimiter', 'The consent route must apply the credential limiter second');
 const consentHandler = consentRoute.arguments[3];
+assert.equal(
+  astSha256(consentHandler),
+  '3c166ae60c37113bc6096b4cdea0b6178991b97947fccd011cf07fb41a2ad44a',
+  'The complete MCP consent handler AST must bind reviewer authentication directly to the reviewed credential result',
+);
 const consentPageRoute = routeCall(authAst, '/mcp-consent', 'get');
 const consentPageHandler = consentPageRoute.arguments[1];
 const consentText = [];

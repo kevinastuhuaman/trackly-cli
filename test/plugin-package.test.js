@@ -2,10 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const babelParser = require('@babel/parser');
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { assertExactUnshadowedNamedImports, astSha256 } = require('../scripts/review-auth-contract-ast.js');
 
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
@@ -108,6 +110,83 @@ test('review-auth verifier fails closed without a backend and skips only when ex
   const skipped = childProcess.spawnSync(process.execPath, [verifier, '--allow-missing-backend'], { encoding: 'utf8', env });
   assert.equal(skipped.status, 0, skipped.stderr);
   assert.match(skipped.stdout, /explicitly skipped without TRACKLY_BACKEND_DIR/);
+});
+
+test('review-auth AST locks reject function and module-scope credential fallbacks', () => {
+  const parse = (source) => babelParser.parse(source, { sourceType: 'module', plugins: ['typescript'] }).program;
+  const reviewed = parse("const password = process.env.MCP_REVIEW_LOGIN_PASSWORD;\nexport function authenticate(value: string) { return value === password; }");
+  const functionFallback = parse("const password = process.env.MCP_REVIEW_LOGIN_PASSWORD;\nexport function authenticate(value: string) { return value === (password || 'fallback'); }");
+  const moduleFallback = parse("const password = process.env.MCP_REVIEW_LOGIN_PASSWORD || 'fallback';\nexport function authenticate(value: string) { return value === password; }");
+  const reviewedDigest = astSha256(reviewed);
+  assert.notEqual(astSha256(functionFallback), reviewedDigest);
+  assert.notEqual(astSha256(moduleFallback), reviewedDigest);
+  assert.throws(
+    () => assert.equal(astSha256(moduleFallback), reviewedDigest, 'environment-only credential contract'),
+    /environment-only credential contract/,
+  );
+});
+
+test('review-auth handler AST lock rejects conditional credential fallbacks', () => {
+  const parseHandler = (source) => babelParser.parseExpression(source, { plugins: ['typescript'] });
+  const reviewed = parseHandler('(email, password) => { const binding = authenticateReviewer(email, password); return binding; }');
+  const conditionalFallback = parseHandler("(email, password) => { const binding = password === 'public-fallback' ? configuredBinding() : authenticateReviewer(email, password); return binding; }");
+  const reviewedDigest = astSha256(reviewed);
+  assert.notEqual(astSha256(conditionalFallback), reviewedDigest);
+  assert.throws(
+    () => assert.equal(astSha256(conditionalFallback), reviewedDigest, 'reviewed credential result'),
+    /reviewed credential result/,
+  );
+});
+
+test('review-auth import binding rejects aliases and lexical shadows', () => {
+  const parse = (source) => babelParser.parse(source, { sourceType: 'module', plugins: ['typescript'] });
+  const sourcePath = './reviewer.js';
+  const names = ['authenticateReviewer'];
+  assert.doesNotThrow(() => assertExactUnshadowedNamedImports(
+    parse("import { authenticateReviewer } from './reviewer.js';\nexport const run = () => authenticateReviewer();"),
+    sourcePath,
+    names,
+  ));
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { authenticateReviewer } from './reviewer.js';\nexport function run(authenticateReviewer: () => boolean) { return authenticateReviewer(); }"),
+      sourcePath,
+      names,
+    ),
+    /must resolve only to its reviewed import; rejected function binding or parameter shadow/,
+  );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { authenticateReviewer as check } from './reviewer.js';\nexport const run = () => check();"),
+      sourcePath,
+      names,
+    ),
+    /imports must not be aliased/,
+  );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { authenticateReviewer } from './reviewer.js';\nexport const runner = { run(authenticateReviewer: () => boolean) { return authenticateReviewer(); } };"),
+      sourcePath,
+      names,
+    ),
+    /must resolve only to its reviewed import; rejected method parameter shadow/,
+  );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import type { authenticateReviewer } from './reviewer.js';\nexport type Review = typeof authenticateReviewer;"),
+      sourcePath,
+      names,
+    ),
+    /must provide runtime helper bindings/,
+  );
+  assert.throws(
+    () => assertExactUnshadowedNamedImports(
+      parse("import { type authenticateReviewer } from './reviewer.js';\nexport type Review = typeof authenticateReviewer;"),
+      sourcePath,
+      names,
+    ),
+    /helpers must be runtime value imports/,
+  );
 });
 
 function filesBelow(directory) {
