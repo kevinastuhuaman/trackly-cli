@@ -10,6 +10,7 @@ const { registerApplyTools } = require('./apply-tools');
 const { configureMcpAnalytics, shutdownMcpAnalytics } = require('./analytics');
 
 const MCP_USER_AGENT = `trackly-mcp/${PACKAGE_VERSION}`;
+const MCP_SHUTDOWN_TIMEOUT_MS = 2_000;
 const MCP_MAINTENANCE_ERROR_CODE = -32002;
 const MCP_ACCESS_ERROR_CODE = -32003;
 const MCP_AUTH_ERROR_CODE = -32004;
@@ -601,6 +602,7 @@ function installMcpSignalHandlers(server, options = {}) {
   const output = options.output || process.stdout;
   const exit = options.exit || ((code) => process.exit(code));
   const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
+  const shutdownTimeoutMs = options.shutdownTimeoutMs ?? MCP_SHUTDOWN_TIMEOUT_MS;
   const closeServer = options.closeServer || (() => server.close());
   const reportInputError = options.reportInputError || ((error) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -629,12 +631,18 @@ function installMcpSignalHandlers(server, options = {}) {
   const terminate = (exitCode) => {
     if (terminating) return;
     terminating = true;
-    void Promise.resolve()
+    let shutdownTimer;
+    const shutdown = Promise.resolve()
       .then(() => closeServer())
       .catch(() => {})
       .then(() => shutdownAnalytics(server))
-      .catch(() => {})
+      .catch(() => {});
+    const deadline = new Promise((resolve) => {
+      shutdownTimer = setTimeout(resolve, shutdownTimeoutMs);
+    });
+    void Promise.race([shutdown, deadline])
       .finally(() => {
+        clearTimeout(shutdownTimer);
         // Keep signal and pipe handlers installed until teardown settles so a
         // repeated disconnect cannot restore Node's default early termination.
         cleanup();

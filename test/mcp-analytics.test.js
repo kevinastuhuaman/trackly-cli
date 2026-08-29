@@ -1335,6 +1335,34 @@ test('SIGTERM flushes analytics before exiting the MCP process', async () => {
   cleanup();
 });
 
+test('MCP shutdown exits by its deadline when server close never settles', async () => {
+  const signalTarget = new EventEmitter();
+  const input = new EventEmitter();
+  const output = new EventEmitter();
+  const exits = [];
+  const closeServer = test.mock.fn(async () => new Promise(() => {}));
+  const shutdownAnalytics = test.mock.fn(async () => {});
+
+  installMcpSignalHandlers({}, {
+    signalTarget,
+    input,
+    output,
+    closeServer,
+    shutdownAnalytics,
+    shutdownTimeoutMs: 5,
+    exit: (code) => exits.push(code),
+  });
+  signalTarget.emit('SIGTERM');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(closeServer.mock.callCount(), 1);
+  assert.equal(shutdownAnalytics.mock.callCount(), 0);
+  assert.deepEqual(exits, [143]);
+  assert.equal(signalTarget.listenerCount('SIGTERM'), 0);
+  assert.equal(input.listenerCount('end'), 0);
+  assert.equal(output.listenerCount('error'), 0);
+});
+
 test('stdin EOF closes the MCP server once and exits cleanly', async () => {
   const signalTarget = new EventEmitter();
   const input = new EventEmitter();
