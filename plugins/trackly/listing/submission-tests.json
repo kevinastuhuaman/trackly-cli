@@ -1,6 +1,14 @@
 {
   "reviewEnvironment": {
     "account": "A synthetic reviewer account with no MFA, OTP, or real applicant data",
+    "authentication": {
+      "mode": "direct_email_password",
+      "surface": "The Trackly MCP consent page exposes the dedicated plugin-review sign-in only for the production plugin resource",
+      "additionalSetupRequired": false,
+      "thirdPartyIdentityProviderRequired": false,
+      "credentialSource": "The exact unexpired demo email and password entered in the OpenAI Platform reviewer-access fields",
+      "requiredEvidence": "A clean external browser must complete consent, direct sign-in, authorization-code exchange, MCP initialization, tools/list, and one read-only fixture using the submitted credentials"
+    },
     "fixtures": "Stable trackly-controlled jobs covering search, saved-job choice, review-ready filling, resume manual upload, and interrupted-work recovery",
     "submissionPolicy": "No fixture may submit an application or contact a real employer",
     "portalPositiveCaseIds": [

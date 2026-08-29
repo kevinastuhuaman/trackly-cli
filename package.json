@@ -10,6 +10,7 @@
     "test": "node --test",
     "test:contract-fixture": "node --test test/apply-contract.test.js",
     "test:hosted-contract": "node scripts/verify-hosted-contract.js",
+    "test:review-auth-contract": "node scripts/verify-review-auth-contract.js",
     "security:audit": "node scripts/verify-audit-exceptions.js"
   },
   "files": [

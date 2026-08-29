@@ -92,6 +92,24 @@ function json(relativePath) {
   return JSON.parse(read(relativePath));
 }
 
+test('review-auth and hosted Apply contracts remain independently targetable', () => {
+  const scripts = json('package.json').scripts;
+  assert.equal(scripts['test:hosted-contract'], 'node scripts/verify-hosted-contract.js');
+  assert.equal(scripts['test:review-auth-contract'], 'node scripts/verify-review-auth-contract.js');
+});
+
+test('review-auth verifier fails closed without a backend and skips only when explicitly allowed', () => {
+  const verifier = path.join(ROOT, 'scripts', 'verify-review-auth-contract.js');
+  const env = { ...process.env };
+  delete env.TRACKLY_BACKEND_DIR;
+  const denied = childProcess.spawnSync(process.execPath, [verifier], { encoding: 'utf8', env });
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /TRACKLY_BACKEND_DIR is required/);
+  const skipped = childProcess.spawnSync(process.execPath, [verifier, '--allow-missing-backend'], { encoding: 'utf8', env });
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.match(skipped.stdout, /explicitly skipped without TRACKLY_BACKEND_DIR/);
+});
+
 function filesBelow(directory) {
   const files = [];
   const visit = (current) => {
@@ -3805,8 +3823,21 @@ test('submission fixtures cover six internal cases and the exact five-case porta
     'every portal positive case must resolve to a reviewed internal fixture',
   );
   assert.match(fixtures.reviewEnvironment.account, /synthetic reviewer account/i);
+  assert.deepEqual(fixtures.reviewEnvironment.authentication, {
+    mode: 'direct_email_password',
+    surface: 'The Trackly MCP consent page exposes the dedicated plugin-review sign-in only for the production plugin resource',
+    additionalSetupRequired: false,
+    thirdPartyIdentityProviderRequired: false,
+    credentialSource: 'The exact unexpired demo email and password entered in the OpenAI Platform reviewer-access fields',
+    requiredEvidence: 'A clean external browser must complete consent, direct sign-in, authorization-code exchange, MCP initialization, tools/list, and one read-only fixture using the submitted credentials',
+  });
   assert.match(fixtures.reviewEnvironment.submissionPolicy, /No fixture may submit/);
   assert.doesNotMatch(JSON.stringify(fixtures), /\b(?:Kevin|Astuhuaman)\b/i, 'submission fixtures must not leak a real reviewer identity');
+  assert.doesNotMatch(
+    JSON.stringify(fixtures.reviewEnvironment.authentication),
+    /google|apple|mfa|otp|verification code/i,
+    'review authentication must not depend on a third-party provider or verification challenge',
+  );
   for (const item of fixtures.positive) {
     assert.ok(item.fixture);
     assert.ok(item.expectedResultShape.length > 0);
