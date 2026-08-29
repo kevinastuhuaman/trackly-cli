@@ -92,6 +92,12 @@ function json(relativePath) {
   return JSON.parse(read(relativePath));
 }
 
+test('review-auth and hosted Apply contracts remain independently targetable', () => {
+  const scripts = json('package.json').scripts;
+  assert.equal(scripts['test:hosted-contract'], 'node scripts/verify-hosted-contract.js');
+  assert.equal(scripts['test:review-auth-contract'], 'node scripts/verify-review-auth-contract.js');
+});
+
 function filesBelow(directory) {
   const files = [];
   const visit = (current) => {
