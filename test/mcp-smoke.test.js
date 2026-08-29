@@ -409,11 +409,9 @@ test('trackly mcp treats a closed client output pipe as a clean disconnect', { t
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
   });
 
-  // Let cmdMcp install its lifecycle handlers, then reproduce a client that
-  // drops the response pipe while leaving a request in flight.
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  child.stdout.destroy();
-  const exited = once(child, 'exit');
+  // Complete initialization first so this test does not depend on a startup
+  // delay, then reproduce a client that drops its response pipe mid-session.
+  const initialized = once(child.stdout, 'data');
   child.stdin.write(`${JSON.stringify({
     jsonrpc: '2.0',
     id: 1,
@@ -423,6 +421,18 @@ test('trackly mcp treats a closed client output pipe as a clean disconnect', { t
       capabilities: {},
       clientInfo: { name: 'epipe-test', version: '1.0.0' },
     },
+  })}\n`);
+  await initialized;
+
+  child.stdout.destroy();
+  const exited = once(child, 'exit');
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'notifications/initialized',
+  })}\n${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/list',
   })}\n`);
   const [code, signal] = await exited;
 
