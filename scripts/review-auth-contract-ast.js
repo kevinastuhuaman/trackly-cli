@@ -39,9 +39,9 @@ const assertExactGitCheckout = (root, expectedCommit) => {
     'The reviewed backend checkout must be the exact deployed merge commit',
   );
   assert.equal(
-    runGit(['status', '--porcelain=v1', '--untracked-files=no'], 'inspect tracked worktree state'),
+    runGit(['status', '--porcelain=v1', '--untracked-files=all'], 'inspect worktree state'),
     '',
-    'The reviewed backend checkout must have no tracked modifications',
+    'The reviewed backend checkout must have no tracked modifications or untracked source',
   );
 };
 

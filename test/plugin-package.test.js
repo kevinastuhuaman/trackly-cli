@@ -157,6 +157,9 @@ test('review-auth checkout and migration locks reject provenance drift', (t) => 
   assert.doesNotThrow(() => assertExactGitCheckout(directory, commit));
   assert.throws(() => assertExactGitCheckout(directory, '0'.repeat(40)), /exact deployed merge commit/);
   const reviewedDigest = reviewAuthSha256ExactBytes(fs.readFileSync(fixture));
+  fs.writeFileSync(path.join(directory, 'untracked-auth.js'), 'module.exports = () => true;\n');
+  assert.throws(() => assertExactGitCheckout(directory, commit), /untracked source/);
+  fs.rmSync(path.join(directory, 'untracked-auth.js'));
   fs.writeFileSync(fixture, 'SELECT 2;\n');
   assert.notEqual(reviewAuthSha256ExactBytes(fs.readFileSync(fixture)), reviewedDigest);
   assert.throws(() => assertExactGitCheckout(directory, commit), /no tracked modifications/);
