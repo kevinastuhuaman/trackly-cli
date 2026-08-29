@@ -597,31 +597,66 @@ async function startMcpServer(options = {}) {
 
 function installMcpSignalHandlers(server, options = {}) {
   const signalTarget = options.signalTarget || process;
+  const input = options.input || process.stdin;
+  const output = options.output || process.stdout;
   const exit = options.exit || ((code) => process.exit(code));
   const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
+  const closeServer = options.closeServer || (() => server.close());
   let terminating = false;
   const handlers = new Map();
+  let inputEndHandler;
+  let inputCloseHandler;
+  let outputErrorHandler;
   const cleanup = () => {
     for (const [signal, handler] of handlers) {
       signalTarget.removeListener(signal, handler);
     }
     handlers.clear();
+    if (inputEndHandler) input.removeListener('end', inputEndHandler);
+    if (inputCloseHandler) input.removeListener('close', inputCloseHandler);
+    if (outputErrorHandler) output.removeListener('error', outputErrorHandler);
+  };
+  const terminate = (exitCode) => {
+    if (terminating) return;
+    terminating = true;
+    cleanup();
+    void Promise.resolve()
+      .then(() => closeServer())
+      .catch(() => {})
+      .then(() => shutdownAnalytics(server))
+      .catch(() => {})
+      .finally(() => exit(exitCode));
   };
   for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
-    const handler = () => {
-      if (terminating) return;
-      terminating = true;
-      void Promise.resolve()
-        .then(() => shutdownAnalytics(server))
-        .catch(() => {})
-        .finally(() => {
-          cleanup();
-          exit(exitCode);
-        });
-    };
+    const handler = () => terminate(exitCode);
     handlers.set(signal, handler);
     signalTarget.on(signal, handler);
   }
+
+  // A stdio client can disappear without sending a signal. Close the MCP
+  // transport explicitly so its onclose hooks run instead of relying on the
+  // Node event loop to happen to become empty.
+  inputEndHandler = () => terminate(0);
+  inputCloseHandler = () => terminate(0);
+  input.on('end', inputEndHandler);
+  input.on('close', inputCloseHandler);
+
+  // A response racing with client teardown can reach a closed stdout pipe.
+  // Treat only EPIPE as a normal disconnect; preserve fail-fast behavior for
+  // every unrelated stream failure.
+  outputErrorHandler = (error) => {
+    if (error?.code === 'EPIPE') {
+      terminate(0);
+      return;
+    }
+    cleanup();
+    throw error;
+  };
+  output.on('error', outputErrorHandler);
+
+  // EOF may arrive while startMcpServer is awaiting transport connection,
+  // before these process-level handlers can be installed.
+  if (input.readableEnded || input.destroyed) terminate(0);
   return cleanup;
 }
 

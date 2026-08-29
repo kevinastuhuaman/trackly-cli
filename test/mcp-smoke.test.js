@@ -358,3 +358,75 @@ test('trackly mcp starts and stays attached to stdio', async (t) => {
 
   await assert.doesNotReject(startup);
 });
+
+test('trackly mcp exits cleanly when its client closes stdin', { timeout: 5_000 }, async (t) => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-mcp-eof-test-'));
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  const child = spawn(process.execPath, [BIN_PATH, 'mcp'], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      TRACKLY_MCP_ANALYTICS_DISABLED: '1',
+      TRACKLY_CONFIG_DIR: configDir,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+  child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  });
+
+  const exited = once(child, 'exit');
+  child.stdin.end();
+  const [code, signal] = await exited;
+
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+  assert.equal(stdout, '');
+  assert.equal(stderr, '');
+});
+
+test('trackly mcp treats a closed client output pipe as a clean disconnect', { timeout: 5_000 }, async (t) => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-mcp-epipe-test-'));
+  t.after(() => fs.rmSync(configDir, { recursive: true, force: true }));
+
+  const child = spawn(process.execPath, [BIN_PATH, 'mcp'], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      TRACKLY_MCP_ANALYTICS_DISABLED: '1',
+      TRACKLY_CONFIG_DIR: configDir,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  });
+
+  // Let cmdMcp install its lifecycle handlers, then reproduce a client that
+  // drops the response pipe while leaving a request in flight.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  child.stdout.destroy();
+  const exited = once(child, 'exit');
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'epipe-test', version: '1.0.0' },
+    },
+  })}\n`);
+  const [code, signal] = await exited;
+
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+  assert.equal(stderr, '');
+});
