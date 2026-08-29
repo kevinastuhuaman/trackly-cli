@@ -160,9 +160,10 @@ test('review-auth checkout and migration locks reject provenance drift', (t) => 
   fs.writeFileSync(path.join(directory, 'untracked-auth.js'), 'module.exports = () => true;\n');
   assert.throws(() => assertExactGitCheckout(directory, commit), /untracked source/);
   fs.rmSync(path.join(directory, 'untracked-auth.js'));
+  childProcess.execFileSync('git', ['-C', directory, 'update-index', '--assume-unchanged', 'migration.sql']);
   fs.writeFileSync(fixture, 'SELECT 2;\n');
   assert.notEqual(reviewAuthSha256ExactBytes(fs.readFileSync(fixture)), reviewedDigest);
-  assert.throws(() => assertExactGitCheckout(directory, commit), /no tracked modifications/);
+  assert.throws(() => assertExactGitCheckout(directory, commit), /tracked bytes must match the pinned commit/);
 });
 
 test('review-auth import binding rejects aliases and lexical shadows', () => {
