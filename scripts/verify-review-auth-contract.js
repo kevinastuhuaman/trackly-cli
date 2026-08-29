@@ -359,13 +359,22 @@ try {
   fs.unlinkSync(archivePath);
 
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const installEnv = { ...process.env, NODE_ENV: 'development', npm_config_omit: '' };
   const install = childProcess.spawnSync(
     npmCommand,
-    ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
-    { cwd: isolatedBackendRoot, encoding: 'utf8', timeout: 600_000 },
+    ['ci', '--ignore-scripts', '--include=dev', '--no-audit', '--no-fund'],
+    { cwd: isolatedBackendRoot, encoding: 'utf8', env: installEnv, timeout: 600_000 },
   );
   assert.ifError(install.error);
-  assert.equal(install.status, 0, `The isolated pinned backend dependency install must succeed (exit ${install.status ?? 'unknown'})`);
+  const installFailure = `${install.stderr || ''}\n${install.stdout || ''}`
+    .replace(/(_authToken=)[^\s]+/gi, '$1[redacted]')
+    .trim()
+    .slice(-4000);
+  assert.equal(
+    install.status,
+    0,
+    `The isolated pinned backend dependency install must succeed (exit ${install.status ?? 'unknown'}): ${installFailure}`,
+  );
   let vitestPackage;
   try {
     vitestPackage = require.resolve('vitest/package.json', { paths: [isolatedBackendRoot] });
