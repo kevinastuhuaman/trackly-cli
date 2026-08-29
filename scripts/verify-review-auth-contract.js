@@ -99,20 +99,23 @@ const migrationRouteAst = parseTypescript(migrationRoute, 'src/routes/run-migrat
 const consentTests = activeTestTitles(parseTypescript(authTests, 'src/routes/__tests__/mcp-consent.test.ts'));
 const oauthTests = activeTestTitles(parseTypescript(providerTests, 'src/mcp/__tests__/mcp-oauth-provider.test.ts'));
 
-for (const envName of [
-  'MCP_REVIEW_LOGIN_EMAIL',
-  'MCP_REVIEW_LOGIN_PASSWORD',
-  'MCP_REVIEW_LOGIN_USER_ID',
-  'MCP_REVIEW_LOGIN_AUTH_EPOCH',
-]) {
-  assert.match(identity, new RegExp(`\\b${envName}\\b`), `${envName} must be read by the dedicated binding helper`);
-}
 const bindingFunctions = namedFunctions(identityAst, 'configuredMcpReviewBinding');
 const credentialFunctions = namedFunctions(identityAst, 'authenticateMcpReviewCredentials');
 const identityGuardFunctions = namedFunctions(identityAst, 'isMcpReviewIdentityAllowed');
 assert.equal(bindingFunctions.length, 1, 'The active MCP binding helper must be unique');
 assert.equal(credentialFunctions.length, 1, 'The active MCP credential helper must be unique');
 assert.equal(identityGuardFunctions.length, 1, 'The active MCP identity guard must be unique');
+const activeBindingTokens = new Set();
+walk(bindingFunctions[0], (node) => {
+  if (node.type === 'Identifier') activeBindingTokens.add(node.name);
+  if (node.type === 'StringLiteral') activeBindingTokens.add(node.value);
+});
+for (const envName of [
+  'MCP_REVIEW_LOGIN_EMAIL',
+  'MCP_REVIEW_LOGIN_PASSWORD',
+  'MCP_REVIEW_LOGIN_USER_ID',
+  'MCP_REVIEW_LOGIN_AUTH_EPOCH',
+]) assert.ok(activeBindingTokens.has(envName), `${envName} must be read by the active dedicated binding helper`);
 assert.equal(callsBelow(bindingFunctions[0], 'isConfiguredReviewUserId').length, 1, 'MCP and App Store review identities must remain distinct');
 assert.equal(callsBelow(credentialFunctions[0], 'crypto.timingSafeEqual').length, 1, 'MCP reviewer passwords must use constant-time comparison');
 for (const identifier of ['is_test_account', 'email', 'resource', 'pluginResource', 'auth_epoch']) {
