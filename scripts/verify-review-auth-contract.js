@@ -75,6 +75,26 @@ const namedFunctions = (root, name) => {
   return functions;
 };
 
+const namedMethods = (root, name) => {
+  const methods = [];
+  walk(root, (node) => {
+    if (node.type === 'ClassMethod' && !node.computed && node.key?.name === name) methods.push(node);
+  });
+  return methods;
+};
+
+const compactSource = (source, node) => source.slice(node.start, node.end).replace(/\s+/g, ' ').trim();
+
+const exactCallArguments = (source, root, name, expectedArguments) => {
+  const calls = callsBelow(root, name);
+  assert.equal(calls.length, 1, `The active ${name} call must be unique in its security boundary`);
+  assert.deepEqual(
+    calls[0].arguments.map((argument) => compactSource(source, argument)),
+    expectedArguments,
+    `The active ${name} call must preserve its reviewed argument binding`,
+  );
+};
+
 const routeCall = (root, routePath) => {
   const matches = callsBelow(root, 'router.post').filter((call) => call.arguments[0]?.value === routePath);
   assert.equal(matches.length, 1, `${routePath} must have exactly one active router.post registration`);
@@ -116,28 +136,46 @@ for (const envName of [
   'MCP_REVIEW_LOGIN_USER_ID',
   'MCP_REVIEW_LOGIN_AUTH_EPOCH',
 ]) assert.ok(activeBindingTokens.has(envName), `${envName} must be read by the active dedicated binding helper`);
+const activeBindingMembers = new Set();
+walk(bindingFunctions[0], (node) => {
+  if (node.type === 'MemberExpression') activeBindingMembers.add(calleeName(node));
+});
+assert.ok(activeBindingMembers.has('process.env.MCP_REVIEW_LOGIN_EMAIL'), 'The active binding helper must read MCP_REVIEW_LOGIN_EMAIL');
+assert.ok(activeBindingMembers.has('process.env.MCP_REVIEW_LOGIN_PASSWORD'), 'The active binding helper must read MCP_REVIEW_LOGIN_PASSWORD');
+exactCallArguments(identity, bindingFunctions[0], 'configuredPositiveInteger', ["'MCP_REVIEW_LOGIN_USER_ID'"]);
+exactCallArguments(identity, bindingFunctions[0], 'parseAuthEpochSetting', ['process.env.MCP_REVIEW_LOGIN_AUTH_EPOCH']);
 assert.equal(callsBelow(bindingFunctions[0], 'isConfiguredReviewUserId').length, 1, 'MCP and App Store review identities must remain distinct');
 assert.equal(callsBelow(credentialFunctions[0], 'crypto.timingSafeEqual').length, 1, 'MCP reviewer passwords must use constant-time comparison');
-for (const identifier of ['is_test_account', 'email', 'resource', 'pluginResource', 'auth_epoch']) {
-  let present = false;
-  walk(identityGuardFunctions[0], (node) => { if (node.type === 'Identifier' && node.name === identifier) present = true; });
-  assert.ok(present, `The active MCP identity guard must bind ${identifier}`);
-}
+const identityGuardStatements = identityGuardFunctions[0].body.body.map((statement) => compactSource(identity, statement));
+assert.ok(
+  identityGuardStatements.includes('if (!binding || resource !== pluginResource) return false;'),
+  'The active MCP identity guard must reject missing bindings and non-plugin resources',
+);
+assert.ok(
+  identityGuardStatements.includes('return userId === binding.userId && email === binding.email && authEpoch === binding.authEpoch && identity.is_test_account === true;'),
+  'The active MCP identity guard must conjunctively bind user ID, email, epoch, and synthetic-account status',
+);
 
 assert.match(auth.replace(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g, ''), /name="provider" value="mcp_review"/, 'The consent page must expose direct plugin-review sign-in');
 const consentRoute = routeCall(authAst, '/mcp-consent');
 assert.equal(consentRoute.arguments[1]?.name, 'reviewEmailAlertLimiter', 'The consent route must apply the email alert limiter first');
 assert.equal(consentRoute.arguments[2]?.name, 'reviewCredentialLimiter', 'The consent route must apply the credential limiter second');
 const consentHandler = consentRoute.arguments[3];
-for (const call of ['authenticateMcpReviewCredentials', 'isMcpReviewIdentityAllowed', 'generateMcpAuthCode']) {
-  assert.equal(callsBelow(consentHandler, call).length, 1, `The active consent handler must call ${call} exactly once`);
-}
+exactCallArguments(auth, consentHandler, 'authenticateMcpReviewCredentials', ['email', 'password']);
+exactCallArguments(auth, consentHandler, 'isMcpReviewIdentityAllowed', ['candidate', 'pending.rows[0].resource', 'MCP_PLUGIN_RESOURCE']);
+exactCallArguments(auth, consentHandler, 'generateMcpAuthCode', ['mcpReviewUser.id', 'pending_id', 'redirect_uri', 'state', 'res']);
 
-assert.ok(
-  callsBelow(providerAst, 'isMcpReviewIdentityAllowed').length >= 3,
-  'Authorization-code exchange, refresh, and access-token verification must all revalidate the MCP reviewer binding',
-);
-assert.ok(callsBelow(providerAst, 'isConfiguredMcpReviewUserId').length >= 3, 'Token validation must recognize the dedicated MCP reviewer identity');
+const exchangeMethods = namedMethods(providerAst, 'exchangeAuthorizationCode');
+const refreshMethods = namedMethods(providerAst, 'exchangeRefreshToken');
+const accessMethods = namedMethods(providerAst, 'verifyAccessToken');
+assert.equal(exchangeMethods.length, 1, 'The active authorization-code exchange method must be unique');
+assert.equal(refreshMethods.length, 1, 'The active refresh-token exchange method must be unique');
+assert.equal(accessMethods.length, 1, 'The active access-token verification method must be unique');
+assert.equal(callsBelow(exchangeMethods[0], 'isMcpReviewIdentityAllowed').length, 1, 'Authorization-code exchange must revalidate the MCP reviewer binding');
+assert.equal(callsBelow(refreshMethods[0], 'isMcpReviewIdentityAllowed').length, 1, 'Refresh-token exchange must revalidate the MCP reviewer binding');
+assert.equal(callsBelow(accessMethods[0], 'isMcpReviewIdentityAllowed').length, 1, 'Access-token verification must revalidate the MCP reviewer binding');
+assert.ok(callsBelow(refreshMethods[0], 'isConfiguredMcpReviewUserId').length >= 1, 'Refresh-token exchange must recognize the dedicated MCP reviewer identity');
+assert.ok(callsBelow(accessMethods[0], 'isConfiguredMcpReviewUserId').length >= 1, 'Access-token verification must recognize the dedicated MCP reviewer identity');
 
 assert.match(reviewerFixture, /openai-review@usetrackly\.app/, 'The reviewer login must have a dedicated synthetic identity');
 assert.match(reviewerFixture, /is_test_account IS DISTINCT FROM TRUE/, 'The fixture must reject non-synthetic identity reuse');
