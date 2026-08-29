@@ -7,7 +7,12 @@ const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { assertExactUnshadowedNamedImports, astSha256 } = require('../scripts/review-auth-contract-ast.js');
+const {
+  assertExactGitCheckout,
+  assertExactUnshadowedNamedImports,
+  astSha256,
+  sha256ExactBytes: reviewAuthSha256ExactBytes,
+} = require('../scripts/review-auth-contract-ast.js');
 
 const ROOT = path.join(__dirname, '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'trackly');
@@ -136,6 +141,25 @@ test('review-auth handler AST lock rejects conditional credential fallbacks', ()
     () => assert.equal(astSha256(conditionalFallback), reviewedDigest, 'reviewed credential result'),
     /reviewed credential result/,
   );
+});
+
+test('review-auth checkout and migration locks reject provenance drift', (t) => {
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'trackly-review-auth-git-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  childProcess.execFileSync('git', ['init', '--quiet', directory]);
+  childProcess.execFileSync('git', ['-C', directory, 'config', 'user.email', 'review-test@example.com']);
+  childProcess.execFileSync('git', ['-C', directory, 'config', 'user.name', 'Review Test']);
+  const fixture = path.join(directory, 'migration.sql');
+  fs.writeFileSync(fixture, 'SELECT 1;\n');
+  childProcess.execFileSync('git', ['-C', directory, 'add', 'migration.sql']);
+  childProcess.execFileSync('git', ['-C', directory, 'commit', '--quiet', '-m', 'fixture']);
+  const commit = childProcess.execFileSync('git', ['-C', directory, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  assert.doesNotThrow(() => assertExactGitCheckout(directory, commit));
+  assert.throws(() => assertExactGitCheckout(directory, '0'.repeat(40)), /exact deployed merge commit/);
+  const reviewedDigest = reviewAuthSha256ExactBytes(fs.readFileSync(fixture));
+  fs.writeFileSync(fixture, 'SELECT 2;\n');
+  assert.notEqual(reviewAuthSha256ExactBytes(fs.readFileSync(fixture)), reviewedDigest);
+  assert.throws(() => assertExactGitCheckout(directory, commit), /no tracked modifications/);
 });
 
 test('review-auth import binding rejects aliases and lexical shadows', () => {

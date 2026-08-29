@@ -6,7 +6,12 @@ const babelParser = require('@babel/parser');
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { assertExactUnshadowedNamedImports, astSha256 } = require('./review-auth-contract-ast.js');
+const {
+  assertExactGitCheckout,
+  assertExactUnshadowedNamedImports,
+  astSha256,
+  sha256ExactBytes,
+} = require('./review-auth-contract-ast.js');
 
 const backendDir = process.env.TRACKLY_BACKEND_DIR;
 if (!backendDir) {
@@ -18,6 +23,8 @@ if (!backendDir) {
 }
 
 const backendRoot = path.resolve(backendDir);
+const EXPECTED_DEPLOYED_BACKEND_COMMIT = '2306d3907409b842f963ac2786c5378c15c7b650';
+assertExactGitCheckout(backendRoot, EXPECTED_DEPLOYED_BACKEND_COMMIT);
 const read = (relativePath) => {
   const sourcePath = path.join(backendRoot, relativePath);
   assert.ok(fs.existsSync(sourcePath), `Missing backend reviewer-auth source: ${sourcePath}`);
@@ -128,6 +135,11 @@ const stripPostgresComments = (source) => {
 };
 
 const activeReviewerFixture = stripPostgresComments(reviewerFixture);
+assert.equal(
+  sha256ExactBytes(reviewerFixture),
+  '73d71283e6e5e59b8a93d4d8ccd245a96578b79f586c81a35b6f654be4ea611f',
+  'Migration 503 must preserve the complete reviewed synthetic-account seeding transaction',
+);
 assert.match(stripPostgresComments("SELECT '--', '/*'; -- removed\nSELECT $$-- kept /* kept */$$; /* outer /* nested */ done */ SELECT 1;"), /'--', '\/\*'; \nSELECT \$\$-- kept \/\* kept \*\/\$\$;\s+SELECT 1;/);
 
 const parseTypescript = (source, sourcePath) => {
@@ -275,6 +287,11 @@ assert.equal(
 );
 const consentPageRoute = routeCall(authAst, '/mcp-consent', 'get');
 const consentPageHandler = consentPageRoute.arguments[1];
+assert.equal(
+  astSha256(consentPageHandler),
+  '71c5945b0c31189bdf95373a03dec3888b0e1c55a3d2110fb9f081c9ed6f338b',
+  'The complete MCP consent page handler must render the reviewed direct reviewer sign-in form',
+);
 const consentText = [];
 walk(consentPageHandler, (node) => {
   if (node.type === 'StringLiteral') consentText.push(node.value);

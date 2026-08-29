@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 
 const OMITTED_AST_KEYS = new Set([
@@ -22,6 +23,27 @@ const astSha256 = (node) => crypto
   .createHash('sha256')
   .update(JSON.stringify(canonicalAst(node)))
   .digest('hex');
+
+const sha256ExactBytes = (value) => crypto.createHash('sha256').update(value).digest('hex');
+
+const assertExactGitCheckout = (root, expectedCommit) => {
+  const runGit = (args, label) => {
+    const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, `Unable to ${label} for reviewed backend checkout: ${result.stderr.trim()}`);
+    return result.stdout.trim();
+  };
+  assert.equal(
+    runGit(['rev-parse', 'HEAD'], 'resolve HEAD'),
+    expectedCommit,
+    'The reviewed backend checkout must be the exact deployed merge commit',
+  );
+  assert.equal(
+    runGit(['status', '--porcelain=v1', '--untracked-files=no'], 'inspect tracked worktree state'),
+    '',
+    'The reviewed backend checkout must have no tracked modifications',
+  );
+};
 
 const boundNames = (pattern, names = []) => {
   if (!pattern || typeof pattern !== 'object') return names;
@@ -89,4 +111,10 @@ const assertExactUnshadowedNamedImports = (root, sourcePath, expectedNames) => {
   });
 };
 
-module.exports = { assertExactUnshadowedNamedImports, astSha256, canonicalAst };
+module.exports = {
+  assertExactGitCheckout,
+  assertExactUnshadowedNamedImports,
+  astSha256,
+  canonicalAst,
+  sha256ExactBytes,
+};
