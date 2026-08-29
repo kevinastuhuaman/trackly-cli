@@ -177,9 +177,9 @@ assert.equal(callsBelow(accessMethods[0], 'isMcpReviewIdentityAllowed').length, 
 assert.ok(callsBelow(refreshMethods[0], 'isConfiguredMcpReviewUserId').length >= 1, 'Refresh-token exchange must recognize the dedicated MCP reviewer identity');
 assert.ok(callsBelow(accessMethods[0], 'isConfiguredMcpReviewUserId').length >= 1, 'Access-token verification must recognize the dedicated MCP reviewer identity');
 
-assert.match(reviewerFixture, /openai-review@usetrackly\.app/, 'The reviewer login must have a dedicated synthetic identity');
-assert.match(reviewerFixture, /is_test_account IS DISTINCT FROM TRUE/, 'The fixture must reject non-synthetic identity reuse');
-assert.match(reviewerFixture, /account_deletion_requests/, 'The fixture must reject deleted identity reuse');
+assert.match(activeReviewerFixture, /openai-review@usetrackly\.app/, 'The reviewer login must have a dedicated synthetic identity');
+assert.match(activeReviewerFixture, /is_test_account IS DISTINCT FROM TRUE/, 'The fixture must reject non-synthetic identity reuse');
+assert.match(activeReviewerFixture, /account_deletion_requests/, 'The fixture must reject deleted identity reuse');
 assert.doesNotMatch(
   activeReviewerFixture,
   /\b(?:MCP_REVIEW_LOGIN_PASSWORD|OPENAI_REVIEW_PASSWORD|REVIEW_LOGIN_PASSWORD|REVIEW_PASSWORD|password(?:_hash|_digest)?|passwd|passphrase|pwd|credential_secret|client_secret)\b/i,
