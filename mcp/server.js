@@ -623,13 +623,17 @@ function installMcpSignalHandlers(server, options = {}) {
   const terminate = (exitCode) => {
     if (terminating) return;
     terminating = true;
-    cleanup();
     void Promise.resolve()
       .then(() => closeServer())
       .catch(() => {})
       .then(() => shutdownAnalytics(server))
       .catch(() => {})
-      .finally(() => exit(exitCode));
+      .finally(() => {
+        // Keep signal and pipe handlers installed until teardown settles so a
+        // repeated disconnect cannot restore Node's default early termination.
+        cleanup();
+        exit(exitCode);
+      });
   };
   for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
     const handler = () => terminate(exitCode);

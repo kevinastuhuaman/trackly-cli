@@ -1325,11 +1325,13 @@ test('SIGTERM flushes analytics before exiting the MCP process', async () => {
   assert.equal(closeServer.mock.callCount(), 1);
   assert.equal(shutdownAnalytics.mock.callCount(), 1);
   assert.deepEqual(exits, []);
+  assert.equal(signalTarget.listenerCount('SIGTERM'), 1);
 
   finishShutdown();
   await shutdownFinished;
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(exits, [143]);
+  assert.equal(signalTarget.listenerCount('SIGTERM'), 0);
   cleanup();
 });
 
