@@ -602,6 +602,10 @@ function installMcpSignalHandlers(server, options = {}) {
   const exit = options.exit || ((code) => process.exit(code));
   const shutdownAnalytics = options.shutdownAnalytics || shutdownMcpAnalytics;
   const closeServer = options.closeServer || (() => server.close());
+  const reportInputError = options.reportInputError || ((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`MCP stdin error: ${message}\n`);
+  });
   const reportOutputError = options.reportOutputError || ((error) => {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`MCP stdout error: ${message}\n`);
@@ -610,6 +614,7 @@ function installMcpSignalHandlers(server, options = {}) {
   const handlers = new Map();
   let inputEndHandler;
   let inputCloseHandler;
+  let inputErrorHandler;
   let outputErrorHandler;
   const cleanup = () => {
     for (const [signal, handler] of handlers) {
@@ -618,6 +623,7 @@ function installMcpSignalHandlers(server, options = {}) {
     handlers.clear();
     if (inputEndHandler) input.removeListener('end', inputEndHandler);
     if (inputCloseHandler) input.removeListener('close', inputCloseHandler);
+    if (inputErrorHandler) input.removeListener('error', inputErrorHandler);
     if (outputErrorHandler) output.removeListener('error', outputErrorHandler);
   };
   const terminate = (exitCode) => {
@@ -646,8 +652,13 @@ function installMcpSignalHandlers(server, options = {}) {
   // Node event loop to happen to become empty.
   inputEndHandler = () => terminate(0);
   inputCloseHandler = () => terminate(0);
+  inputErrorHandler = (error) => {
+    reportInputError(error);
+    terminate(1);
+  };
   input.on('end', inputEndHandler);
   input.on('close', inputCloseHandler);
+  input.on('error', inputErrorHandler);
 
   // A response racing with client teardown can reach a closed stdout pipe.
   // Treat only EPIPE as a normal disconnect; preserve fail-fast behavior for
@@ -664,7 +675,11 @@ function installMcpSignalHandlers(server, options = {}) {
 
   // A pipe may close while startMcpServer is awaiting transport connection,
   // before these process-level handlers can be installed.
-  if (input.readableEnded || input.destroyed || output.writableEnded || output.destroyed) {
+  if (input.errored) {
+    inputErrorHandler(input.errored);
+  } else if (output.errored) {
+    outputErrorHandler(output.errored);
+  } else if (input.readableEnded || input.destroyed || output.writableEnded || output.destroyed) {
     terminate(0);
   }
   return cleanup;
