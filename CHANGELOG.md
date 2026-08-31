@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-28
+
+### Added
+
+- Published MCP contract 3.8.0 access knowledge: frozen `proposedWave`
+  receipts, `nextAction: access_review`, and hash-bound
+  `accessReviewApproval` on `trackly_advance_apply_execution`.
+- Added `trackly_list_apply_access_deferments`, `trackly_defer_apply_access`,
+  and `trackly_clear_apply_access_deferment` so agents can persist or clear
+  job/company deferments from a Trackly `jobId` without submitting URLs or
+  raw chat.
+- Updated Trackly Apply skill 4.8.0 and protocol 3.7.0 so historical OPEN
+  can schedule work but a fresh live probe remains required before form
+  filling.
+
 ### Fixed
 
 - `trackly mcp` now closes its server and flushes bounded analytics when the

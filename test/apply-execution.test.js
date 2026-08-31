@@ -35,6 +35,9 @@ const executionTools = [
   'trackly_recover_exact_apply_members',
   'trackly_list_apply_review_handoffs',
   'trackly_claim_apply_review_handoff',
+  'trackly_list_apply_access_deferments',
+  'trackly_defer_apply_access',
+  'trackly_clear_apply_access_deferment',
 ];
 
 function registerRuntimeTools(apiResponse = { ok: true }) {
@@ -66,8 +69,8 @@ function registerRuntimeTools(apiResponse = { ok: true }) {
   return { registrations, calls };
 }
 
-test('protocol 3.6 publishes all accessible execution and recovery tools', () => {
-  assert.equal(contract.contractVersion, '3.7.6');
+test('protocol 3.7 publishes all accessible execution, recovery, and access-knowledge tools', () => {
+  assert.equal(contract.contractVersion, '3.8.0');
   for (const name of executionTools) {
     assert.ok(contract.tools[name], `${name} missing from contract fixture`);
     assert.match(tools, new RegExp(`['"]${name}['"]`));
@@ -907,6 +910,8 @@ test('execution contract uses bounded targets, revisions, idempotency, and typed
   assert.match(fixture, /expectedRevision/);
   assert.match(fixture, /idempotencyKey/);
   assert.match(contract.tools.trackly_advance_apply_execution, /browserSurface:z\.enum\(APPLY_BROWSER_SURFACES\)/);
+  assert.match(contract.tools.trackly_advance_apply_execution, /accessReviewApproval:z\.object/);
+  assert.match(contract.tools.trackly_defer_apply_access, /scope:z\.enum\(APPLY_ACCESS_DEFERMENT_SCOPES\)/);
   for (const classification of [
     'accessible',
     'authentication_required',
@@ -1062,10 +1067,10 @@ test('advance replay returns the backend current revision and progress unchanged
   assert.deepEqual(result, response);
 });
 
-test('skill 4.7.1 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
-  assert.match(agent, /const SKILL_VERSION = '4\.7\.1'/);
-  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.6\.0'/);
-  assert.match(skill, /Skill 4\.7\.1 requires protocol 3\.6\.0 or newer/);
+test('skill 4.8.0 recovers executions before legacy batches and distinguishes complete from inspect requests', () => {
+  assert.match(agent, /const SKILL_VERSION = '4\.8\.0'/);
+  assert.match(agent, /const MIN_APPLY_PROTOCOL_VERSION = '3\.7\.0'/);
+  assert.match(skill, /Skill 4\.8\.0 requires protocol 3\.7\.0 or newer/);
   assert.match(skill, /trackly_get_active_apply_execution[\s\S]*before[\s\S]*trackly_get_active_apply_batch/i);
   assert.match(skill, /complete_next_n_accessible/);
   assert.match(skill, /durablyReviewReady/);
@@ -1152,5 +1157,163 @@ test('execution documentation includes strict disposition inputs and every publi
     '/apply/executions/:executionId/advance`',
     '/apply/executions/:executionId/dispositions`',
     '/apply/executions/:executionId/stop`',
+    '/apply/access-deferments`',
+    '/apply/access-deferments/:defermentId/clear`',
   ]) assert.match(contributorDocs, new RegExp(suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+const sampleAccessKnowledge = {
+  observedAccess: {
+    classification: 'open',
+    detailCode: null,
+    wallStage: null,
+    matchedScope: 'ats_default',
+    source: 'curated_audit',
+    lastConfirmedAt: '2026-08-22T12:00:00.000Z',
+    freshUntil: '2026-09-21T12:00:00.000Z',
+    freshness: 'fresh',
+    evidenceCount: 1,
+    contradictory: false,
+  },
+  userPreference: null,
+  effectiveSchedulingEffect: 'prefer',
+  rationaleCode: 'ats_default_open',
+  knowledgeRevision: 1,
+  evaluatedAt: '2026-08-28T12:00:00.000Z',
+  freshLiveProbeRequired: true,
+};
+
+test('advance accepts hash-bound accessReviewApproval and validates proposedWave receipts', async () => {
+  const approvalHash = 'c'.repeat(64);
+  const proposedWave = [{ jobId: 88, accessKnowledge: sampleAccessKnowledge }];
+  const { registrations, calls } = registerRuntimeTools({
+    success: true,
+    proposedWave,
+    progress: {
+      nextAction: 'probe',
+      availableCandidateCount: 1,
+      deferredCandidateCount: 0,
+    },
+  });
+  const registration = registrations.get('trackly_advance_apply_execution');
+  const idempotencyKey = 'access-review-approval-key-01';
+  const result = await registration.handler(registration.schema.parse({
+    executionId: 41,
+    expectedRevision: 3,
+    browserSurface: 'codex_in_app',
+    idempotencyKey,
+    accessReviewApproval: { jobIds: [88], approvalHash },
+  }));
+  assert.deepEqual(calls.at(-1).slice(0, 3), ['POST', '/api/jobscout/apply/executions/41/advance', {
+    expectedRevision: 3,
+    browserSurface: 'codex_in_app',
+    accessReviewApproval: { jobIds: [88], approvalHash },
+  }]);
+  assert.deepEqual(result.proposedWave, proposedWave);
+  assert.equal(result.progress.nextAction, 'probe');
+  assert.throws(
+    () => registration.schema.parse({
+      executionId: 41,
+      expectedRevision: 3,
+      browserSurface: 'codex_in_app',
+      idempotencyKey,
+      accessReviewApproval: { jobIds: [88, 88], approvalHash },
+    }),
+    /unique/i,
+  );
+  const leaky = registerRuntimeTools({
+    success: true,
+    proposedWave: [{
+      jobId: 88,
+      accessKnowledge: sampleAccessKnowledge,
+      pageText: 'do not leak',
+    }],
+  }).registrations.get('trackly_advance_apply_execution');
+  await assert.rejects(
+    leaky.handler(leaky.schema.parse({
+      executionId: 41,
+      expectedRevision: 3,
+      browserSurface: 'codex_in_app',
+      idempotencyKey,
+    })),
+    z.ZodError,
+  );
+});
+
+test('access deferment tools use jobId-derived scopes and discovered ids', async () => {
+  const deferment = {
+    id: 9,
+    jobId: 88,
+    scope: 'company',
+    createdAt: '2026-08-28T12:00:00.000Z',
+    persistsUntilCleared: true,
+  };
+  const { registrations, calls } = registerRuntimeTools((method, route) => {
+    if (method === 'GET') {
+      return { success: true, deferments: [deferment] };
+    }
+    return { success: true, replay: false, deferment };
+  });
+  const idempotencyKey = 'access-deferment-key-0001';
+  await registrations.get('trackly_list_apply_access_deferments').handler({});
+  await registrations.get('trackly_defer_apply_access').handler(
+    registrations.get('trackly_defer_apply_access').schema.parse({
+      jobId: 88,
+      scope: 'company',
+      idempotencyKey,
+    }),
+  );
+  await registrations.get('trackly_clear_apply_access_deferment').handler(
+    registrations.get('trackly_clear_apply_access_deferment').schema.parse({
+      defermentId: 9,
+      idempotencyKey,
+    }),
+  );
+  assert.deepEqual(calls[0].slice(0, 2), ['GET', '/api/jobscout/apply/access-deferments']);
+  assert.deepEqual(calls[1].slice(0, 3), ['POST', '/api/jobscout/apply/access-deferments', {
+    jobId: 88,
+    scope: 'company',
+  }]);
+  assert.deepEqual(calls[2].slice(0, 3), [
+    'POST',
+    '/api/jobscout/apply/access-deferments/9/clear',
+    {},
+  ]);
+  const undiscovered = registerRuntimeTools({ success: true, replay: false, deferment });
+  await assert.rejects(
+    undiscovered.registrations.get('trackly_clear_apply_access_deferment').handler({
+      defermentId: 9,
+      idempotencyKey,
+    }),
+    /latest list or defer response/,
+  );
+  const mismatchedDefer = registerRuntimeTools({
+    success: true,
+    replay: false,
+    deferment: { ...deferment, jobId: 99 },
+  }).registrations.get('trackly_defer_apply_access');
+  await assert.rejects(
+    mismatchedDefer.handler(mismatchedDefer.schema.parse({
+      jobId: 88,
+      scope: 'company',
+      idempotencyKey,
+    })),
+    /does not match the requested job and scope/,
+  );
+  const mismatchedClear = registerRuntimeTools((method) => {
+    if (method === 'GET') {
+      return { success: true, deferments: [deferment] };
+    }
+    return { success: true, replay: false, deferment: { ...deferment, id: 12 } };
+  });
+  await mismatchedClear.registrations.get('trackly_list_apply_access_deferments').handler({});
+  await assert.rejects(
+    mismatchedClear.registrations.get('trackly_clear_apply_access_deferment').handler(
+      mismatchedClear.registrations.get('trackly_clear_apply_access_deferment').schema.parse({
+        defermentId: 9,
+        idempotencyKey,
+      }),
+    ),
+    /does not match the requested deferment id/,
+  );
 });

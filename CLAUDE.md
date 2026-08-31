@@ -51,7 +51,7 @@ There is a small Node test suite (`npm test`), but no linter and no build step. 
 
 1. User runs `trackly mcp` (or AI agent spawns it via stdio)
 2. `bin/trackly` delegates to `mcp/server.js`
-3. `mcp/server.js` creates an `McpServer` with 55 tools, connects via `StdioServerTransport`
+3. `mcp/server.js` creates an `McpServer` with 58 tools, connects via `StdioServerTransport`
 4. Each tool calls `apiRequest()` from `lib/client.js` with a `trackly-mcp/<version>` User-Agent derived from `package.json`
 5. CLI commands use `trackly-cli/<version>` User-Agent derived from `package.json` (separate channel attribution)
 
@@ -60,7 +60,7 @@ MCP setup for Claude Code:
 claude mcp add --scope user trackly -- trackly mcp
 ```
 
-The 55 MCP tools include the complete search, network, profile, and Trackly
+The 58 MCP tools include the complete search, network, profile, and Trackly
 Apply set documented in `docs/trackly-tools.md` plus the analytics-owned
 `get_more_tools` missing-capability tool. Keep this count synchronized with
 `mcp/server.js`, `README.md`, and the docs-drift tests.
@@ -112,6 +112,9 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `POST /api/jobscout/apply/executions/:executionId/parked/:memberId/resume` -- Request a fresh probe for an explicitly resumed parked job (`trackly_resume_parked_apply_member`)
 - `POST /api/jobscout/apply/executions/:executionId/resume-approval` -- Approve one exact resume across an immutable execution snapshot (`trackly_approve_apply_execution_resume`)
 - `POST /api/jobscout/apply/executions/:executionId/advance` -- Select the next immutable child wave (`trackly_advance_apply_execution`)
+- `GET /api/jobscout/apply/access-deferments` -- List persistent user access deferments (`trackly_list_apply_access_deferments`)
+- `POST /api/jobscout/apply/access-deferments` -- Persist a job or company deferment from a Trackly jobId (`trackly_defer_apply_access`)
+- `POST /api/jobscout/apply/access-deferments/:defermentId/clear` -- Clear one discovered user access deferment (`trackly_clear_apply_access_deferment`)
 - `POST /api/jobscout/apply/executions/:executionId/dispositions` -- Record bound value-free probe classifications (`trackly_record_apply_execution_dispositions`)
 - `POST /api/jobscout/apply/executions/:executionId/stop` -- Stop an active execution idempotently (`trackly_stop_apply_execution`)
 - `POST /api/jobscout/apply/batches/:batchId/cancel` -- Retire a legacy fixed batch after explicit user confirmation (`trackly_cancel_apply_batch`)
@@ -136,7 +139,7 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 - `GET /api/network/companies/:id/workspace` -- Get company workspace (jobs, contacts, campaigns)
 - `GET /auth/google/cli` -- OAuth login redirect
 
-The complete 55-tool inventory is in `docs/trackly-tools.md`. Local-only helpers such as `trackly_verify_prepared_resume` and `trackly_validate_apply_resume_upload` intentionally have no HTTP endpoint and therefore do not appear in the endpoint list above.
+The complete 58-tool inventory is in `docs/trackly-tools.md`. Local-only helpers such as `trackly_verify_prepared_resume` and `trackly_validate_apply_resume_upload` intentionally have no HTTP endpoint and therefore do not appear in the endpoint list above.
 
 ## Gotchas
 

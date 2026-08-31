@@ -3760,8 +3760,8 @@ test('public skills reference only the locked 18-tool facade', () => {
   const lock = json('plugins/trackly/skill-lock.json');
   const actual = referencedTools(path.join(PLUGIN, 'skills'));
   assert.equal(lock.publicToolAllowlist.length, 18);
-  assert.equal(lock.hostedMcpToolAllowlist.length, 52);
-  assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 52);
+  assert.equal(lock.hostedMcpToolAllowlist.length, 55);
+  assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 55);
   assert.deepEqual(actual, [...lock.publicToolAllowlist].sort());
   assert.ok(!actual.some((name) => name.includes('referral')));
   assert.deepEqual(lock.publicLifecycleContract, {
@@ -3917,6 +3917,7 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.doesNotMatch(skill, /at least once every 60 seconds during active browser work/);
   assert.match(skill, /`nextAction: complete`/);
   assert.match(skill, /`nextAction: manual_review`/);
+  assert.match(skill, /`nextAction: access_review`/);
   assert.match(skill, /first pass for every mutable member in the current bound wave/);
   assert.match(skill, /Wait until the advertised retry time or estimated return time before one work refetch/);
   assert.match(browserSafety, /verify only the filename visibly committed/);

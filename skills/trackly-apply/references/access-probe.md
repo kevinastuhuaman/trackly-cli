@@ -66,3 +66,8 @@ durably terminal. A provider hint is scheduling input, never sufficient proof.
 
 When browser and accessibility surfaces disagree, use
 `unknown_unobservable`. Never upgrade uncertainty to accessibility.
+
+Keep the audit UI's four labels (`OPEN`, `ACCOUNT WALL`, `VARIES`, `UNKNOWN`)
+separate from these detailed live classifications. Curated `OPEN` and recent
+accessibility can schedule a probe; they never authorize `fill_form`.
+`freshLiveProbeRequired` remains true for every proposed member.

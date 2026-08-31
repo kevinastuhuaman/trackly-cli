@@ -35,7 +35,7 @@ trackly jobs --function product
 
 ## At a Glance
 
-3,800+ companies | 170K+ jobs | 40+ ATS types | CLI + MCP | 55 local MCP tools
+3,800+ companies | 170K+ jobs | 40+ ATS types | CLI + MCP | 58 local MCP tools
 
 ## CLI Commands
 
@@ -189,7 +189,10 @@ Then use natural language in any of these clients:
 | trackly_get_apply_execution_snapshot | Fetch a compact bounded projection for current execution members and required profile keys |
 | trackly_resume_parked_apply_member | Explicitly resume one parked member for a fresh non-mutating access probe |
 | trackly_approve_apply_execution_resume | Approve one exact resume identity for an unchanged execution snapshot |
-| trackly_advance_apply_execution | Transactionally create the next eligible immutable wave |
+| trackly_advance_apply_execution | Transactionally create the next eligible immutable wave with frozen accessKnowledge |
+| trackly_list_apply_access_deferments | List persistent user access deferments |
+| trackly_defer_apply_access | Persist a job or company deferment from a Trackly jobId |
+| trackly_clear_apply_access_deferment | Clear one discovered user access deferment |
 | trackly_record_apply_execution_dispositions | Record typed, value-free access classifications |
 | trackly_stop_apply_execution | Stop an execution without changing saved-job state |
 | trackly_create_apply_batch | Freeze an exact recent-first approved batch |
@@ -282,7 +285,7 @@ trackly config --base-url http://127.0.0.1:3000  # Point at a different backend
 | Job search + filters | Yes | Yes | Yes |
 | Apply/save/dismiss | Yes | Yes | Yes |
 | AI-powered search | Yes (trackly ask) | Yes | Yes |
-| MCP integration | Yes (55 local tools) | -- | -- |
+| MCP integration | Yes (58 local tools) | -- | -- |
 | Browser required | No | Yes | No |
 | Best for | Terminal + AI agents | Visual browsing | Custom integrations |
 
@@ -296,7 +299,7 @@ Install trackly-cli (`npm install -g trackly-cli`), authenticate with `trackly l
 
 **What MCP servers exist for job searching?**
 
-trackly-cli includes a built-in MCP server with 55 tools: the complete Trackly
+trackly-cli includes a built-in MCP server with 58 tools: the complete Trackly
 job-search and application set plus `get_more_tools`, which lets agents report
 a missing capability. Run `trackly mcp` or use
 `trackly agent setup --client claude`.
