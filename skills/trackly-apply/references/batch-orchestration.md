@@ -77,8 +77,9 @@ schedule. A fresh non-mutating live probe is still required before private
 data or form mutation.
 
 Rank `OPEN`, then neutral `VARIES`/`UNKNOWN`, then fresh `ACCOUNT WALL`. Never
-select an active user deferment automatically. Workday and Eightfold are known
-authentication-gated providers for this workflow: they start as `ACCOUNT WALL`
+select an active user deferment automatically. Workday starts as `ACCOUNT WALL`,
+and Eightfold is also a known authentication-gated provider for this workflow:
+they start as `ACCOUNT WALL`
 and must not be opened for a browser probe while Greenhouse or other `OPEN`/
 neutral alternatives exist. Static safety exclusions always override `OPEN`.
 
