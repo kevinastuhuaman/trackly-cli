@@ -11,7 +11,7 @@
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
         "@posthog/mcp": "0.11.0",
-        "fast-uri": "3.1.5",
+        "fast-uri": "3.1.6",
         "hono": "4.13.0",
         "ip-address": "10.4.0",
         "posthog-node": "5.48.1",
@@ -555,9 +555,9 @@
       "license": "MIT"
     },
     "node_modules/fast-uri": {
-      "version": "3.1.5",
-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.5.tgz",
-      "integrity": "sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw==",
+      "version": "3.1.6",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.6.tgz",
+      "integrity": "sha512-7Ical1vFEMr0onbVzEDIreM22I4khW+fzyQPwvAFWBp1iwdshSZRsL4jjRvPG9JP1uiqMHRto+YU6R2/CzDz5Q==",
       "funding": [
         {
           "type": "github",
