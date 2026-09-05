@@ -1,6 +1,7 @@
 ---
 title: Bind access-review approval to validated proposal receipts
 date: 2026-09-05
+last_updated: 2026-09-05
 category: integration-issues
 module: Trackly Apply access-review facade
 problem_type: integration_issue
@@ -60,6 +61,20 @@ approval cache handled only the first proposal, and identity comparison relied
 on serialization order. The verifier's member lookup likewise happened before
 its computed-key guard.
 
+## What Didn't Work
+
+A single proposal-response model could not safely cover start, per-execution
+reads, active recovery, and advance because those endpoints return different
+identity and metadata envelopes. Passing responses through raw exposed
+unmodelled fields, while forcing every active response through the access-review
+schema rejected ordinary and preserved-terminal recovery. Caching only the
+first proposal, clearing replay state on every refresh, and leaving proposal
+bindings unbounded broke either exact retry behavior or long-running process
+memory safety. Raw JSON serialization made receipt equality depend on object-key
+order. Reusing the execution-wave limit for deferment discovery happened to
+match the backend's current limit of 20, but concealed a separate contract that
+could drift independently.
+
 ## Solution
 
 - Accept the deployed compact local projection and the optional complete future
@@ -81,7 +96,9 @@ its computed-key guard.
 - Canonicalize nested `accessKnowledge` objects by key before comparing the
   simple and rich proposal representations.
 - Cache a newly returned access-review proposal after a successful approval so
-  the next continuation uses its current revision, ordered IDs, and hash.
+  the next continuation uses its current revision, ordered IDs, and hash. Bound
+  pending and replayable proposal bindings with oldest-entry eviction so an
+  abandoned execution cannot retain process memory indefinitely.
 - Reject all computed instance members before selecting the hosted runtime
   method, with fixtures for computed methods and fields.
 - Keep the local and adapted Apply skills explicit about
@@ -90,18 +107,30 @@ its computed-key guard.
 - Validate deferment discovery against the backend's dedicated active-deferment
   limit rather than coupling it to the numerically equal execution-wave limit.
 
+## Why This Works
+
+Each endpoint is parsed through its own strict envelope before its response is
+returned or cached. An access-review continuation must contain both the compact
+proposal and rich receipt, and the validator binds their ordered job IDs,
+contiguous member positions, frozen access knowledge, counts, and approval hash.
+Start and active recovery hydrate the detail endpoint only when execution ID,
+revision, and next action still match, preventing a stale detail response from
+authorizing work. Separate bounded pending and replay caches preserve exact
+same-key idempotency while rejecting a new key or evicting abandoned execution
+state. Canonical object comparison removes serialization-order dependence, and
+the separately named deferment limit prevents unrelated contract constants from
+being coupled accidentally.
+
 ## Verification
 
-`npm test` passes. `npm run test:hosted-contract` passes the checked-in 3.8.1
-hosted fixture. The backend-coupled check must be rerun against
-the exact coordinated backend release candidate before merge; current backend
-`origin/main` is 3.8.0/job-company only. Its direct CLI compact projection
-contains `jobId` and `accessKnowledge` and omits `memberPosition` and display
-identity; the client therefore accepts that deployed shape while binding any
-optional returned position to the rich receipt. Provider scope, richer identity,
-and clear-to-fresh all-deferred recomputation remain pending in backend PR
-#1769. The backend store's active-deferment limit is 20; the CLI now names and
-tests that boundary independently from the execution-wave limit.
+PR #135 merged as `e97309a07a8afdc6eb62b28f4313c538699c72e5`.
+Its CI passed 520 tests and the checked-in contract-fixture run passed 81 tests.
+The corrective npm release remains pending: npm latest is 0.18.0, and backend
+PR `#1769` is still open and readiness-blocked. Before publishing 0.18.1, run
+the backend-coupled hosted-contract check against the exact merged backend
+candidate, verify its Azure deployment and access-deferment behavior, and rerun
+the exact-head CLI review gate. Replace this pending status with the backend
+merge and deployed SHA plus the published CLI version after those checks pass.
 
 ## Prevention
 

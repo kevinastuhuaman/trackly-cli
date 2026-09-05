@@ -836,12 +836,20 @@ function registerApplyTools(
   }
   const pendingAccessProposalByExecution = new Map();
   const replayableAccessApprovalByExecution = new Map();
+  const MAX_ACCESS_PROPOSAL_BINDINGS = 64;
+  function setBoundedAccessProposalBinding(bindings, executionId, value) {
+    bindings.delete(executionId);
+    bindings.set(executionId, value);
+    while (bindings.size > MAX_ACCESS_PROPOSAL_BINDINGS) {
+      bindings.delete(bindings.keys().next().value);
+    }
+  }
   function rememberAccessProposal(executionId, revision, browserSurface, response) {
     if (response.progress?.nextAction !== 'access_review') {
       pendingAccessProposalByExecution.delete(executionId);
       return response;
     }
-    pendingAccessProposalByExecution.set(executionId, {
+    setBoundedAccessProposalBinding(pendingAccessProposalByExecution, executionId, {
       revision,
       browserSurface,
       approvalHash: response.accessProposal.approvalHash,
@@ -1309,7 +1317,7 @@ function registerApplyTools(
       }
       if (body.accessReviewApproval) {
         pendingAccessProposalByExecution.delete(executionId);
-        replayableAccessApprovalByExecution.set(executionId, {
+        setBoundedAccessProposalBinding(replayableAccessApprovalByExecution, executionId, {
           revision: body.expectedRevision,
           browserSurface: body.browserSurface,
           approvalHash: body.accessReviewApproval.approvalHash,

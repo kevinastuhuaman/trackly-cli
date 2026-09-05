@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   execution recovery envelopes, while retaining the 3.8.1 provider-scope
   contract for the coordinated backend release. Legacy all-deferred receipts
   without deferment mappings remain safe stop/expiry states until refreshed.
+  Proposal approval and replay bindings now use bounded in-memory caches.
+- Fail the Claude review workflow closed when its recovered output contains
+  intermediate planning text instead of a complete terminal review verdict.
 
 ## [0.18.0] - 2026-09-04
 

@@ -128,12 +128,22 @@ jobs:
         shell: bash
         env:
           GH_TOKEN_POST: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           echo "::warning title=Claude review skipped::This PR changes the Claude review workflow, so automated Claude review is skipped until the workflow lands on the default branch. Use compensating structured review before relying on this gate."
-          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review skipped because this PR changes the Claude review workflow. This required check is NOT an approval and NOT a clean review result. Use compensating structured review before relying on this gate."
-          python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_self_change_notice.json" || { echo "::warning::could not build self-change notice body"; exit 0; }
-          curl -sS --fail -X POST             -H "Authorization: Bearer ${GH_TOKEN_POST}"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments"             -d @"$RUNNER_TEMP/cr_self_change_notice.json" >/dev/null             && echo "Posted self-change review-skip notice to PR."             || echo "::warning::Failed to post self-change review-skip notice to the PR."
+          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review skipped because this PR changes the Claude review workflow at head ${HEAD_SHA}. This required check is NOT an approval and NOT a clean review result. Use an exact-head compensating structured review before relying on this gate."
+          python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_self_change_notice.json"
+          if curl -sS --fail -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN_POST}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              -d @"$RUNNER_TEMP/cr_self_change_notice.json" >/dev/null; then
+            echo "Posted self-change review-skip notice to PR."
+          else
+            echo "::error::Failed to post self-change review-skip notice to the PR."
+            exit 1
+          fi
 
       # Precompute the diff in a trusted step and inject it DIRECTLY into the
       # prompt (via GITHUB_ENV). Claude is then given no filesystem/shell tools,
@@ -541,45 +551,46 @@ jobs:
           fi
 
           # No inline comment landed. Recover the model's final text from the
-          # execution file of whichever review step succeeded. The file may be a
-          # JSON array or JSONL (stream-json); `jq -s | flatten(1)` normalizes
-          # both, then we take the last result-type text (or last assistant text).
+          # execution file of whichever review step succeeded. The extractor
+          # accepts JSON arrays and JSONL, selects the final result (or final
+          # assistant text), and rejects intermediate planning text unless it has
+          # the required header, severity counts, and recommendation.
           if [ "${{ steps.claude-review.outcome }}" = "success" ]; then
             EXEC_FILE="$EXEC_FILE_PRIMARY"
           else
             EXEC_FILE="$EXEC_FILE_FALLBACK"
           fi
           REVIEW_TEXT=""
-          if [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ]; then
-            REVIEW_TEXT="$(jq -s -r '
-              (flatten(1)) as $ev
-              | ( [ $ev[] | select(.type=="result") | .result // empty ] | last )
-                // ( [ $ev[] | select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text ] | last )
-                // ""' "$EXEC_FILE" 2>/dev/null | head -c 60000 || true)"
-          fi
-
-          if [ -n "${REVIEW_TEXT//[[:space:]]/}" ]; then
+          if [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ] \
+              && REVIEW_TEXT="$(node scripts/extract-terminal-claude-review.js "$EXEC_FILE")"; then
+            REVIEW_TEXT="$(printf '%s' "$REVIEW_TEXT" | head -c 60000)"
             NOTE="_(backstop — inline anchoring was unavailable, so the model's full review is posted here.)_"
             case "$REVIEW_TEXT" in
               "## 🔵 Claude Code Review"*) BODY="$REVIEW_TEXT"$'\n\n'"$NOTE" ;;
               *) BODY="## 🔵 Claude Code Review"$'\n\n'"$NOTE"$'\n\n'"$REVIEW_TEXT" ;;
             esac
-            python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_backstop.json" || { echo "::warning::could not build backstop body"; exit 0; }
-            curl -sS --fail -X POST \
-              -H "Authorization: Bearer ${GH_TOKEN_POST}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-              -d @"$RUNNER_TEMP/cr_backstop.json" >/dev/null \
-              && echo "Posted substantive review via backstop (inline anchoring unavailable)." \
-              || echo "::warning::Failed to post backstop review comment."
+            python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_backstop.json" || { echo "::error::could not build backstop body"; exit 1; }
+            if curl -sS --fail -X POST \
+                -H "Authorization: Bearer ${GH_TOKEN_POST}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+                -d @"$RUNNER_TEMP/cr_backstop.json" >/dev/null; then
+              echo "Posted substantive review via backstop (inline anchoring unavailable)."
+            else
+              echo "::error::Failed to post backstop review comment."
+              exit 1
+            fi
           else
-            echo "::warning title=Empty review::A review step succeeded but posted 0 inline comments and no recoverable text was found in the execution file."
-            python3 -c 'import json;print(json.dumps({"body":"## 🔵 Claude Code Review\n\n⚠️ The review ran but produced no inline comment and no recoverable summary text (e.g. a rename/mode/binary-only diff). NON-BLOCKING notice — not an approval. Re-run if line-level review is needed."}))' > "$RUNNER_TEMP/cr_empty.json" || exit 0
-            curl -sS --fail -X POST \
-              -H "Authorization: Bearer ${GH_TOKEN_POST}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-              -d @"$RUNNER_TEMP/cr_empty.json" >/dev/null \
-              && echo "Posted empty-review notice to PR." \
-              || echo "::warning::Failed to post empty-review notice."
+            echo "::error title=Incomplete review::A review step succeeded but posted 0 inline comments and did not end with the required terminal verdict."
+            python3 -c 'import json;print(json.dumps({"body":"## 🔵 Claude Code Review\n\n⚠️ The review ran but produced no inline comment and no complete terminal verdict. This check fails closed; intermediate planning text is not review coverage. Re-run the review or use the documented exact-head compensating review path."}))' > "$RUNNER_TEMP/cr_empty.json" || exit 1
+            if curl -sS --fail -X POST \
+                -H "Authorization: Bearer ${GH_TOKEN_POST}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+                -d @"$RUNNER_TEMP/cr_empty.json" >/dev/null; then
+              echo "Posted incomplete-review notice to PR."
+            else
+              echo "::warning::Failed to post incomplete-review notice to the PR."
+            fi
+            exit 1
           fi

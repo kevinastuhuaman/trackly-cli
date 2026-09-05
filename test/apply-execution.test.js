@@ -2346,6 +2346,104 @@ test('access-review validation bounds all-deferred proposals, ignores key order,
     accessReviewApproval: { jobIds: [88], approvalHash: followUpHash },
   })));
   assert.equal(requestCount, 4);
+
+  const bounded = registerRuntimeTools((method, route) => {
+    const executionId = Number(route.match(/\/executions\/(\d+)\/advance$/)?.[1]);
+    if (!executionId) throw new Error(`unexpected request: ${method} ${route}`);
+    return {
+      success: true,
+      executionId,
+      createdWave: false,
+      revision: 4,
+      proposedWave,
+      accessProposal,
+      progress: proposalProgress,
+    };
+  });
+  const boundedAdvance = bounded.registrations.get('trackly_advance_apply_execution');
+  for (let executionId = 1; executionId <= 65; executionId += 1) {
+    await boundedAdvance.handler(boundedAdvance.schema.parse({
+      ...advanceInput({
+        executionId,
+        idempotencyKey: `bounded-proposal-seed-${executionId}`,
+      }),
+    }));
+  }
+  const callsBeforeEvictionCheck = bounded.calls.length;
+  await assert.rejects(
+    boundedAdvance.handler(boundedAdvance.schema.parse(advanceInput({
+      executionId: 1,
+      expectedRevision: 4,
+      idempotencyKey: 'bounded-evicted-approval-key',
+      accessReviewApproval: { jobIds: [88], approvalHash },
+    }))),
+    /exact returned proposal/i,
+  );
+  assert.equal(bounded.calls.length, callsBeforeEvictionCheck);
+  await assert.doesNotReject(boundedAdvance.handler(boundedAdvance.schema.parse(advanceInput({
+    executionId: 65,
+    expectedRevision: 4,
+    idempotencyKey: 'bounded-retained-approval-key',
+    accessReviewApproval: { jobIds: [88], approvalHash },
+  }))));
+
+  const boundedReplay = registerRuntimeTools((method, route, body) => {
+    const executionId = Number(route.match(/\/executions\/(\d+)\/advance$/)?.[1]);
+    if (!executionId) throw new Error(`unexpected request: ${method} ${route}`);
+    if (body.accessReviewApproval) {
+      return {
+        success: true,
+        executionId,
+        createdWave: true,
+        batchId: 1000 + executionId,
+        revision: 5,
+        progress: { ...proposalProgress, nextAction: 'continue_current_wave' },
+      };
+    }
+    return {
+      success: true,
+      executionId,
+      createdWave: false,
+      revision: 4,
+      proposedWave,
+      accessProposal,
+      progress: proposalProgress,
+    };
+  });
+  const boundedReplayAdvance = boundedReplay.registrations.get('trackly_advance_apply_execution');
+  for (let executionId = 1; executionId <= 65; executionId += 1) {
+    const seed = boundedReplayAdvance.schema.parse(advanceInput({
+      executionId,
+      idempotencyKey: `bounded-replay-seed-${executionId}`,
+    }));
+    await boundedReplayAdvance.handler(seed);
+    const approval = boundedReplayAdvance.schema.parse(advanceInput({
+      executionId,
+      expectedRevision: 4,
+      idempotencyKey: `bounded-replay-approval-${executionId}`,
+      accessReviewApproval: { jobIds: [88], approvalHash },
+    }));
+    await boundedReplayAdvance.handler(approval);
+  }
+  const replayCallsBeforeEvictionCheck = boundedReplay.calls.length;
+  const evictedReplay = boundedReplayAdvance.schema.parse(advanceInput({
+    executionId: 1,
+    expectedRevision: 4,
+    idempotencyKey: 'bounded-replay-approval-1',
+    accessReviewApproval: { jobIds: [88], approvalHash },
+  }));
+  await assert.rejects(
+    boundedReplayAdvance.handler(evictedReplay),
+    /exact returned proposal/i,
+  );
+  assert.equal(boundedReplay.calls.length, replayCallsBeforeEvictionCheck);
+  const retainedReplay = boundedReplayAdvance.schema.parse(advanceInput({
+    executionId: 65,
+    expectedRevision: 4,
+    idempotencyKey: 'bounded-replay-approval-65',
+    accessReviewApproval: { jobIds: [88], approvalHash },
+  }));
+  await assert.doesNotReject(boundedReplayAdvance.handler(retainedReplay));
 });
 
 test('access deferment tools use jobId-derived scopes and discovered ids', async () => {
