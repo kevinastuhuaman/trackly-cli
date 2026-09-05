@@ -649,6 +649,23 @@ function registerApplyTools(
   const discoveredHandoffBindings = new Map();
   const discoveredHandoffIdsByExecution = new Map();
   const discoveredDefermentIds = new Set();
+  const clearedDefermentReplayKeys = new Map();
+  const MAX_CLEARED_DEFERMENT_REPLAYS = 64;
+  let clearedDefermentReplayCount = 0;
+  function rememberClearedDefermentReplay(defermentId, idempotencyKey) {
+    if (!clearedDefermentReplayKeys.has(defermentId)) clearedDefermentReplayKeys.set(defermentId, new Set());
+    const keys = clearedDefermentReplayKeys.get(defermentId);
+    if (keys.has(idempotencyKey)) return;
+    keys.add(idempotencyKey);
+    clearedDefermentReplayCount += 1;
+    while (clearedDefermentReplayCount > MAX_CLEARED_DEFERMENT_REPLAYS) {
+      const [oldestId, oldestKeys] = clearedDefermentReplayKeys.entries().next().value;
+      const oldestKey = oldestKeys.values().next().value;
+      oldestKeys.delete(oldestKey);
+      clearedDefermentReplayCount -= 1;
+      if (!oldestKeys.size) clearedDefermentReplayKeys.delete(oldestId);
+    }
+  }
   const pendingAccessProposalByExecution = new Map();
   const replayableAccessApprovalByExecution = new Map();
   function rememberAccessProposal(executionId, revision, browserSurface, response) {
@@ -781,9 +798,15 @@ function registerApplyTools(
       target: z.number().int().min(1).max(APPLY_EXECUTION_MAX_TARGET),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
     },
-    wrapTool(async ({ idempotencyKey, ...body }) => applyControlRequest(
-      'POST', '/api/jobscout/apply/executions', body, idempotencyKey,
-    ), 'Failed to start apply execution')
+    wrapTool(async ({ idempotencyKey, ...body }) => {
+      const response = await applyControlRequest(
+        'POST', '/api/jobscout/apply/executions', body, idempotencyKey,
+      );
+      if (response.execution?.id && response.proposedWave !== undefined) {
+        rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
+      }
+      return response;
+    }, 'Failed to start apply execution')
   );
 
   server.tool(
@@ -1143,6 +1166,11 @@ function registerApplyTools(
     },
     wrapTool(async ({ defermentId, idempotencyKey }) => {
       if (!discoveredDefermentIds.has(defermentId)) {
+        if (clearedDefermentReplayKeys.get(defermentId)?.has(idempotencyKey)) {
+          return applyControlRequest(
+            'POST', `/api/jobscout/apply/access-deferments/${defermentId}/clear`, {}, idempotencyKey,
+          );
+        }
         throw new Error('Clear must use a deferment id from the latest list or defer response.');
       }
       const response = accessDefermentClearResponseSchema.parse(await applyControlRequest(
@@ -1151,6 +1179,7 @@ function registerApplyTools(
       if (response.deferment.id !== defermentId) {
         throw new Error('Access deferment response does not match the requested deferment id.');
       }
+      rememberClearedDefermentReplay(defermentId, idempotencyKey);
       return response;
     }, 'Failed to clear apply access deferment')
   );

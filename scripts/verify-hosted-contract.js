@@ -3305,15 +3305,19 @@ function assertActiveClassMethodAstSha256(
       : [];
   });
   assert.equal(classes.length, 1, `${sourcePath} must define exactly one top-level ${className} class`);
-  const methods = classes[0].body.body.filter((member) => (
-    member.type === 'ClassMethod'
-    && !member.computed
-    && member.key?.type === 'Identifier'
-    && member.key.name === methodName
-  ));
-  assert.equal(methods.length, 1, `${className}.${methodName} in ${sourcePath} must exist exactly once`);
+  const members = classes[0].body.body.filter((member) => !member.static);
+  const runtimeKey = (member) => {
+    if (member.key?.type === 'Identifier' || member.key?.type === 'StringLiteral') return member.key.name || member.key.value;
+    return null;
+  };
+  const matchingMembers = members.filter((member) => runtimeKey(member) === methodName);
+  assert.equal(matchingMembers.length, 1, `${className}.${methodName} in ${sourcePath} must have exactly one runtime member`);
+  const method = matchingMembers[0];
+  assert.equal(method.type, 'ClassMethod', `${className}.${methodName} in ${sourcePath} must be a method, not a field`);
+  assert.equal(method.computed, false, `${className}.${methodName} in ${sourcePath} must not use a computed key`);
+  assert.equal(method.key?.type, 'Identifier', `${className}.${methodName} in ${sourcePath} must use an identifier key`);
   assert.equal(
-    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(methods[0]))),
+    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(method))),
     expectedSha256,
     `${className}.${methodName} in ${sourcePath} must preserve its locked active semantic AST`,
   );
@@ -9418,6 +9422,7 @@ module.exports = {
   assertActiveFunctionDirectStatementAst,
   assertActiveTopLevelStatementAst,
   assertActiveFunctionDefinitionAst,
+  assertActiveClassMethodAstSha256,
   assertActiveFunctionAstSha256,
   assertLivePluginRouterMount,
   assertImmutablePluginScopeFreeMethods,

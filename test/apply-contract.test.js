@@ -27,6 +27,7 @@ const {
   assertPluginReviewReadyPersistenceSemantics,
   assertPluginUiContractSemantics,
   assertActiveFunctionDefinitionAst,
+  assertActiveClassMethodAstSha256,
   canonicalSchemaAst,
   exactSchemaDefinition,
   gitOutput,
@@ -34,6 +35,22 @@ const {
   sha256ExactBytes,
   verifyHostedContract,
 } = require('../scripts/verify-hosted-contract.js');
+
+test('hosted verifier rejects runtime verifyAccessToken shadow members', () => {
+  for (const member of [
+    "['verifyAccessToken']() { return null; }",
+    "verifyAccessToken = () => null;",
+    "['verifyAccessToken'] = () => null;",
+  ]) {
+    const source = `class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member} }`;
+    assert.throws(
+      () => assertActiveClassMethodAstSha256(
+        source, 'TracklyOAuthProvider', 'verifyAccessToken', '0'.repeat(64), 'fixture.ts',
+      ),
+      /exactly one runtime member|must be a method|must use an identifier key|must not use a computed key/,
+    );
+  }
+});
 
 test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {
   const reviewedSource = `
