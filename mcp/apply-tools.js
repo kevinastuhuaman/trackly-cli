@@ -799,9 +799,12 @@ function registerApplyTools(
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
     },
     wrapTool(async ({ idempotencyKey, ...body }) => {
-      const response = await applyControlRequest(
+      const rawResponse = await applyControlRequest(
         'POST', '/api/jobscout/apply/executions', body, idempotencyKey,
       );
+      const response = rawResponse?.proposedWave !== undefined || rawResponse?.accessProposal !== undefined
+        ? validateProposedWaveResponse(rawResponse)
+        : rawResponse;
       if (response.execution?.id && response.proposedWave !== undefined) {
         rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
       }
@@ -1167,9 +1170,9 @@ function registerApplyTools(
     wrapTool(async ({ defermentId, idempotencyKey }) => {
       if (!discoveredDefermentIds.has(defermentId)) {
         if (clearedDefermentReplayKeys.get(defermentId)?.has(idempotencyKey)) {
-          return applyControlRequest(
+          return accessDefermentClearResponseSchema.parse(await applyControlRequest(
             'POST', `/api/jobscout/apply/access-deferments/${defermentId}/clear`, {}, idempotencyKey,
-          );
+          ));
         }
         throw new Error('Clear must use a deferment id from the latest list or defer response.');
       }
