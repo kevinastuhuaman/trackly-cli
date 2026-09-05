@@ -33,11 +33,12 @@ function extractReview(events) {
 }
 
 function isTerminalReview(review) {
-  return /^## 🔵 Claude Code Review\s*$/m.test(review)
-    && /🔴\s*\d+/u.test(review)
-    && /🟡\s*\d+/u.test(review)
-    && /🟢\s*\d+/u.test(review)
-    && /recommendation\s*:\s*(?:approve|request[_ -]?changes|comment)\b/i.test(review);
+  const normalized = review.replace(/[*_`]/g, '');
+  return /^## 🔵 Claude Code Review\s*(?:\r?\n|$)/.test(normalized)
+    && /🔴(?:\s*P[0-3])?\s*:?\s*\d+/iu.test(normalized)
+    && /🟡(?:\s*P[0-3])?\s*:?\s*\d+/iu.test(normalized)
+    && /🟢(?:\s*P[0-3])?\s*:?\s*\d+/iu.test(normalized)
+    && /recommendation\s*:\s*(?:approve|request[_ -]?changes|comment)\b/i.test(normalized);
 }
 
 const executionFile = process.argv[2];

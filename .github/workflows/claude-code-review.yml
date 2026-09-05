@@ -532,6 +532,7 @@ jobs:
         env:
           GH_TOKEN_POST: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EXEC_FILE_PRIMARY: ${{ steps.claude-review.outputs.execution_file }}
           EXEC_FILE_FALLBACK: ${{ steps.claude-review-fallback.outputs.execution_file }}
         run: |
@@ -561,8 +562,19 @@ jobs:
             EXEC_FILE="$EXEC_FILE_FALLBACK"
           fi
           REVIEW_TEXT=""
-          if [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ] \
-              && REVIEW_TEXT="$(node scripts/extract-terminal-claude-review.js "$EXEC_FILE")"; then
+          TRUSTED_EXTRACTOR_JSON="$RUNNER_TEMP/trusted-claude-review-extractor.json"
+          TRUSTED_EXTRACTOR="$RUNNER_TEMP/extract-terminal-claude-review.js"
+          if ! curl -sS --fail \
+              -H "Authorization: Bearer ${GH_TOKEN_POST}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/contents/scripts/extract-terminal-claude-review.js?ref=${BASE_SHA}" \
+              > "$TRUSTED_EXTRACTOR_JSON"; then
+            echo "::error::Could not load the Claude review extractor from trusted base ${BASE_SHA}."
+          elif ! python3 -c 'import base64,json,sys;print(base64.b64decode(json.load(open(sys.argv[1]))["content"]).decode(),end="")' \
+              "$TRUSTED_EXTRACTOR_JSON" > "$TRUSTED_EXTRACTOR"; then
+            echo "::error::Could not decode the trusted Claude review extractor."
+          elif [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ] \
+              && REVIEW_TEXT="$(node "$TRUSTED_EXTRACTOR" "$EXEC_FILE")"; then
             REVIEW_TEXT="$(printf '%s' "$REVIEW_TEXT" | head -c 60000)"
             NOTE="_(backstop — inline anchoring was unavailable, so the model's full review is posted here.)_"
             case "$REVIEW_TEXT" in
