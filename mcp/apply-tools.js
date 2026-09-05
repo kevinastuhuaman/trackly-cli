@@ -354,6 +354,13 @@ const getExecutionAccessReviewResponseSchema = z.object({
   proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
 }).strict().superRefine(validateMatchingProposal);
+const startExecutionAccessReviewResponseSchema = z.object({
+  success: z.literal(true),
+  execution: applyExecutionSchema,
+  progress: executionProgressSchema,
+  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  accessProposal: accessProposalSchema,
+}).strict().superRefine(validateMatchingProposal);
 const advanceExecutionResponseSchema = z.object({
   success: z.literal(true),
   executionId: z.number().int().min(1),
@@ -669,7 +676,6 @@ function registerApplyTools(
   const pendingAccessProposalByExecution = new Map();
   const replayableAccessApprovalByExecution = new Map();
   function rememberAccessProposal(executionId, revision, browserSurface, response) {
-    replayableAccessApprovalByExecution.delete(executionId);
     if (response.progress?.nextAction !== 'access_review') {
       pendingAccessProposalByExecution.delete(executionId);
       return response;
@@ -803,7 +809,7 @@ function registerApplyTools(
         'POST', '/api/jobscout/apply/executions', body, idempotencyKey,
       );
       const response = rawResponse?.proposedWave !== undefined || rawResponse?.accessProposal !== undefined
-        ? validateProposedWaveResponse(rawResponse)
+        ? startExecutionAccessReviewResponseSchema.parse(rawResponse)
         : rawResponse;
       if (response.execution?.id && response.proposedWave !== undefined) {
         rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
@@ -816,9 +822,13 @@ function registerApplyTools(
     'trackly_get_active_apply_execution',
     'Recover the active Apply execution before recovering or creating a legacy fixed batch.',
     {},
-    wrapTool(async () => applyControlRequest(
-      'GET', '/api/jobscout/apply/executions/active',
-    ), 'Failed to recover active apply execution')
+    wrapTool(async () => {
+      const response = await applyControlRequest('GET', '/api/jobscout/apply/executions/active');
+      if (response?.execution?.id && response.proposedWave !== undefined) {
+        rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
+      }
+      return response;
+    }, 'Failed to recover active apply execution')
   );
 
   server.tool(
