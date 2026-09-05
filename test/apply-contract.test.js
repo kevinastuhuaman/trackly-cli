@@ -58,14 +58,18 @@ test('hosted verifier rejects runtime verifyAccessToken shadow members', () => {
 });
 
 test('Apply skill and orchestration bind access-review approval to the exact server receipt', () => {
-  for (const relativePath of [
-    ['skills', 'trackly-apply', 'SKILL.md'],
-    ['plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'],
-  ]) {
-    const skill = fs.readFileSync(path.join(__dirname, '..', ...relativePath), 'utf8');
-    assert.match(skill, /accessProposal\.approvalHash/);
-    assert.doesNotMatch(skill, /proposedWave\.approvalHash/);
-  }
+  const localSkill = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(localSkill, /accessProposal\.approvalHash/);
+  assert.doesNotMatch(localSkill, /proposedWave\.approvalHash/);
+  const hostedSkill = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(hostedSkill, /proposedWave\.approvalHash/);
+  assert.match(hostedSkill, /accessProposal\.approvalHash/);
   const orchestration = fs.readFileSync(
     path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'),
     'utf8',
@@ -73,12 +77,12 @@ test('Apply skill and orchestration bind access-review approval to the exact ser
   assert.match(orchestration, /trackly_list_apply_access_deferments/);
   assert.match(orchestration, /trackly_defer_apply_access/);
   assert.match(orchestration, /trackly_clear_apply_access_deferment/);
-  assert.match(orchestration, /clear[^\n]*defermentId/i);
+  assert.match(orchestration, /clear[\s\S]*defermentId/i);
   assert.match(orchestration, /using a\s+Trackly `jobId`/i);
   assert.doesNotMatch(orchestration, /trackly_clear_apply_access_deferment` using a\s+Trackly `jobId`/i);
   assert.ok(
-    orchestration.indexOf('Clear any\nactive personal deferment before probing')
-      < orchestration.indexOf('Probe those exact job IDs'),
+    orchestration.search(/Clear any\s+active personal deferment before probing/i)
+      < orchestration.search(/probe those exact job IDs/i),
     'clear-before-probe guidance must precede the probe instruction',
   );
 });
@@ -2655,8 +2659,8 @@ test('Apply skill 4.8.0 requires protocol 3.7.0 for new work and preserves activ
   assert.match(skill, /trackly_defer_apply_access/);
   assert.match(skill, /trackly_clear_apply_access_deferment/);
   assert.match(skill, /including ordinary OPEN or neutral proposals/i);
-  assert.match(skill, /show each server-frozen member in `memberPosition` order/i);
-  assert.match(skill, /job ID, company, title, provider, requisition URL, and value-free scheduling reason/i);
+  assert.match(skill, /show each (?:rich )?server-frozen member in (?:exact )?`memberPosition` order/i);
+  assert.match(skill, /compact `proposedWave` projection with each member's `jobId` and `accessKnowledge`/i);
   assert.match(skill, /Missing, noncontiguous, or mismatched identity blocks approval/i);
   assert.match(skill, /unchanged `accessProposal\.members\[\]\.jobId` order/i);
   assert.match(skill, /server-provided `accessProposal\.approvalHash`/i);
@@ -2666,8 +2670,8 @@ test('Apply skill 4.8.0 requires protocol 3.7.0 for new work and preserves activ
   assert.match(orchestration, /protocol 3\.4 execution remains get-or-stop-only legacy recovery/i);
   assert.match(orchestration, /When `nextAction` is `access_review`/);
   assert.match(orchestration, /Workday starts as `ACCOUNT WALL`/);
-  assert.match(orchestration, /Require each simple `proposedWave` identity to equal the corresponding rich/i);
-  assert.match(orchestration, /job ID, company,\s+title, provider, requisition URL, and a short value-free reason/i);
+  assert.match(orchestration, /local\s+projection contains each member's `jobId` and value-free `accessKnowledge`/i);
+  assert.match(orchestration, /job IDs and scheduling\s+reasons in order/i);
 });
 
 test('terminal Apply executions remain visible but are never resumed', () => {

@@ -83,30 +83,40 @@ probe while Greenhouse or other `OPEN`/neutral alternatives exist. Eightfold
 starts as `ACCOUNT WALL`, is independently authentication-gated, and must not be
 opened for a browser probe under the same condition. Static safety exclusions
 always override `OPEN`.
-An active job, company, or provider deferment is an unconditional no-browser
-rule, regardless of whether another accessible candidate remains.
+An active job, company, or provider deferment is an unconditional no-browser rule,
+regardless of whether another accessible candidate remains.
 
 Read `progress.availableCandidateCount`, `progress.deferredCandidateCount`, and
-`nextAction`. When `nextAction` is `access_review`, return the bounded deferred
-proposal, open nothing, and do not report the queue as exhausted. Clear any
-active personal deferment before probing. Probe those exact job IDs only with
-hash-bound `accessReviewApproval` after clearing that deferment. List or create deferments only through
+`nextAction`. When `nextAction` is `access_review`, return the bounded
+access-review proposal, including ordinary OPEN or neutral members, open
+nothing, and do not report the queue as exhausted. If the proposal has no
+members because all remaining candidates are deferred, or because exact
+recovery is blocked by a user deferment
+(`recovery_blocked_by_user_deferment`), show its deferred count and matching
+stable job/scope/deferment IDs, then offer clear-deferment only for IDs the user
+explicitly selects and the server returns. Recovery-blocked proposals may
+still report available candidates; they are not queue exhaustion. If a legacy
+receipt omits that mapping, stop or expiry rather than guessing an ID. Never
+send an empty approval.
+Clear any active personal deferment before probing. For a nonempty proposal,
+probe those exact job IDs only with hash-bound `accessReviewApproval` after
+clearing that deferment. List or create deferments only through
 `trackly_list_apply_access_deferments` and `trackly_defer_apply_access` using a
-Trackly `jobId`. Clear only through `trackly_clear_apply_access_deferment` using the exact user-selected `defermentId` returned by deferment discovery or creation. Never submit a URL, provider name, or raw chat.
-Scope `provider` is the approved global
-user-policy boundary: the server derives that identity and blocks matching
-candidates across companies, proposal approval, recovery, and replay. Create a
-provider deferment only after the current authenticated user explicitly requests
-that persistent provider policy; never infer it from this shared skill.
+Trackly `jobId` and scope `job`, `company`, or `provider`. Provider scope is a
+global policy boundary derived from that stable job anchor and applies across
+companies until explicitly cleared. Clear only through
+`trackly_clear_apply_access_deferment` using the exact user-selected
+`defermentId` returned by deferment discovery or creation. Never submit a URL,
+provider name, or raw chat.
 
 Pause after every `proposedWave`. Same-key advance replay returns the same
 member IDs, order, and rationale. Browser probing requires explicit wave
-approval, including when every proposed job is OPEN or neutral. Show every
-server-frozen member in exact `memberPosition` order with its job ID, company,
-title, provider, requisition URL, and a short value-free reason such as
-“Greenhouse default: OPEN, audited 6 days ago; fresh probe still required.”
-Require each simple `proposedWave` identity to equal the corresponding rich
-`accessProposal.members[]` identity. Missing, noncontiguous, or mismatched
+approval, including when every proposed job is OPEN or neutral. The local
+projection contains each member's `jobId` and value-free `accessKnowledge`;
+the rich `accessProposal.members[]` receipt contains the contiguous position,
+rationale, and approval metadata. Show those exact job IDs and scheduling
+reasons in order and require the compact projection's ordered IDs and access
+knowledge to match the rich receipt. Missing, noncontiguous, or mismatched
 identity blocks approval; never substitute chat, browser state, search results,
 or a later mutable job lookup. Never describe a proposed job as accessible until the current
 probe proves it. Bind approval to the unchanged

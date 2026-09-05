@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Align Apply access-review parsing and guidance with the compact 3.8.x
+  proposal wire shape, including all-deferred and recovery-blocked zero-member reviews and active
+  execution recovery envelopes, while retaining the 3.8.1 provider-scope
+  contract for the coordinated backend release. Legacy all-deferred receipts
+  without deferment mappings remain safe stop/expiry states until refreshed.
+
 ## [0.18.0] - 2026-09-04
 
 ### Added
@@ -17,9 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `trackly_list_apply_access_deferments`, `trackly_defer_apply_access`,
   and `trackly_clear_apply_access_deferment` so agents can persist or clear
   job/company/provider deferments from a Trackly `jobId` without submitting
-  provider names, URLs, or raw chat. Provider scope can persist explicitly
-  requested Workday and Eightfold exclusions across companies, recovery, and
-  replay.
+  provider names, URLs, or raw chat. Provider scope is the approved global
+  policy boundary and applies across companies until explicitly cleared.
 - Updated Trackly Apply skill 4.8.0 and protocol 3.7.0 so historical OPEN
   can schedule work but a fresh live probe remains required before form
   filling.

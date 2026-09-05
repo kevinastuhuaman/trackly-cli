@@ -30,11 +30,22 @@ Server-owned scheduling evidence that ranks jobs by curated ATS defaults, user d
 
 ## Access review
 
-The `nextAction` that returns a bounded deferred proposal when only account-wall or user-deferred candidates remain. Trackly opens nothing and does not report the queue as exhausted.
+The `nextAction` that returns a bounded access-review proposal before any
+browser work. It may contain ordinary OPEN or neutral candidates that still
+require explicit approval, or it may contain zero members when all remaining
+candidates are deferred or exact recovery is blocked by a user deferment.
+Trackly opens nothing and does not report the queue as exhausted; an empty
+all-deferred or recovery-blocked proposal is handled by clearing explicitly
+returned job/company/provider deferments, stopping, or expiry rather than by
+sending an empty approval.
 
 ## User deferment
 
-An explicit, persistent, reversible per-user preference to skip a Trackly job, company, or provider scope. Provider scope applies across companies and remains a no-browser policy until explicitly cleared. The server derives identity from `jobId`; agents cannot submit URLs or raw chat. Global policy is never trained from individual deferments.
+An explicit, persistent, reversible per-user preference to skip a Trackly job,
+company, or provider scope. The server derives identity from `jobId`; agents
+cannot submit URLs or raw chat. Provider scope is a global policy boundary that
+applies across companies until explicitly cleared. Global policy is never
+trained from individual deferments.
 
 ## Service-authoritative safety guard
 

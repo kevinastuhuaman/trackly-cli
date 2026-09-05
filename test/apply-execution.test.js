@@ -622,6 +622,8 @@ test('profile jurisdiction and office tools validate and forward exact context',
 test('execution tools validate and send the exact HTTP contract', async () => {
   const progress = {
     target: 10,
+    achievementCount: 0,
+    completed: 0,
     durablyReviewReady: 0,
     submitted: 0,
     reservedReviewSlots: 0,
@@ -632,9 +634,13 @@ test('execution tools validate and send the exact HTTP contract', async () => {
     conflicted: 0,
     attempted: 0,
     remainingCandidates: 10,
+    availableCandidateCount: 10,
+    deferredCandidateCount: 0,
     queueExhausted: false,
     targetReached: false,
     nextAction: 'advance',
+    historicalProjection: { achievementCount: 0, completed: 0 },
+    currentProjection: { durablyReviewReady: 0, submitted: 0 },
   };
   const execution = {
     id: 41,
@@ -668,6 +674,18 @@ test('execution tools validate and send the exact HTTP contract', async () => {
         revision: 4,
         progress,
       };
+    }
+    if (method === 'POST' && route === '/api/jobscout/apply/executions') {
+      return {
+        success: true,
+        replay: false,
+        execution,
+        candidateCount: 10,
+        progress,
+      };
+    }
+    if (method === 'GET' && route === '/api/jobscout/apply/executions/active') {
+      return { success: true, enabled: true, active: false, preserved: false };
     }
     return { ok: true };
   });
@@ -1040,12 +1058,26 @@ test('start execution returns numeric identity plus authoritative progress and n
     replay: false,
     execution: {
       id: 41,
+      userId: 7,
+      mode: 'complete_next_n_accessible',
+      targetCount: 10,
+      orderingVersion: 3,
+      queueSnapshotAt: '2026-08-28T12:00:00.000Z',
+      originalSnapshotHash: 'a'.repeat(64),
+      status: 'running',
       revision: 1,
+      expiresAt: '2026-08-29T12:00:00.000Z',
+      recoverableUntil: '2026-09-04T12:00:00.000Z',
+      sourceExecutionId: null,
+      sourceSnapshotHash: null,
       currentWave: null,
+      unresolvedWaves: [],
     },
     candidateCount: 12,
     progress: {
       target: 10,
+      achievementCount: 0,
+      completed: 0,
       durablyReviewReady: 0,
       submitted: 0,
       reservedReviewSlots: 0,
@@ -1056,9 +1088,13 @@ test('start execution returns numeric identity plus authoritative progress and n
       conflicted: 0,
       attempted: 0,
       remainingCandidates: 12,
+      availableCandidateCount: 12,
+      deferredCandidateCount: 0,
       queueExhausted: false,
       targetReached: false,
       nextAction: 'advance',
+      historicalProjection: { achievementCount: 0, completed: 0 },
+      currentProjection: { durablyReviewReady: 0, submitted: 0 },
     },
   };
   const { registrations } = registerRuntimeTools(response);
@@ -1074,9 +1110,155 @@ test('start execution returns numeric identity plus authoritative progress and n
   assert.equal(result.progress.nextAction, 'advance');
 });
 
+test('start access-review replays hydrate and cache the detail receipt before approval', async () => {
+  const execution = {
+    id: 41,
+    userId: 7,
+    mode: 'complete_next_n_accessible',
+    targetCount: 1,
+    orderingVersion: 3,
+    queueSnapshotAt: '2026-08-28T12:00:00.000Z',
+    originalSnapshotHash: 'a'.repeat(64),
+    status: 'running',
+    revision: 4,
+    expiresAt: '2026-08-29T12:00:00.000Z',
+    recoverableUntil: '2026-09-04T12:00:00.000Z',
+    sourceExecutionId: null,
+    sourceSnapshotHash: null,
+    currentWave: null,
+    unresolvedWaves: [],
+  };
+  const progress = {
+    target: 1,
+    achievementCount: 0,
+    completed: 0,
+    durablyReviewReady: 0,
+    submitted: 0,
+    reservedReviewSlots: 0,
+    currentlyFilling: 0,
+    awaitingAnswer: 0,
+    authParked: 0,
+    excluded: 0,
+    conflicted: 0,
+    attempted: 0,
+    remainingCandidates: 1,
+    availableCandidateCount: 1,
+    deferredCandidateCount: 0,
+    queueExhausted: false,
+    targetReached: false,
+    nextAction: 'access_review',
+    historicalProjection: { achievementCount: 0, completed: 0 },
+    currentProjection: { durablyReviewReady: 0, submitted: 0 },
+  };
+  const accessProposal = {
+    proposalId: 7,
+    approvalHash: 'c'.repeat(64),
+    rationaleCode: 'access_review',
+    knowledgeRevision: 1,
+    evaluatedAt: '2026-08-28T12:00:00.000Z',
+    availableCandidateCount: 1,
+    deferredCandidateCount: 0,
+    members: [{
+      jobId: 88,
+      memberPosition: 0,
+      rationaleCode: 'ats_default_open',
+      receiptHash: 'd'.repeat(64),
+      accessKnowledge: sampleAccessKnowledge,
+    }],
+  };
+  const detail = {
+    success: true,
+    execution,
+    progress,
+    proposedWave: [{ jobId: 88, accessKnowledge: sampleAccessKnowledge }],
+    accessProposal,
+  };
+  let startCalls = 0;
+  const { registrations, calls } = registerRuntimeTools((method, route) => {
+    if (method === 'POST' && route === '/api/jobscout/apply/executions') {
+      startCalls += 1;
+      return startCalls === 1
+        ? { success: true, replay: true, execution, candidateCount: 1, progress }
+        : {
+          success: true,
+          replay: true,
+          execution,
+          candidateCount: 1,
+          progress: { ...progress, nextAction: 'advance' },
+        };
+    }
+    if (method === 'GET' && route.endsWith('/41')) return detail;
+    if (method === 'POST' && route.endsWith('/advance')) {
+      return {
+        success: true,
+        executionId: 41,
+        createdWave: true,
+        batchId: 91,
+        revision: 5,
+        progress: { ...progress, remainingCandidates: 0, availableCandidateCount: 0, nextAction: 'continue_current_wave' },
+      };
+    }
+    throw new Error(`unexpected request: ${method} ${route}`);
+  });
+  const start = registrations.get('trackly_start_apply_execution');
+  const result = await start.handler(start.schema.parse({
+    mode: 'complete_next_n_accessible',
+    target: 1,
+    idempotencyKey: 'start-replay-hydration-key',
+  }));
+  assert.equal(startCalls, 1);
+  assert.deepEqual(result.accessProposal, accessProposal);
+  assert.deepEqual(calls.map((call) => call.slice(0, 2)), [
+    ['POST', '/api/jobscout/apply/executions'],
+    ['GET', '/api/jobscout/apply/executions/41'],
+  ]);
+
+  const advance = registrations.get('trackly_advance_apply_execution');
+  await assert.doesNotReject(advance.handler(advance.schema.parse({
+    executionId: 41,
+    expectedRevision: 4,
+    browserSurface: 'codex_in_app',
+    idempotencyKey: 'start-replay-approval-key',
+    accessReviewApproval: { jobIds: [88], approvalHash: accessProposal.approvalHash },
+  })));
+
+  // A later idempotent start replay can return ordinary progress after the
+  // review wave was consumed. That authoritative state must clear the old
+  // approval receipt before another advance is attempted.
+  await start.handler(start.schema.parse({
+    mode: 'complete_next_n_accessible',
+    target: 1,
+    idempotencyKey: 'start-ordinary-replay-key',
+  }));
+  await assert.rejects(advance.handler(advance.schema.parse({
+    executionId: 41,
+    expectedRevision: 4,
+    browserSurface: 'codex_in_app',
+    idempotencyKey: 'stale-approval-after-ordinary-key',
+    accessReviewApproval: { jobIds: [88], approvalHash: accessProposal.approvalHash },
+  })), /exact returned proposal/i);
+  assert.equal(startCalls, 2);
+
+  const mismatchedStart = registerRuntimeTools((method, route) => {
+    if (method === 'POST' && route === '/api/jobscout/apply/executions') {
+      return { success: true, replay: true, execution, candidateCount: 1, progress };
+    }
+    if (method === 'GET' && route.endsWith('/41')) {
+      return { ...detail, execution: { ...execution, revision: execution.revision + 1 } };
+    }
+    throw new Error(`unexpected request: ${method} ${route}`);
+  }).registrations.get('trackly_start_apply_execution');
+  await assert.rejects(mismatchedStart.handler(mismatchedStart.schema.parse({
+    mode: 'complete_next_n_accessible',
+    target: 1,
+    idempotencyKey: 'start-revision-race-key',
+  })), /did not include its proposal/i);
+});
+
 test('active execution validation accepts ordinary envelopes with active-state metadata', async () => {
   const response = {
     success: true,
+    enabled: true,
     active: true,
     preserved: false,
     execution: {
@@ -1116,11 +1298,136 @@ test('active execution validation accepts ordinary envelopes with active-state m
   const registration = registerRuntimeTools(response).registrations.get('trackly_get_active_apply_execution');
   assert.deepEqual(await registration.handler({}), response);
 
+  const preservedTerminal = {
+    ...response,
+    active: false,
+    preserved: true,
+    execution: { ...response.execution, status: 'stopped' },
+    progress: { ...response.progress, nextAction: 'none' },
+  };
+  const preservedRegistration = registerRuntimeTools(preservedTerminal)
+    .registrations.get('trackly_get_active_apply_execution');
+  assert.deepEqual(await preservedRegistration.handler({}), preservedTerminal);
+
+  const contradictoryInactiveReview = {
+    ...response,
+    active: false,
+    progress: { ...response.progress, nextAction: 'access_review' },
+  };
+  const contradictoryRegistration = registerRuntimeTools(contradictoryInactiveReview)
+    .registrations.get('trackly_get_active_apply_execution');
+  await assert.rejects(contradictoryRegistration.handler({}), z.ZodError);
+
   const missingProposal = registerRuntimeTools({
     ...response,
     progress: { ...response.progress, nextAction: 'access_review' },
   }).registrations.get('trackly_get_active_apply_execution');
   await assert.rejects(missingProposal.handler({}), z.ZodError);
+
+  const missingDetailProposal = registerRuntimeTools({
+    success: true,
+    execution: response.execution,
+    progress: { ...response.progress, nextAction: 'access_review' },
+  }).registrations.get('trackly_get_apply_execution');
+  await assert.rejects(
+    missingDetailProposal.handler(missingDetailProposal.schema.parse({ executionId: 41 })),
+    z.ZodError,
+  );
+});
+
+test('active access reviews hydrate the compact proposal and reject revision races', async () => {
+  const execution = {
+    id: 41,
+    userId: 7,
+    mode: 'complete_next_n_accessible',
+    targetCount: 1,
+    orderingVersion: 3,
+    queueSnapshotAt: '2026-08-28T12:00:00.000Z',
+    originalSnapshotHash: 'a'.repeat(64),
+    status: 'running',
+    revision: 4,
+    expiresAt: '2026-08-29T12:00:00.000Z',
+    recoverableUntil: '2026-09-04T12:00:00.000Z',
+    sourceExecutionId: null,
+    sourceSnapshotHash: null,
+    currentWave: null,
+    unresolvedWaves: [],
+  };
+  const proposalProgress = {
+    target: 1,
+    achievementCount: 0,
+    completed: 0,
+    durablyReviewReady: 0,
+    submitted: 0,
+    reservedReviewSlots: 0,
+    currentlyFilling: 0,
+    awaitingAnswer: 0,
+    authParked: 0,
+    excluded: 0,
+    conflicted: 0,
+    attempted: 0,
+    remainingCandidates: 1,
+    availableCandidateCount: 1,
+    deferredCandidateCount: 0,
+    queueExhausted: false,
+    targetReached: false,
+    nextAction: 'access_review',
+    historicalProjection: { achievementCount: 0, completed: 0 },
+    currentProjection: { durablyReviewReady: 0, submitted: 0 },
+  };
+  const proposal = {
+    success: true,
+    execution,
+    progress: proposalProgress,
+    proposedWave: [{ jobId: 88, accessKnowledge: sampleAccessKnowledge }],
+    accessProposal: {
+      proposalId: 7,
+      approvalHash: 'c'.repeat(64),
+      rationaleCode: 'access_review',
+      knowledgeRevision: 1,
+      evaluatedAt: '2026-08-28T12:00:00.000Z',
+      availableCandidateCount: 1,
+      deferredCandidateCount: 0,
+      members: [{
+        jobId: 88,
+        memberPosition: 0,
+        rationaleCode: 'ats_default_open',
+        receiptHash: 'd'.repeat(64),
+        accessKnowledge: sampleAccessKnowledge,
+      }],
+    },
+  };
+  const active = {
+    success: true,
+    enabled: true,
+    active: true,
+    preserved: false,
+    execution,
+    progress: proposalProgress,
+  };
+  let detailRevision = execution.revision;
+  const { registrations, calls } = registerRuntimeTools((method, route) => {
+    if (route.endsWith('/active')) return active;
+    if (route.endsWith('/41')) {
+      return {
+        ...proposal,
+        execution: { ...execution, revision: detailRevision },
+      };
+    }
+    throw new Error(`unexpected request: ${method} ${route}`);
+  });
+  const registration = registrations.get('trackly_get_active_apply_execution');
+  const result = await registration.handler({});
+  assert.deepEqual(result.proposedWave, proposal.proposedWave);
+  assert.deepEqual(result.accessProposal, proposal.accessProposal);
+  assert.equal(result.enabled, true);
+  assert.deepEqual(calls.map((call) => call.slice(0, 2)), [
+    ['GET', '/api/jobscout/apply/executions/active'],
+    ['GET', '/api/jobscout/apply/executions/41'],
+  ]);
+
+  detailRevision = execution.revision + 1;
+  await assert.rejects(registration.handler({}), /did not include its proposal/i);
 });
 
 test('advance replay returns the backend current revision and progress unchanged', async () => {
@@ -1829,8 +2136,10 @@ test('access-review validation bounds all-deferred proposals, ignores key order,
 
   const allDeferredProposal = {
     ...accessProposal,
+    rationaleCode: 'all_candidates_user_deferred',
     availableCandidateCount: 0,
     deferredCandidateCount: 1,
+    blockedJobDeferments: [{ jobId: 88, defermentId: 9, scope: 'job' }],
     members: [],
   };
   const allDeferred = registerRuntimeTools({
@@ -1859,6 +2168,47 @@ test('access-review validation bounds all-deferred proposals, ignores key order,
     progress: proposalProgress,
   }).registrations.get('trackly_advance_apply_execution');
   await assert.rejects(invalidEmpty.handler(invalidEmpty.schema.parse(advanceInput())), z.ZodError);
+
+  const missingDefermentMapping = registerRuntimeTools({
+    success: true,
+    executionId: 41,
+    createdWave: false,
+    revision: 4,
+    proposedWave: [],
+    accessProposal: {
+      ...allDeferredProposal,
+      blockedJobDeferments: undefined,
+    },
+    progress: {
+      ...proposalProgress,
+      availableCandidateCount: 0,
+      deferredCandidateCount: 1,
+    },
+  }).registrations.get('trackly_advance_apply_execution');
+  await assert.doesNotReject(
+    missingDefermentMapping.handler(missingDefermentMapping.schema.parse(advanceInput())),
+  );
+
+  const recoveryBlocked = registerRuntimeTools({
+    success: true,
+    executionId: 41,
+    createdWave: false,
+    revision: 4,
+    proposedWave: [],
+    accessProposal: {
+      ...allDeferredProposal,
+      rationaleCode: 'recovery_blocked_by_user_deferment',
+      availableCandidateCount: 2,
+      deferredCandidateCount: 1,
+      blockedJobDeferments: [{ jobId: 88, defermentId: 9, scope: 'job' }],
+    },
+    progress: {
+      ...proposalProgress,
+      availableCandidateCount: 2,
+      deferredCandidateCount: 1,
+    },
+  }).registrations.get('trackly_advance_apply_execution');
+  await assert.doesNotReject(recoveryBlocked.handler(recoveryBlocked.schema.parse(advanceInput())));
 
   const reorderedAccessKnowledge = {
     freshLiveProbeRequired: sampleAccessKnowledge.freshLiveProbeRequired,
@@ -1908,6 +2258,20 @@ test('access-review validation bounds all-deferred proposals, ignores key order,
         success: true,
         executionId: 41,
         createdWave: false,
+        revision: 4,
+        proposedWave,
+        accessProposal: followUpProposal,
+        progress: {
+          ...proposalProgress,
+          nextAction: 'continue_current_wave',
+        },
+      };
+    }
+    if (requestCount === 3) {
+      return {
+        success: true,
+        executionId: 41,
+        createdWave: false,
         revision: 5,
         proposedWave,
         accessProposal: followUpProposal,
@@ -1933,10 +2297,14 @@ test('access-review validation bounds all-deferred proposals, ignores key order,
   })));
   await followUp.handler(followUp.schema.parse(advanceInput({
     expectedRevision: 5,
+    idempotencyKey: 'follow-up-proposal-test-key',
+  })));
+  await followUp.handler(followUp.schema.parse(advanceInput({
+    expectedRevision: 5,
     idempotencyKey: 'follow-up-approval-test-key',
     accessReviewApproval: { jobIds: [88], approvalHash: followUpHash },
   })));
-  assert.equal(requestCount, 3);
+  assert.equal(requestCount, 4);
 });
 
 test('access deferment tools use jobId-derived scopes and discovered ids', async () => {
@@ -1952,12 +2320,14 @@ test('access deferment tools use jobId-derived scopes and discovered ids', async
     clearedAt: '2026-08-28T12:05:00.000Z',
     persistsUntilCleared: false,
   };
+  let clearCalls = 0;
   const { registrations, calls } = registerRuntimeTools((method, route) => {
     if (method === 'GET') {
       return { success: true, deferments: [deferment] };
     }
     if (route.endsWith('/clear')) {
-      return { success: true, replay: false, deferment: clearReceipt };
+      clearCalls += 1;
+      return { success: true, replay: clearCalls > 1, deferment: clearReceipt };
     }
     return { success: true, replay: false, deferment };
   });
@@ -1990,6 +2360,21 @@ test('access deferment tools use jobId-derived scopes and discovered ids', async
     '/api/jobscout/apply/access-deferments/9/clear',
     {},
   ]);
+  const clear = registrations.get('trackly_clear_apply_access_deferment');
+  const replayed = await clear.handler(clear.schema.parse({
+    defermentId: 9,
+    idempotencyKey,
+  }));
+  assert.equal(replayed.replay, true);
+  assert.equal(clearCalls, 2);
+  await assert.rejects(
+    clear.handler(clear.schema.parse({
+      defermentId: 9,
+      idempotencyKey: 'new-after-clear-key-0001',
+    })),
+    /latest list or defer response/,
+  );
+  assert.equal(clearCalls, 2);
   const providerDefer = registerRuntimeTools({
     success: true,
     replay: false,
