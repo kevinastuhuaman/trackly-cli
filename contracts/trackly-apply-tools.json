@@ -1,6 +1,8 @@
 {
-  "contractVersion": "3.7.6",
+  "contractVersion": "3.8.1",
   "constants": {
+    "applyExecutionProtocolVersion": "trackly-apply-execution/v3",
+    "applyAccessKnowledgeOrderingVersion": 3,
     "applyExecutionMaxTarget": 20,
     "applyScenarioCodes": ["browser_reclaim", "resume_upload", "resume_parser_recheck", "semantic_boolean_commit", "custom_select_commit", "multi_step_navigation", "free_text_voice", "required_error_sweep", "final_consent", "handoff_reclaim", "critical_contact_integrity", "manual_submit_boundary", "job_identity_match"],
     "applyBrowserSurfaces": ["codex_in_app", "chrome_extension", "claude_in_chrome"],
@@ -12,7 +14,7 @@
     "applyExecutionDispositionSources": ["live_probe"],
     "applyProbeCleanupPreferences": ["never", "submitted_only", "submitted_and_probe_blockers"],
     "applyExecutionStopReasonCodes": ["user_requested", "target_changed", "session_ended", "execution_restarted", "operator_stop"],
-    "applyBatchConflictCodes": ["state_changed", "lease_unavailable", "idempotency_key_reused", "fixed_batch_not_found", "execution_child_batch", "fixed_batch_not_active", "fixed_batch_revision_changed", "submission_in_progress", "attestation_dependencies_changed", "legacy_fixed_batch_active", "dedicated_recovery_required", "recovery_migration_not_ready"],
+    "applyBatchConflictCodes": ["state_changed", "lease_unavailable", "idempotency_key_reused", "fixed_batch_not_found", "execution_child_batch", "fixed_batch_not_active", "fixed_batch_revision_changed", "submission_in_progress", "attestation_dependencies_changed", "legacy_fixed_batch_active", "dedicated_recovery_required", "recovery_migration_not_ready", "access_deferment_limit_reached", "access_deferments_active"],
     "fixedApplyBatchCancelReasonCodes": ["user_requested_restart"],
     "applyCheckpointPacketPhases": ["first_pass", "delta"],
     "applySurfaceBindingReasons": ["initial_binding", "recovery_binding"],
@@ -23,6 +25,12 @@
     "applyPositiveSubmissionStrategyCodes": ["greenhouse_confirmation_redirect", "greenhouse_semantic_success", "ashby_semantic_success_banner", "ashby_submitted_state", "lever_confirmation_redirect", "lever_semantic_confirmation"],
     "applyExecutionRecoveryEligibilityCodes": ["recoverable", "already_applied", "inactive", "revoked", "changed_requisition", "concurrently_owned", "lineage_unavailable", "retention_expired"],
     "applyHandoffReconciliationClassifications": ["detected", "user_confirmed", "unresolved", "contradictory"],
+    "applyObservedAccessClassifications": ["open", "account_wall", "varies", "unknown"],
+    "applyAccessKnowledgeSources": ["curated_audit", "live_probe", "none"],
+    "applyAccessFreshnessStates": ["fresh", "stale", "unknown"],
+    "applySchedulingEffects": ["prefer", "neutral", "defer_while_alternatives_exist", "defer_until_cleared"],
+    "applyAccessDefermentScopes": ["job", "company", "provider"],
+    "applyAccessMatchedScopes": ["job", "company", "provider_tenant", "origin", "route", "ats_default"],
     "applyUploadStages": ["semantic_control_discovered", "file_chooser_armed", "file_chooser_opened", "set_files_succeeded", "user_facing_filename_committed", "parser_fields_rechecked"],
     "applyUploadFailureCodes": ["upload_capability_unavailable", "upload_stage_missing", "upload_stage_out_of_order", "upload_stage_duplicate", "control_ambiguous", "chooser_timeout", "chooser_open_without_commit", "file_missing", "file_expired", "set_files_failed", "filename_uncommitted", "unexpected_file_navigation", "parser_unsettled", "parser_field_regression"]
   },
@@ -34,6 +42,24 @@
     },
     "trackly_get_apply_execution_snapshot": {
       "officeProjectionMemberIdsMustExistInMemberIds": true
+    },
+    "trackly_advance_apply_execution": {
+      "accessReviewApprovalJobIdsMustBeUnique": true,
+      "accessReviewApprovalRequiresClearedPersonalDeferment": true,
+      "sameKeyReplayReturnsIdenticalProposedWaveAndRationale": true,
+      "proposedWaveIncludesFrozenIdentity": true,
+      "approvalReceiptBindsFrozenIdentity": true
+    },
+    "trackly_defer_apply_access": {
+      "serverDerivesIdentityFromJobId": true,
+      "agentsCannotSubmitUrlsOrRawChat": true,
+      "providerScopeAppliesAcrossCompanies": true
+    },
+    "trackly_clear_apply_access_deferment": {
+      "clearRequiresDiscoveredDefermentId": true,
+      "idempotentReplayPreserved": true,
+      "clearReceiptIncludesClearedAt": true,
+      "clearReceiptPersistsUntilClearedFalse": true
     }
   },
   "schemaDigests": {
@@ -56,7 +82,10 @@
     "trackly_get_apply_execution_snapshot": "{executionId:z.number().int().min(1),memberIds:z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET).refine((values)=>newSet(values).size===values.length,{message:'memberIdsmustbeunique'}),profileKeys:z.array(z.string().min(1).max(200)).max(100).refine((values)=>newSet(values).size===values.length,{message:'profileKeysmustbeunique'}).optional(),officeProjections:z.array(z.object({memberId:z.number().int().min(1),office:officeScopeSchema,profileKeys:z.array(z.string().min(1).max(200)).min(1).max(100).refine((values)=>newSet(values).size===values.length,{message:'officeprofileKeysmustbeunique'})}).strict()).max(APPLY_EXECUTION_MAX_TARGET).refine((values)=>newSet(values.map(({memberId})=>memberId)).size===values.length,{message:'officeProjectionsmustcontainuniquememberIdvalues'}).optional(),browserSurface:z.enum(APPLY_BROWSER_SURFACES)}",
     "trackly_resume_parked_apply_member": "{executionId:z.number().int().min(1),memberId:z.number().int().min(1),expectedRevision:z.number().int().min(1),browserSurface:z.enum(APPLY_BROWSER_SURFACES),explicitUserResume:z.literal(true),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_approve_apply_execution_resume": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),originalSnapshotHash:z.string().regex(/^[a-f0-9]{64}$/),profileRevision:z.number().int().min(1),resumeId:z.number().int().min(1),resumeSha256:z.string().regex(/^[a-f0-9]{64}$/),resumeFilename:z.string().min(1).max(255),resumeSizeBytes:z.number().int().min(1),expiresAt:z.string().datetime(),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
-    "trackly_advance_apply_execution": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),browserSurface:z.enum(APPLY_BROWSER_SURFACES),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
+    "trackly_advance_apply_execution": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),browserSurface:z.enum(APPLY_BROWSER_SURFACES),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),accessReviewApproval:z.object({jobIds:z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET).refine((values)=>newSet(values).size===values.length,{message:'jobIdsmustbeunique'}),approvalHash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional()}",
+    "trackly_list_apply_access_deferments": "{}",
+    "trackly_defer_apply_access": "{jobId:z.number().int().min(1),scope:z.enum(APPLY_ACCESS_DEFERMENT_SCOPES),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
+    "trackly_clear_apply_access_deferment": "{defermentId:z.number().int().min(1),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",
     "trackly_record_apply_execution_dispositions": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),dispositions:z.array(applyExecutionDispositionSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET)}",
     "trackly_stop_apply_execution": "{executionId:z.number().int().min(1),expectedRevision:z.number().int().min(1),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),reasonCode:z.enum(APPLY_EXECUTION_STOP_REASON_CODES).optional()}",
     "trackly_create_apply_batch": "{limit:z.number().int().min(1).max(100),idempotencyKey:z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY)}",

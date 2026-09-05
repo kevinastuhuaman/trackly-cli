@@ -27,6 +27,7 @@ const {
   assertPluginReviewReadyPersistenceSemantics,
   assertPluginUiContractSemantics,
   assertActiveFunctionDefinitionAst,
+  assertActiveClassMethodAstSha256,
   canonicalSchemaAst,
   exactSchemaDefinition,
   gitOutput,
@@ -35,10 +36,28 @@ const {
   verifyHostedContract,
 } = require('../scripts/verify-hosted-contract.js');
 
+test('hosted verifier rejects runtime verifyAccessToken shadow members', () => {
+  for (const member of [
+    "['verifyAccessToken']() { return null; }",
+    "verifyAccessToken = () => null;",
+    "['verifyAccessToken'] = () => null;",
+  ]) {
+    const source = `class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member} }`;
+    assert.throws(
+      () => assertActiveClassMethodAstSha256(
+        source, 'TracklyOAuthProvider', 'verifyAccessToken', '0'.repeat(64), 'fixture.ts',
+      ),
+      /exactly one runtime member|must be a method|must use an identifier key|must not use a computed key/,
+    );
+  }
+});
+
 test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {
   const reviewedSource = `
     import { z } from 'zod';
+    export { z };
     const schema = z.object({ value: z.string() });
+    function acceptsShape<Shape extends z.ZodRawShape>(shape: Shape) { return shape; }
   `;
   assert.doesNotThrow(() => assertUnshadowedImportBinding(
     reviewedSource,
@@ -1074,12 +1093,12 @@ test('documented local MCP tool count matches every registered tool', () => {
     /server\.(?:tool|registerTool)\(\s*['"]([^'"]+)['"]/g
   )].map((match) => match[1]);
 
-  assert.equal(registeredTools.length, 55);
+  assert.equal(registeredTools.length, 58);
   assert.equal(new Set(registeredTools).size, registeredTools.length);
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.7.6');
+  assert.equal(contract.contractVersion, '3.8.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
@@ -1087,11 +1106,50 @@ test('local MCP Apply schemas match each complete versioned input schema', () =>
   }
 });
 
-test('Apply contract publishes mixed-packet and replay invariants', () => {
+test('Apply contract publishes the accessible execution protocol and conflict code surface', () => {
+  assert.equal(contract.constants.applyExecutionProtocolVersion, 'trackly-apply-execution/v3');
+  assert.equal(contract.constants.applyAccessKnowledgeOrderingVersion, 3);
+  assert.deepEqual(contract.constants.applyBatchConflictCodes, [
+    'state_changed',
+    'lease_unavailable',
+    'idempotency_key_reused',
+    'fixed_batch_not_found',
+    'execution_child_batch',
+    'fixed_batch_not_active',
+    'fixed_batch_revision_changed',
+    'submission_in_progress',
+    'attestation_dependencies_changed',
+    'legacy_fixed_batch_active',
+    'dedicated_recovery_required',
+    'recovery_migration_not_ready',
+    'access_deferment_limit_reached',
+    'access_deferments_active',
+  ]);
+});
+
+test('Apply contract publishes mixed-packet, replay, and access-knowledge invariants', () => {
   assert.deepEqual(contract.toolInputInvariants.trackly_checkpoint_apply_batch, {
     questionAndNonQuestionActionsMutuallyExclusiveForNewCheckpoints: true,
     exactReplayOfPreviouslyAcceptedPayloadPreserved: true,
     preFormAuthenticationWallsRejectedAfterExactReplayLookup: true,
+  });
+  assert.deepEqual(contract.toolInputInvariants.trackly_advance_apply_execution, {
+    accessReviewApprovalJobIdsMustBeUnique: true,
+    accessReviewApprovalRequiresClearedPersonalDeferment: true,
+    sameKeyReplayReturnsIdenticalProposedWaveAndRationale: true,
+    proposedWaveIncludesFrozenIdentity: true,
+    approvalReceiptBindsFrozenIdentity: true,
+  });
+  assert.deepEqual(contract.toolInputInvariants.trackly_defer_apply_access, {
+    serverDerivesIdentityFromJobId: true,
+    agentsCannotSubmitUrlsOrRawChat: true,
+    providerScopeAppliesAcrossCompanies: true,
+  });
+  assert.deepEqual(contract.toolInputInvariants.trackly_clear_apply_access_deferment, {
+    clearRequiresDiscoveredDefermentId: true,
+    idempotentReplayPreserved: true,
+    clearReceiptIncludesClearedAt: true,
+    clearReceiptPersistsUntilClearedFalse: true,
   });
 });
 
@@ -2550,19 +2608,35 @@ test('Apply MCP evidence preserves custom bounds and prompt gates new executions
   assert.match(promptRegion, /keep the confirmation tab open until a refetch proves member lifecycle submitted and Trackly job state applied_confirmed/);
 });
 
-test('Apply skill 4.7.1 requires protocol 3.6.0 for new work and preserves active legacy recovery', () => {
+test('Apply skill 4.8.0 requires protocol 3.7.0 for new work and preserves active legacy recovery', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
-  assert.match(skill, /Skill 4\.7\.1 requires protocol 3\.6\.0 or newer/);
+  assert.match(skill, /Skill 4\.8\.0 requires protocol 3\.7\.0 or newer/);
   assert.match(skill, /protocol 3\.2 remains valid only for an already-active explicit legacy single run/i);
   assert.match(skill, /an already-active explicit 3\.2 single run may finish through its legacy path/i);
   assert.match(skill, /`compatibleSkillMajor: 4`/);
-  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.7\.1/);
+  assert.match(skill, /Never continue a pre-evidence 3\.0\.x run under skill 4\.8\.0/);
   assert.match(skill, /Preserve that run instead of starting a replacement/);
   assert.match(skill, /already-active protocol 3\.4 execution is read-only legacy recovery/i);
   assert.match(skill, /never call the 3\.5-only snapshot/i);
+  assert.match(skill, /`nextAction` is `access_review`/);
+  assert.match(skill, /Never describe a proposed job as accessible until the current live probe/);
+  assert.match(skill, /trackly_list_apply_access_deferments/);
+  assert.match(skill, /trackly_defer_apply_access/);
+  assert.match(skill, /trackly_clear_apply_access_deferment/);
+  assert.match(skill, /including ordinary OPEN or neutral proposals/i);
+  assert.match(skill, /show each server-frozen member in `memberPosition` order/i);
+  assert.match(skill, /job ID, company, title, provider, requisition URL, and value-free scheduling reason/i);
+  assert.match(skill, /Missing, noncontiguous, or mismatched identity blocks approval/i);
+  assert.match(skill, /unchanged `accessProposal\.members\[\]\.jobId` order/i);
+  assert.match(skill, /server-provided `accessProposal\.approvalHash`/i);
+  assert.match(skill, /freshLiveProbeRequired` remains true/);
   const orchestration = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'), 'utf8');
   assert.match(orchestration, /protocol 3\.5 or newer and the compact-snapshot capability enabled/i);
   assert.match(orchestration, /protocol 3\.4 execution remains get-or-stop-only legacy recovery/i);
+  assert.match(orchestration, /When `nextAction` is `access_review`/);
+  assert.match(orchestration, /Workday starts as `ACCOUNT WALL`/);
+  assert.match(orchestration, /Require each simple `proposedWave` identity to equal the corresponding rich/i);
+  assert.match(orchestration, /job ID, company,\s+title, provider, requisition URL, and a short value-free reason/i);
 });
 
 test('terminal Apply executions remain visible but are never resumed', () => {
@@ -2943,12 +3017,12 @@ test('Apply skill runs Humanizer when available and retains a self-contained fal
   assert.match(writing, /use the saved style instructions or plain default instead/);
 });
 
-test('Apply skill 4.7.1 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
+test('Apply skill 4.8.0 uses compact snapshots, parked-member controls, local lint, and upload proofs', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'), 'utf8');
   const writing = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'application-writing.md'), 'utf8');
   const review = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'review-handoff.md'), 'utf8');
   const upload = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'browser-upload.md'), 'utf8');
-  assert.match(skill, /Skill 4\.7\.1/);
+  assert.match(skill, /Skill 4\.8\.0/);
   assert.match(skill, /trackly_get_apply_execution_snapshot/);
   assert.match(skill, /`mutable` and `allowedOperations`/);
   assert.match(skill, /trackly_resume_parked_apply_member/);

@@ -29,6 +29,12 @@ const APPLY_SUBMISSION_EVIDENCE_TYPES = APPLY_CONTRACT.constants.applySubmission
 const APPLY_SUBMISSION_EVIDENCE_SOURCES = APPLY_CONTRACT.constants.applySubmissionEvidenceSources;
 const APPLY_EXECUTION_RECOVERY_ELIGIBILITY_CODES = APPLY_CONTRACT.constants.applyExecutionRecoveryEligibilityCodes;
 const APPLY_HANDOFF_RECONCILIATION_CLASSIFICATION_CODES = APPLY_CONTRACT.constants.applyHandoffReconciliationClassifications;
+const APPLY_OBSERVED_ACCESS_CLASSIFICATIONS = APPLY_CONTRACT.constants.applyObservedAccessClassifications;
+const APPLY_ACCESS_KNOWLEDGE_SOURCES = APPLY_CONTRACT.constants.applyAccessKnowledgeSources;
+const APPLY_ACCESS_FRESHNESS_STATES = APPLY_CONTRACT.constants.applyAccessFreshnessStates;
+const APPLY_SCHEDULING_EFFECTS = APPLY_CONTRACT.constants.applySchedulingEffects;
+const APPLY_ACCESS_DEFERMENT_SCOPES = APPLY_CONTRACT.constants.applyAccessDefermentScopes;
+const APPLY_ACCESS_MATCHED_SCOPES = APPLY_CONTRACT.constants.applyAccessMatchedScopes;
 const APPLY_BATCH_MAX_MEMBERS = 100;
 const APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST = 20;
 const APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT = 25;
@@ -146,12 +152,290 @@ const applyExecutionDispositionSchema = z.object({
   probeOnlyNoDraft: z.boolean().optional(),
   browserSurface: z.enum(APPLY_BROWSER_SURFACES),
 }).strict();
+const accessKnowledgeSchema = z.object({
+  observedAccess: z.object({
+    classification: z.enum(APPLY_OBSERVED_ACCESS_CLASSIFICATIONS),
+    detailCode: z.string().regex(SAFE_OBSERVATION_CODE).nullable(),
+    wallStage: z.enum(APPLY_EXECUTION_ACCESS_CLASSIFICATIONS).nullable(),
+    matchedScope: z.enum(APPLY_ACCESS_MATCHED_SCOPES),
+    source: z.enum(APPLY_ACCESS_KNOWLEDGE_SOURCES),
+    lastConfirmedAt: z.string().datetime().nullable(),
+    freshUntil: z.string().datetime().nullable(),
+    freshness: z.enum(APPLY_ACCESS_FRESHNESS_STATES),
+    evidenceCount: z.number().int().min(0),
+    contradictory: z.boolean(),
+  }).strict(),
+  userPreference: z.object({
+    defermentId: z.number().int().min(1),
+    scope: z.enum(APPLY_ACCESS_DEFERMENT_SCOPES),
+    createdAt: z.string().datetime(),
+    persistsUntilCleared: z.literal(true),
+  }).strict().nullable(),
+  effectiveSchedulingEffect: z.enum(APPLY_SCHEDULING_EFFECTS),
+  rationaleCode: z.string().regex(SAFE_OBSERVATION_CODE),
+  knowledgeRevision: z.number().int().min(1),
+  evaluatedAt: z.string().datetime(),
+  freshLiveProbeRequired: z.literal(true),
+}).strict();
+const proposedWaveMemberSchema = z.object({
+  jobId: z.number().int().min(1),
+  memberPosition: z.number().int().min(0),
+  jobTitle: z.string().min(1).refine((value) => Array.from(value).length <= 300, {
+    message: 'jobTitle must contain at most 300 Unicode code points',
+  }),
+  companyName: z.string().min(1).refine((value) => Array.from(value).length <= 300, {
+    message: 'companyName must contain at most 300 Unicode code points',
+  }),
+  provider: z.string().regex(SAFE_OBSERVATION_CODE),
+  requisitionUrl: z.string().url().max(2048).refine((value) => value.startsWith('https://'), {
+    message: 'requisitionUrl must use HTTPS',
+  }),
+  accessKnowledge: accessKnowledgeSchema,
+}).strict();
+const blockedJobDefermentSchema = z.object({
+  jobId: z.number().int().min(1),
+  defermentId: z.number().int().min(1),
+  scope: z.enum(APPLY_ACCESS_DEFERMENT_SCOPES),
+}).strict();
+const richProposedWaveMemberSchema = proposedWaveMemberSchema.extend({
+  rationaleCode: z.string().regex(SAFE_OBSERVATION_CODE),
+  receiptHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+const accessProposalSchema = z.object({
+  proposalId: z.number().int().min(1),
+  approvalHash: z.string().regex(/^[a-f0-9]{64}$/),
+  rationaleCode: z.string().regex(SAFE_OBSERVATION_CODE),
+  knowledgeRevision: z.number().int().min(1),
+  evaluatedAt: z.string().datetime(),
+  availableCandidateCount: z.number().int().min(0),
+  deferredCandidateCount: z.number().int().min(0),
+  blockedJobDeferments: z.array(blockedJobDefermentSchema)
+    .max(APPLY_EXECUTION_MAX_TARGET)
+    .refine((values) => (
+      new Set(values.map(({ jobId, defermentId }) => `${jobId}:${defermentId}`)).size
+        === values.length
+    ), { message: 'blockedJobDeferments must contain unique job/deferment pairs' })
+    .optional(),
+  members: z.array(richProposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+}).strict().superRefine((proposal, context) => {
+  if (new Set(proposal.members.map(({ jobId }) => jobId)).size !== proposal.members.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['members'],
+      message: 'accessProposal job IDs must be unique',
+    });
+  }
+  if (proposal.members.some(({ memberPosition }, index) => memberPosition !== index)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['members'],
+      message: 'accessProposal members must retain exact contiguous order',
+    });
+  }
+});
+const executionProgressSchema = z.object({
+  target: z.number().int().min(1),
+  achievementCount: z.number().int().min(0),
+  completed: z.number().int().min(0),
+  durablyReviewReady: z.number().int().min(0),
+  submitted: z.number().int().min(0),
+  reservedReviewSlots: z.number().int().min(0),
+  currentlyFilling: z.number().int().min(0),
+  awaitingAnswer: z.number().int().min(0),
+  authParked: z.number().int().min(0),
+  excluded: z.number().int().min(0),
+  conflicted: z.number().int().min(0),
+  attempted: z.number().int().min(0),
+  remainingCandidates: z.number().int().min(0),
+  availableCandidateCount: z.number().int().min(0),
+  deferredCandidateCount: z.number().int().min(0),
+  queueExhausted: z.boolean(),
+  targetReached: z.boolean(),
+  nextAction: z.enum([
+    'continue_current_wave', 'advance', 'access_review', 'answer_required',
+    'manual_review', 'complete', 'none',
+  ]),
+  historicalProjection: z.object({
+    achievementCount: z.number().int().min(0),
+    completed: z.number().int().min(0),
+  }).strict(),
+  currentProjection: z.object({
+    durablyReviewReady: z.number().int().min(0),
+    submitted: z.number().int().min(0),
+  }).strict(),
+}).strict();
+const compatibleExecutionProgressSchema = executionProgressSchema.extend({
+  achievementCount: z.number().int().min(0).optional(),
+  completed: z.number().int().min(0).optional(),
+  availableCandidateCount: z.number().int().min(0).optional(),
+  deferredCandidateCount: z.number().int().min(0).optional(),
+  historicalProjection: z.object({
+    achievementCount: z.number().int().min(0),
+    completed: z.number().int().min(0),
+  }).strict().optional(),
+  currentProjection: z.object({
+    durablyReviewReady: z.number().int().min(0),
+    submitted: z.number().int().min(0),
+  }).strict().optional(),
+}).strict();
+function validateMatchingProposal(response, context) {
+  const simpleIds = response.proposedWave.map(({ jobId }) => jobId);
+  const richIds = response.accessProposal.members.map(({ jobId }) => jobId);
+  if (new Set(simpleIds).size !== simpleIds.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['proposedWave'],
+      message: 'proposedWave job IDs must be unique',
+    });
+  }
+  if (simpleIds.length !== richIds.length
+    || simpleIds.some((jobId, index) => jobId !== richIds[index])) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['accessProposal', 'members'],
+      message: 'accessProposal must bind the exact ordered proposedWave job IDs',
+    });
+  }
+  if (response.proposedWave.some((member, index) => {
+    const rich = response.accessProposal.members[index];
+    return !rich
+      || member.memberPosition !== rich.memberPosition
+      || member.jobTitle !== rich.jobTitle
+      || member.companyName !== rich.companyName
+      || member.provider !== rich.provider
+      || member.requisitionUrl !== rich.requisitionUrl
+      || JSON.stringify(member.accessKnowledge) !== JSON.stringify(rich.accessKnowledge)
+      || rich.rationaleCode !== rich.accessKnowledge.rationaleCode;
+  })) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['accessProposal', 'members'],
+      message: 'accessProposal must bind the exact displayed frozen identities and access knowledge',
+    });
+  }
+}
+const proposedWaveResponseSchema = z.object({
+  success: z.literal(true),
+  executionId: z.number().int().min(1),
+  createdWave: z.boolean(),
+  batchId: z.number().int().min(1).optional(),
+  revision: z.number().int().min(1),
+  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  accessProposal: accessProposalSchema,
+  progress: executionProgressSchema,
+  replay: z.boolean().optional(),
+}).strict().superRefine(validateMatchingProposal);
+const executionWaveSchema = z.object({
+  batchId: z.number().int().min(1),
+  waveOrder: z.number().int().min(0),
+}).strict();
+const applyExecutionSchema = z.object({
+  id: z.number().int().min(1),
+  userId: z.number().int().min(1),
+  mode: z.enum(['complete_next_n_accessible', 'recover_exact_members']),
+  targetCount: z.number().int().min(1).max(APPLY_EXECUTION_MAX_TARGET),
+  orderingVersion: z.number().int().min(1),
+  queueSnapshotAt: z.string().datetime(),
+  originalSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
+  status: z.enum(['running', 'target_reached', 'exhausted_partial', 'stopped', 'closed', 'expired']),
+  revision: z.number().int().min(1),
+  expiresAt: z.string().datetime(),
+  recoverableUntil: z.string().datetime(),
+  sourceExecutionId: z.number().int().min(1).nullable(),
+  sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  achievementLedgerEnabled: z.boolean().optional(),
+  currentWave: executionWaveSchema.nullable(),
+  unresolvedWaves: z.array(executionWaveSchema).max(APPLY_EXECUTION_MAX_TARGET),
+}).strict();
+const getExecutionAccessReviewResponseSchema = z.object({
+  success: z.literal(true),
+  execution: applyExecutionSchema,
+  progress: executionProgressSchema,
+  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  accessProposal: accessProposalSchema,
+}).strict().superRefine(validateMatchingProposal);
+const activeExecutionAccessReviewResponseSchema = getExecutionAccessReviewResponseSchema.innerType().extend({
+  active: z.boolean().optional(),
+  preserved: z.boolean().optional(),
+}).strict().superRefine(validateMatchingProposal);
+const startExecutionAccessReviewResponseSchema = z.object({
+  success: z.literal(true),
+  execution: applyExecutionSchema,
+  progress: executionProgressSchema,
+  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  accessProposal: accessProposalSchema,
+}).strict().superRefine(validateMatchingProposal);
+const advanceExecutionResponseSchema = z.object({
+  success: z.literal(true),
+  executionId: z.number().int().min(1),
+  createdWave: z.boolean(),
+  batchId: z.number().int().min(1).optional(),
+  revision: z.number().int().min(1),
+  progress: compatibleExecutionProgressSchema,
+  replay: z.boolean().optional(),
+}).strict();
+const getExecutionResponseSchema = z.object({
+  success: z.literal(true),
+  execution: applyExecutionSchema,
+  progress: compatibleExecutionProgressSchema,
+}).strict();
+const accessDefermentSchema = z.object({
+  id: z.number().int().min(1),
+  jobId: z.number().int().min(1),
+  scope: z.enum(APPLY_ACCESS_DEFERMENT_SCOPES),
+  createdAt: z.string().datetime(),
+  persistsUntilCleared: z.literal(true),
+}).strict();
+const clearedAccessDefermentSchema = accessDefermentSchema.extend({
+  clearedAt: z.string().datetime(),
+  persistsUntilCleared: z.literal(false),
+}).strict();
+const accessDefermentListResponseSchema = z.object({
+  success: z.literal(true),
+  deferments: z.array(accessDefermentSchema).max(APPLY_EXECUTION_MAX_TARGET),
+}).strict().refine(({ deferments }) => (
+  new Set(deferments.map(({ id }) => id)).size === deferments.length
+), { message: 'deferment IDs must be unique' });
+const accessDefermentMutationResponseSchema = z.object({
+  success: z.literal(true),
+  replay: z.boolean(),
+  deferment: accessDefermentSchema,
+}).strict();
+const accessDefermentClearResponseSchema = z.object({
+  success: z.literal(true),
+  replay: z.boolean(),
+  deferment: clearedAccessDefermentSchema,
+}).strict();
 const recoverableCandidateSchema = z.object({
   candidateId: z.number().int().min(1),
   jobId: z.number().int().min(1),
   queuePosition: z.number().int().min(0),
   eligibilityCode: z.enum(APPLY_EXECUTION_RECOVERY_ELIGIBILITY_CODES),
+  accessKnowledge: accessKnowledgeSchema.optional(),
 }).strict();
+
+function validateProposedWaveResponse(response) {
+  if (
+    !response
+    || typeof response !== 'object'
+    || Array.isArray(response)
+  ) {
+    return advanceExecutionResponseSchema.parse(response);
+  }
+  const hasSimpleProposal = response.proposedWave !== undefined;
+  const hasRichProposal = response.accessProposal !== undefined;
+  if (!hasSimpleProposal && !hasRichProposal) return advanceExecutionResponseSchema.parse(response);
+  return proposedWaveResponseSchema.parse(response);
+}
+function validateGetExecutionResponse(response) {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return getExecutionResponseSchema.parse(response);
+  }
+  if (response.proposedWave === undefined && response.accessProposal === undefined) {
+    return getExecutionResponseSchema.parse(response);
+  }
+  return getExecutionAccessReviewResponseSchema.parse(response);
+}
 const recoverableExecutionSourceSchema = z.object({
   sourceExecutionId: z.number().int().min(1),
   sourceSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -350,7 +634,7 @@ const startApplyRunSchema = z.object({
   }
 });
 
-const APPLY_RELIABILITY_PROMPT = 'Protocol 3.6 / skill 4.7.1 reliability gate: recover active work first. Retain the latest explicit target as hard, prove genuine applicant fields before counting access, obtain approval for the exact accessible jobs before form mutation, fill all deterministic fields before one true-gap question packet, and validate each value-free phase checkpoint. Every checkpoint action must use its canonical continuationAllowed value; review/manual_submit, captcha/at_submit, trust/origin_mismatch, and observability/unverifiable_state require false. Fail closed on a rejected checkpoint. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
+const APPLY_RELIABILITY_PROMPT = 'Protocol 3.7 / skill 4.8.0 reliability gate: recover active work first. Consume the exact proposedWave and frozen accessKnowledge receipts before opening any browser. Rank OPEN ahead of neutral VARIES/UNKNOWN, then fresh ACCOUNT WALL; never auto-select an active user deferment. Historical OPEN never authorizes fill_form; freshLiveProbeRequired remains true. When nextAction is access_review, display the exact accessProposal and approvalHash, then obtain explicit approval for those exact jobIds and call the hash-bound approval continuation; if access is deferred, wait for probe, clear-deferment, stop, or expiry. Do not open a browser or report the queue exhausted. Retain the latest explicit target as hard, prove genuine applicant fields before counting access, obtain approval for the exact accessible jobs before form mutation, fill all deterministic fields before one true-gap question packet, and validate each value-free phase checkpoint. Every checkpoint action must use its canonical continuationAllowed value; review/manual_submit, captcha/at_submit, trust/origin_mismatch, and observability/unverifiable_state require false. Fail closed on a rejected checkpoint. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. An active personal deferment blocks exact recovery until cleared. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
 
 function registerApplyTools(
   server,
@@ -375,6 +659,39 @@ function registerApplyTools(
   const discoveredRecoverableSources = new Map();
   const discoveredHandoffBindings = new Map();
   const discoveredHandoffIdsByExecution = new Map();
+  const discoveredDefermentIds = new Set();
+  const clearedDefermentReplayKeys = new Map();
+  const MAX_CLEARED_DEFERMENT_REPLAYS = 64;
+  let clearedDefermentReplayCount = 0;
+  function rememberClearedDefermentReplay(defermentId, idempotencyKey) {
+    if (!clearedDefermentReplayKeys.has(defermentId)) clearedDefermentReplayKeys.set(defermentId, new Set());
+    const keys = clearedDefermentReplayKeys.get(defermentId);
+    if (keys.has(idempotencyKey)) return;
+    keys.add(idempotencyKey);
+    clearedDefermentReplayCount += 1;
+    while (clearedDefermentReplayCount > MAX_CLEARED_DEFERMENT_REPLAYS) {
+      const [oldestId, oldestKeys] = clearedDefermentReplayKeys.entries().next().value;
+      const oldestKey = oldestKeys.values().next().value;
+      oldestKeys.delete(oldestKey);
+      clearedDefermentReplayCount -= 1;
+      if (!oldestKeys.size) clearedDefermentReplayKeys.delete(oldestId);
+    }
+  }
+  const pendingAccessProposalByExecution = new Map();
+  const replayableAccessApprovalByExecution = new Map();
+  function rememberAccessProposal(executionId, revision, browserSurface, response) {
+    if (response.progress?.nextAction !== 'access_review') {
+      pendingAccessProposalByExecution.delete(executionId);
+      return response;
+    }
+    pendingAccessProposalByExecution.set(executionId, {
+      revision,
+      browserSurface,
+      approvalHash: response.accessProposal.approvalHash,
+      jobIds: response.accessProposal.members.map(({ jobId }) => jobId),
+    });
+    return response;
+  }
   server.tool(
     'trackly_get_apply_queue',
     'Get the deterministic queue of jobs the user already approved by saving as check later. Do not rescore or veto these jobs.',
@@ -491,27 +808,55 @@ function registerApplyTools(
       target: z.number().int().min(1).max(APPLY_EXECUTION_MAX_TARGET),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
     },
-    wrapTool(async ({ idempotencyKey, ...body }) => applyControlRequest(
-      'POST', '/api/jobscout/apply/executions', body, idempotencyKey,
-    ), 'Failed to start apply execution')
+    wrapTool(async ({ idempotencyKey, ...body }) => {
+      const rawResponse = await applyControlRequest(
+        'POST', '/api/jobscout/apply/executions', body, idempotencyKey,
+      );
+      const response = rawResponse?.proposedWave !== undefined || rawResponse?.accessProposal !== undefined
+        ? startExecutionAccessReviewResponseSchema.parse(rawResponse)
+        : rawResponse;
+      if (response?.proposedWave !== undefined && response?.execution?.id !== undefined) {
+        rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
+      }
+      return response;
+    }, 'Failed to start apply execution')
   );
 
   server.tool(
     'trackly_get_active_apply_execution',
     'Recover the active Apply execution before recovering or creating a legacy fixed batch.',
     {},
-    wrapTool(async () => applyControlRequest(
-      'GET', '/api/jobscout/apply/executions/active',
-    ), 'Failed to recover active apply execution')
+    wrapTool(async () => {
+      const rawResponse = await applyControlRequest('GET', '/api/jobscout/apply/executions/active');
+      const response = rawResponse?.execution !== undefined || rawResponse?.progress !== undefined
+        ? (rawResponse?.active !== undefined || rawResponse?.preserved !== undefined
+          ? activeExecutionAccessReviewResponseSchema.parse(rawResponse)
+          : validateGetExecutionResponse(rawResponse))
+        : rawResponse;
+      if (response?.execution?.id && response.proposedWave !== undefined) {
+        rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
+      }
+      return response;
+    }, 'Failed to recover active apply execution')
   );
 
   server.tool(
     'trackly_get_apply_execution',
     'Read the authoritative execution state, latest current-wave identity, and aggregate progress funnel.',
     { executionId: z.number().int().min(1) },
-    wrapTool(async ({ executionId }) => applyControlRequest(
-      'GET', `/api/jobscout/apply/executions/${executionId}`,
-    ), 'Failed to fetch apply execution')
+    wrapTool(async ({ executionId }) => {
+      const response = validateGetExecutionResponse(await applyControlRequest(
+        'GET', `/api/jobscout/apply/executions/${executionId}`,
+      ));
+      if (response.execution !== undefined && response.execution?.id !== executionId) {
+        throw new Error('Apply execution response does not match the requested execution id.');
+      }
+      if (response.proposedWave === undefined) {
+        pendingAccessProposalByExecution.delete(executionId);
+        return response;
+      }
+      return rememberAccessProposal(executionId, response.execution.revision, null, response);
+    }, 'Failed to fetch apply execution')
   );
 
   server.tool(
@@ -704,16 +1049,62 @@ function registerApplyTools(
 
   server.tool(
     'trackly_advance_apply_execution',
-    'Advance an execution transactionally for the current browser surface. The backend creates at most one immutable continuation wave and never exceeds the requested review-ready target. A same-key replay returns current authoritative progress and the current execution revision.',
+    'Advance an execution transactionally for the current browser surface. Returns the immutable proposedWave with frozen accessKnowledge receipts and never opens a browser. Same-key replay returns the same members, order, and rationale. Optional hash-bound accessReviewApproval probes exact deferred job IDs only after personal deferments are cleared.',
     {
       executionId: z.number().int().min(1),
       expectedRevision: z.number().int().min(1),
       browserSurface: z.enum(APPLY_BROWSER_SURFACES),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+      accessReviewApproval: z.object({
+        jobIds: z.array(z.number().int().min(1)).min(1).max(APPLY_EXECUTION_MAX_TARGET)
+          .refine((values) => new Set(values).size === values.length, {
+            message: 'jobIds must be unique',
+          }),
+        approvalHash: z.string().regex(/^[a-f0-9]{64}$/),
+      }).strict().optional(),
     },
-    wrapTool(async ({ executionId, idempotencyKey, ...body }) => applyControlRequest(
-      'POST', `/api/jobscout/apply/executions/${executionId}/advance`, body, idempotencyKey,
-    ), 'Failed to advance apply execution')
+    wrapTool(async ({ executionId, idempotencyKey, ...body }) => {
+      if (body.accessReviewApproval) {
+        const pending = pendingAccessProposalByExecution.get(executionId);
+        const replayable = replayableAccessApprovalByExecution.get(executionId);
+        const approvedIds = body.accessReviewApproval.jobIds;
+        const matchesProposal = (proposal) => proposal
+          && proposal.revision === body.expectedRevision
+          && (proposal.browserSurface === null || proposal.browserSurface === body.browserSurface)
+          && proposal.approvalHash === body.accessReviewApproval.approvalHash
+          && proposal.jobIds.length === approvedIds.length
+          && proposal.jobIds.every((jobId, index) => jobId === approvedIds[index]);
+        const matchesReplay = matchesProposal(replayable)
+          && replayable.idempotencyKey === idempotencyKey;
+        if (!matchesProposal(pending) && !matchesReplay) {
+          throw new Error(
+            'Access review approval must match the exact returned proposal, revision, browser surface, ordered job IDs, and approval hash.',
+          );
+        }
+      }
+      const response = validateProposedWaveResponse(await applyControlRequest(
+        'POST', `/api/jobscout/apply/executions/${executionId}/advance`, body, idempotencyKey,
+      ));
+      if (response.executionId !== undefined && response.executionId !== executionId) {
+        throw new Error('Apply execution response does not match the requested execution id.');
+      }
+      if (body.accessReviewApproval) {
+        pendingAccessProposalByExecution.delete(executionId);
+        replayableAccessApprovalByExecution.set(executionId, {
+          revision: body.expectedRevision,
+          browserSurface: body.browserSurface,
+          approvalHash: body.accessReviewApproval.approvalHash,
+          jobIds: [...body.accessReviewApproval.jobIds],
+          idempotencyKey,
+        });
+      } else if (response.proposedWave !== undefined) {
+        rememberAccessProposal(executionId, response.revision, body.browserSurface, response);
+      } else {
+        pendingAccessProposalByExecution.delete(executionId);
+        replayableAccessApprovalByExecution.delete(executionId);
+      }
+      return response;
+    }, 'Failed to advance apply execution')
   );
 
   server.tool(
@@ -739,9 +1130,84 @@ function registerApplyTools(
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
       reasonCode: z.enum(APPLY_EXECUTION_STOP_REASON_CODES).optional(),
     },
-    wrapTool(async ({ executionId, idempotencyKey, ...body }) => applyControlRequest(
-      'POST', `/api/jobscout/apply/executions/${executionId}/stop`, body, idempotencyKey,
-    ), 'Failed to stop apply execution')
+    wrapTool(async ({ executionId, idempotencyKey, ...body }) => {
+      const response = await applyControlRequest(
+        'POST', `/api/jobscout/apply/executions/${executionId}/stop`, body, idempotencyKey,
+      );
+      pendingAccessProposalByExecution.delete(executionId);
+      replayableAccessApprovalByExecution.delete(executionId);
+      return response;
+    }, 'Failed to stop apply execution')
+  );
+
+  server.tool(
+    'trackly_list_apply_access_deferments',
+    'List the current user\'s persistent Apply access deferments. Returns only job, company, or provider scope identities; never URLs, provider names, or chat text.',
+    {},
+    wrapTool(async () => {
+      const response = accessDefermentListResponseSchema.parse(await applyControlRequest(
+        'GET', '/api/jobscout/apply/access-deferments',
+      ));
+      discoveredDefermentIds.clear();
+      for (const deferment of response.deferments) {
+        discoveredDefermentIds.add(deferment.id);
+      }
+      return response;
+    }, 'Failed to list apply access deferments')
+  );
+
+  server.tool(
+    'trackly_defer_apply_access',
+    'Persist an explicit user deferment for one Trackly job or its derived company or provider scope. Provider scope blocks that provider across companies, proposal approval, recovery, and replay until cleared. The server derives company, provider, tenant, origin, and route from jobId; never submit a provider name, URL, or free text.',
+    {
+      jobId: z.number().int().min(1),
+      scope: z.enum(APPLY_ACCESS_DEFERMENT_SCOPES),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ idempotencyKey, ...body }) => {
+      const response = accessDefermentMutationResponseSchema.parse(await applyControlRequest(
+        'POST', '/api/jobscout/apply/access-deferments', body, idempotencyKey,
+      ));
+      if (
+        response.deferment.jobId !== body.jobId
+        || response.deferment.scope !== body.scope
+      ) {
+        throw new Error('Access deferment response does not match the requested job and scope.');
+      }
+      discoveredDefermentIds.add(response.deferment.id);
+      return response;
+    }, 'Failed to defer apply access')
+  );
+
+  server.tool(
+    'trackly_clear_apply_access_deferment',
+    'Clear one explicit user deferment previously listed or created in this session. An exact same-session retry remains idempotent, including for provider-wide user policy.',
+    {
+      defermentId: z.number().int().min(1),
+      idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+    },
+    wrapTool(async ({ defermentId, idempotencyKey }) => {
+      if (!discoveredDefermentIds.has(defermentId)) {
+        if (clearedDefermentReplayKeys.get(defermentId)?.has(idempotencyKey)) {
+          const replayResponse = accessDefermentClearResponseSchema.parse(await applyControlRequest(
+            'POST', `/api/jobscout/apply/access-deferments/${defermentId}/clear`, {}, idempotencyKey,
+          ));
+          if (replayResponse.deferment.id !== defermentId) {
+            throw new Error('Access deferment response does not match the requested deferment id.');
+          }
+          return replayResponse;
+        }
+        throw new Error('Clear must use a deferment id from the latest list or defer response.');
+      }
+      const response = accessDefermentClearResponseSchema.parse(await applyControlRequest(
+        'POST', `/api/jobscout/apply/access-deferments/${defermentId}/clear`, {}, idempotencyKey,
+      ));
+      if (response.deferment.id !== defermentId) {
+        throw new Error('Access deferment response does not match the requested deferment id.');
+      }
+      rememberClearedDefermentReplay(defermentId, idempotencyKey);
+      return response;
+    }, 'Failed to clear apply access deferment')
   );
 
   server.tool(
@@ -1271,7 +1737,7 @@ function registerApplyTools(
       content: { type: 'text', text: APPLY_RELIABILITY_PROMPT },
     }, {
       role: 'user',
-      content: { type: 'text', text: 'Before generating questions or filling controls, run the skill 4.7.1 deterministic answer resolver. Classify every visible answer as exact_profile, safe_derivation, supported_draft, missing_fact, live_consent, or forbidden_inference; validate the control type; fill only the first three; and ask only currently visible unresolved needs. Treat the current profile revision as reusable authority, never transcript, screenshot, parser, autocomplete, or cached values. Accessible-first is a hard scheduler invariant: park known authentication, account-creation, OTP, and pre-form-CAPTCHA work without starting a draft while an accessible candidate remains.' },
+      content: { type: 'text', text: 'Before generating questions or filling controls, run the skill 4.8.0 deterministic answer resolver. Classify every visible answer as exact_profile, safe_derivation, supported_draft, missing_fact, live_consent, or forbidden_inference; validate the control type; fill only the first three; and ask only currently visible unresolved needs. Treat the current profile revision as reusable authority, never transcript, screenshot, parser, autocomplete, or cached values. Accessible-first is a hard scheduler invariant: park known authentication, account-creation, OTP, and pre-form-CAPTCHA work without starting a draft while an accessible candidate remains. Curated OPEN and recent accessibility never change allowedOperations to fill_form.' },
     }, {
       role: 'user',
       content: { type: 'text', text: 'Only active=true identifies resumable execution work. Active=false and preserved=true is terminal read-only reconciliation evidence.' },
@@ -1279,13 +1745,13 @@ function registerApplyTools(
       role: 'user',
       content: {
         type: 'text',
-        text: 'Protocol 3.6.0 reliability gate for new work: require MCP contract 3.7.6 and skill 4.7.1. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
+        text: 'Protocol 3.7.0 reliability gate for new work: require MCP contract 3.8.1 and skill 4.8.0. Consume the exact proposedWave with frozen accessKnowledge before opening any browser; same-key advance replay returns identical member IDs, order, and rationale. When nextAction is access_review, display the deferred proposal and do not report exhaustion. Defer or clear only through jobId-scoped tools; provider scope persists server-derived provider exclusions across companies, approval, recovery, and replay. Never submit provider names, URLs, or raw chat. After complete local context loss, list bounded recovery candidates, obtain explicit confirmation of the exact set, and recover only that set. An active personal deferment blocks exact recovery until cleared. Treat tab recovery, form-state recovery, and mutation authority as independent. List active handoff receipts for the execution before resolving grouped submission statements; use the named receipt or the sole returned active receipt, classify every member, and claim that receipt before recording outcomes. Validate tab keep sets and resume upload stages locally. Never send raw browser values or click Submit.',
       },
     }, {
       role: 'user',
       content: {
         type: 'text',
-        text: 'Legacy protocol compatibility gate: require the fetched compatibleSkillMinimumVersion or newer for all new work and use protocol 3.6.0 as specified above. Read the Apply protocol first. Only protocol 3.5 or newer with the compact-snapshot capability may call trackly_get_apply_execution_snapshot or the parked-member resume and execution-resume approval tools. An already-active protocol 3.4 execution is read-only legacy recovery: use only its published get or stop tools and never mutate its browser forms. Only when the fetched protocol is 3.4 or newer call trackly_get_active_apply_execution before legacy batch recovery, including when accessible execution is disabled. For protocol 3.3, skip the execution endpoint and recover the already-active immutable fixed batch directly; protocol 3.2 remains valid only for an already-active explicit legacy single run. A disabled rollout may preserve an active execution: recover it read-only and use only get or stop tools until the capability is enabled; never start, advance, or record dispositions while disabled. If disabled and no execution is active, use the legacy fixed-batch path. Recover every entry in execution.unresolvedWaves in ascending waveOrder; an older unresolved wave remains part of recovery after a replacement wave exists, and execution.currentWave is only the latest scheduling identity, never the complete recovery set. For “fill/apply to the next N,” recover or start one complete_next_n_accessible execution with target 1–20 and follow only the server nextAction and authoritative funnel. If the requested N differs from the active target, explain the mismatch, obtain explicit confirmation, stop the old execution with reason target_changed, refetch its terminal state, then start the new target. If an immutable fixed batch is active when the user requests complete_next_n_accessible, explain the incompatible mode and summarize any review-ready, submitted, or unresolved work before browser mutation. Resume that exact fixed batch when the user chooses to finish it. If the user instead says to start fresh, leave, replace, discard, or otherwise abandon the old batch, treat that statement as explicit cancellation confirmation: refetch the latest batch revision, call trackly_cancel_apply_batch with reason user_requested_restart and a fresh idempotency key, refetch until no active fixed batch remains, preserve every existing browser tab without mutation, and start the requested accessible execution in the same turn. Never wait for batch expiry and never create a scheduled continuation merely to escape an obsolete batch. If cancellation reports submission_in_progress, preserve everything and stop for the user; do not cancel or start replacement work. If the user asks to stop, call trackly_stop_apply_execution with reason user_requested and refetch its terminal state. Continue immutable child waves from the original recent-first snapshot until the authoritative backend funnel says targetReached, the queue is exhausted, or the user stops. Treat achievementCount and target-capped completed as the cumulative target authority. durablyReviewReady and submitted are current operator projections only; never add them together locally to reconstruct completion. Accessible drafts awaiting answers and forms currently being filled occupy target slots; authentication, account creation, OTP, pre-form CAPTCHA, exclusions, manual-only, conflicts, and revocations do not. Record only typed value-free live-probe dispositions. Advance only when no current-wave member remains unclassified queued or inspecting. Never calculate replacements or progress locally. For an explicit “inspect the next N records” request, use the existing fixed immutable batch and never replenish it; if a different accessible execution is active, confirm the intent change with the user, stop that execution with reason target_changed, refetch its terminal state, then recover or create the fixed batch. A cache hint may prioritize a live minimal non-mutating probe but never authorizes private-data entry or replaces that probe. After a redirect or contradictory observation, report only the fresh live disposition with its exact binding and let the backend invalidate its own hint. Preserve every user-edited or unknown non-empty field through the local provenance ledger. Never submit.',
+        text: 'Legacy protocol compatibility gate: require the fetched compatibleSkillMinimumVersion or newer for all new work and use protocol 3.7.0 as specified above. Read the Apply protocol first. Only protocol 3.5 or newer with the compact-snapshot capability may call trackly_get_apply_execution_snapshot or the parked-member resume and execution-resume approval tools. An already-active protocol 3.4 execution is read-only legacy recovery: use only its published get or stop tools and never mutate its browser forms. Only when the fetched protocol is 3.4 or newer call trackly_get_active_apply_execution before legacy batch recovery, including when accessible execution is disabled. For protocol 3.3, skip the execution endpoint and recover the already-active immutable fixed batch directly; protocol 3.2 remains valid only for an already-active explicit legacy single run. A disabled rollout may preserve an active execution: recover it read-only and use only get or stop tools until the capability is enabled; never start, advance, or record dispositions while disabled. If disabled and no execution is active, use the legacy fixed-batch path. Recover every entry in execution.unresolvedWaves in ascending waveOrder; an older unresolved wave remains part of recovery after a replacement wave exists, and execution.currentWave is only the latest scheduling identity, never the complete recovery set. For “fill/apply to the next N,” recover or start one complete_next_n_accessible execution with target 1–20 and follow only the server nextAction and authoritative funnel. If the requested N differs from the active target, explain the mismatch, obtain explicit confirmation, stop the old execution with reason target_changed, refetch its terminal state, then start the new target. If an immutable fixed batch is active when the user requests complete_next_n_accessible, explain the incompatible mode and summarize any review-ready, submitted, or unresolved work before browser mutation. Resume that exact fixed batch when the user chooses to finish it. If the user instead says to start fresh, leave, replace, discard, or otherwise abandon the old batch, treat that statement as explicit cancellation confirmation: refetch the latest batch revision, call trackly_cancel_apply_batch with reason user_requested_restart and a fresh idempotency key, refetch until no active fixed batch remains, preserve every existing browser tab without mutation, and start the requested accessible execution in the same turn. Never wait for batch expiry and never create a scheduled continuation merely to escape an obsolete batch. If cancellation reports submission_in_progress, preserve everything and stop for the user; do not cancel or start replacement work. If the user asks to stop, call trackly_stop_apply_execution with reason user_requested and refetch its terminal state. Continue immutable child waves from the original recent-first snapshot until the authoritative backend funnel says targetReached, the queue is exhausted, or the user stops. Treat achievementCount and target-capped completed as the cumulative target authority. durablyReviewReady and submitted are current operator projections only; never add them together locally to reconstruct completion. Accessible drafts awaiting answers and forms currently being filled occupy target slots; authentication, account creation, OTP, pre-form CAPTCHA, exclusions, manual-only, conflicts, and revocations do not. Record only typed value-free live-probe dispositions. Advance only when no current-wave member remains unclassified queued or inspecting. Never calculate replacements or progress locally. For an explicit “inspect the next N records” request, use the existing fixed immutable batch and never replenish it; if a different accessible execution is active, confirm the intent change with the user, stop that execution with reason target_changed, refetch its terminal state, then recover or create the fixed batch. A cache hint may prioritize a live minimal non-mutating probe but never authorizes private-data entry or replaces that probe. After a redirect or contradictory observation, report only the fresh live disposition with its exact binding and let the backend invalidate its own hint. Preserve every user-edited or unknown non-empty field through the local provenance ledger. Never submit.',
       },
     }, {
       role: 'user',

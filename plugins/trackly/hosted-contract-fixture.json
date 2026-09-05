@@ -1,40 +1,127 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-08-25T11:19:58-07:00",
+  "capturedAt": "2026-09-04T01:25:26-0700",
   "sourceRuntime": {
-    "commit": "e810e2e2955a847aa69c696dbdc16009f346e79b",
-    "parent": "67c2128fe46e16284b1df7b089e661e530670408",
-    "committedAt": "2026-08-25T11:05:50-07:00"
+    "commit": "58ca1b9374989062dd190b9e5f8e44082b216de2",
+    "parent": "2e9b02b3044a6ff2f5951d0f7288c72e53dd3f23",
+    "committedAt": "2026-09-03T09:06:51-07:00"
   },
   "mergedRuntime": {
-    "commit": "6becfab7198bf0ba4a0684c70cca30781389ad9a",
+    "commit": "eafbf77f05c435881ebf922e1003d93f5520f06c",
     "parents": [
-      "a24dff06a6bd027ca1d8bed3444e7ac7916dbe15",
-      "e810e2e2955a847aa69c696dbdc16009f346e79b"
+      "2e9b02b3044a6ff2f5951d0f7288c72e53dd3f23",
+      "58ca1b9374989062dd190b9e5f8e44082b216de2"
     ],
-    "committedAt": "2026-08-25T11:15:19-07:00"
+    "committedAt": "2026-09-03T09:30:38-07:00"
   },
-  "applyContractVersion": "3.7.6",
+  "applyContractVersion": "3.8.1",
   "pluginContractVersion": "1.0.0",
   "publicTools": [
-    ["trackly_search_jobs", "6e72672960c93c127fcd38588fcd2444ba59dea169c0d46d300c70201b6aca1a", "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481"],
-    ["trackly_get_job", "cba56f95a6b6cd44b3f440c3005f1daab9dbe1ae2e923070fcffde517d94c1d1", "44cb4d59112b1752e5ee450427981084b299b909d0901406dafe12de24625eab"],
-    ["trackly_search_companies", "fb72369ef77512c279a4544c0978fe10a592fbcf7032be872e10a9364a02a8de", "79b0e1b919cf9baa22fb6e091c8ae37064a2edf9c2a7f8198f22c76ba67d87f6"],
-    ["trackly_get_job_brief", "c64829b0bc2f0c0347f440f9261dca16675a886adc045f6dca7c56e22dcb0725", "462d7c379bfea90f3cff8030b68b22830ba4db2f5952531fa7230db7b625639f"],
-    ["trackly_get_preferences", "3a848d9864eaa749a6964ae05a3520ccfb755d93cad85540ec16c7f3761935b4", "359dae5b5485dee12788f054413d1690f2527dfc6472202f9e75682c1dbdf8ac"],
-    ["trackly_get_apply_readiness", "caabb74d6a0c20632054e6c1710ec4bc680e08da46b66bbc49ef71697eb5c296", "a011f9a2a0498a3cc18202739fda987fea113d6bff3290ecf2ec7f7d0ee4c1a5"],
-    ["trackly_lint_application_text", "4291951a0bccc03706083872c1b8fb3d62e4241a18f63f1f5d6dd14963bfe955", "d5b72e6d57bd43e291c8d1495a0eba06f08b09d2eb65059e289b08246fb4b3ad"],
-    ["trackly_update_status", "c9725177eda04b00aa6ab944086f96dbef62f27b0f20fb5658b391fa0c4d9c8b", "10538a74b15f1fbc60a2152dfea3e5822ccd6d26225b555bc9e379ea559dcc74"],
-    ["trackly_save_application_answers", "93c7cbb504621e317c8c81ee2ceb1ee276acf563a74ac0b08eada2479d5da0ab", "441c563c75a323165cf87a323134ff210314dd91d5c392047dfaba1cca756df2"],
-    ["trackly_grant_sensitive_storage_consent", "f5d873f8f2a7c36e3e1bcc2ce15cd8534d77a60f287fa7cef2cfde4788fc980f", "77c53b12516d4b05f7853ba7a326c667e95be8a718dcebb77fc54f806dec4f84"],
-    ["trackly_revoke_sensitive_storage_consent", "a5eea25127a2f2fb8441c5557e9ae43efc8d0f34e19028d5b31b7364994cf861", "223aa22074b9f857177c3b0f45a5d1d8f262bcdee3afb7c0478d222232b893cf"],
-    ["trackly_start_or_resume_apply", "6c372e9bcbf7248f7c45a14ae0dc2efed9994309518c359b786746c65f165a8c", "1800f6cc608abc2a7f8b07c2653be603690f850b16094fd4cfcc22fadda419e5"],
-    ["trackly_get_apply_work", "5fbcf31759ee849b4e38389142a5fc7f37b3ebfee550b90942ab25e348f5f98a", "0526043ab7146cea8bdb68897cf03fc215876544be12a9fe6330b773684a6e67"],
-    ["trackly_report_apply_progress", "11e8c6ac5d7dadeda7e1111c675b2a74dfc9fdf4bdeafcc72a99fb003121ead6", "1acbc6cd4782177761ab1d5eb3a10d647459d3702a4b987d8913970f466c460c"],
-    ["trackly_prepare_resume_artifact", "f05e1d7bb5b6348af45c07d76a10649c7bc623532a37f829b1798269dc903e9d", "bcc1f89678a3cd53aed2864556a8afb056a94535a85051d39379e5b71e98d3ed"],
-    ["trackly_certify_review_ready", "1535a71a12cd7fed0bc7435b3a0c7427809a39247bedee029775bd4295dd2b69", "7e875ca5fb20e3e746c79aa70a8c717b9d91f2183447497f258df31849fa82df"],
-    ["trackly_reconcile_manual_submission", "c300b386c95c3119b80de120fcbecfb663c2afcbf9978715f83ba63b545db7ef", "32be19dadef3c8e3a1d9f320d3c1a9a0cde3845f930dac85641409f25a722b0a"],
-    ["trackly_stop_apply", "2d28c84e84846edaeec93a0b59439690e37f4e960695c78a68ff41fd56b35c84", "8363bfe5eb7fb8ed4093b1f01bdaa9ebcb599ac35004fd13bab0ae6a2ab4f1ce"]
+    [
+      "trackly_search_jobs",
+      "6e72672960c93c127fcd38588fcd2444ba59dea169c0d46d300c70201b6aca1a",
+      "ced86c3689069997bb125f9aa89f4eaaeb1638e784f9188627d5264ffaa86481"
+    ],
+    [
+      "trackly_get_job",
+      "cba56f95a6b6cd44b3f440c3005f1daab9dbe1ae2e923070fcffde517d94c1d1",
+      "44cb4d59112b1752e5ee450427981084b299b909d0901406dafe12de24625eab"
+    ],
+    [
+      "trackly_search_companies",
+      "fb72369ef77512c279a4544c0978fe10a592fbcf7032be872e10a9364a02a8de",
+      "79b0e1b919cf9baa22fb6e091c8ae37064a2edf9c2a7f8198f22c76ba67d87f6"
+    ],
+    [
+      "trackly_get_job_brief",
+      "c64829b0bc2f0c0347f440f9261dca16675a886adc045f6dca7c56e22dcb0725",
+      "462d7c379bfea90f3cff8030b68b22830ba4db2f5952531fa7230db7b625639f"
+    ],
+    [
+      "trackly_get_preferences",
+      "3a848d9864eaa749a6964ae05a3520ccfb755d93cad85540ec16c7f3761935b4",
+      "359dae5b5485dee12788f054413d1690f2527dfc6472202f9e75682c1dbdf8ac"
+    ],
+    [
+      "trackly_get_apply_readiness",
+      "caabb74d6a0c20632054e6c1710ec4bc680e08da46b66bbc49ef71697eb5c296",
+      "a011f9a2a0498a3cc18202739fda987fea113d6bff3290ecf2ec7f7d0ee4c1a5"
+    ],
+    [
+      "trackly_lint_application_text",
+      "4291951a0bccc03706083872c1b8fb3d62e4241a18f63f1f5d6dd14963bfe955",
+      "d5b72e6d57bd43e291c8d1495a0eba06f08b09d2eb65059e289b08246fb4b3ad"
+    ],
+    [
+      "trackly_update_status",
+      "c9725177eda04b00aa6ab944086f96dbef62f27b0f20fb5658b391fa0c4d9c8b",
+      "10538a74b15f1fbc60a2152dfea3e5822ccd6d26225b555bc9e379ea559dcc74"
+    ],
+    [
+      "trackly_save_application_answers",
+      "93c7cbb504621e317c8c81ee2ceb1ee276acf563a74ac0b08eada2479d5da0ab",
+      "441c563c75a323165cf87a323134ff210314dd91d5c392047dfaba1cca756df2"
+    ],
+    [
+      "trackly_grant_sensitive_storage_consent",
+      "f5d873f8f2a7c36e3e1bcc2ce15cd8534d77a60f287fa7cef2cfde4788fc980f",
+      "77c53b12516d4b05f7853ba7a326c667e95be8a718dcebb77fc54f806dec4f84"
+    ],
+    [
+      "trackly_revoke_sensitive_storage_consent",
+      "a5eea25127a2f2fb8441c5557e9ae43efc8d0f34e19028d5b31b7364994cf861",
+      "223aa22074b9f857177c3b0f45a5d1d8f262bcdee3afb7c0478d222232b893cf"
+    ],
+    [
+      "trackly_list_apply_access_deferments",
+      "24ab6932f3dfd2f0b2ea5f4fad26e7aadd88bfb9475c14a38e5d33f33b44f7d4",
+      "11a3a58d1a775f830cc64ff17d591f7c3b7c6d67329f66c376697051a32f08a1"
+    ],
+    [
+      "trackly_defer_apply_access",
+      "8198381bd09f4320b7d6cf8fef1d4f278f863e9b31b5823cb4c7425146863671",
+      "1389d30551a8536f09592c14184d4e156c91cef11895abe3eee508ed55ea932e"
+    ],
+    [
+      "trackly_clear_apply_access_deferment",
+      "aa7a8b70e488f7e924d659428926840ff50e589e83b1b4815acdc8e069e35267",
+      "de6b29b8469b758f5252edc565cc33d6e5a07c43a97cc2f7e8ebf3f0e3342e0b"
+    ],
+    [
+      "trackly_start_or_resume_apply",
+      "6c372e9bcbf7248f7c45a14ae0dc2efed9994309518c359b786746c65f165a8c",
+      "dbc08491ee7486824a9f3d598f1ba317aa31a0d7bbfd15d74298b4c8b41998db"
+    ],
+    [
+      "trackly_get_apply_work",
+      "5fbcf31759ee849b4e38389142a5fc7f37b3ebfee550b90942ab25e348f5f98a",
+      "f04236fa329f2a3acb2fd71486dc26fe2d8d762f90be17d903c0539aecf6535d"
+    ],
+    [
+      "trackly_report_apply_progress",
+      "26389f1412f25a52e02c3eb2fd4edf15a2d38546de7671d596192787ef1b44d3",
+      "b9f265e6ed97feb2dd4023561c03cdf686a055fa7f0540c9cc8fc1c82d41d07c"
+    ],
+    [
+      "trackly_prepare_resume_artifact",
+      "f05e1d7bb5b6348af45c07d76a10649c7bc623532a37f829b1798269dc903e9d",
+      "bcc1f89678a3cd53aed2864556a8afb056a94535a85051d39379e5b71e98d3ed"
+    ],
+    [
+      "trackly_certify_review_ready",
+      "1535a71a12cd7fed0bc7435b3a0c7427809a39247bedee029775bd4295dd2b69",
+      "7e875ca5fb20e3e746c79aa70a8c717b9d91f2183447497f258df31849fa82df"
+    ],
+    [
+      "trackly_reconcile_manual_submission",
+      "c300b386c95c3119b80de120fcbecfb663c2afcbf9978715f83ba63b545db7ef",
+      "32be19dadef3c8e3a1d9f320d3c1a9a0cde3845f930dac85641409f25a722b0a"
+    ],
+    [
+      "trackly_stop_apply",
+      "2d28c84e84846edaeec93a0b59439690e37f4e960695c78a68ff41fd56b35c84",
+      "8363bfe5eb7fb8ed4093b1f01bdaa9ebcb599ac35004fd13bab0ae6a2ab4f1ce"
+    ]
   ],
   "hostedMcpToolNames": [
     "trackly_search_jobs",
@@ -59,6 +146,9 @@
     "trackly_start_apply_execution",
     "trackly_get_active_apply_execution",
     "trackly_get_apply_execution",
+    "trackly_list_apply_access_deferments",
+    "trackly_defer_apply_access",
+    "trackly_clear_apply_access_deferment",
     "trackly_list_recoverable_apply_executions",
     "trackly_recover_exact_apply_members",
     "trackly_list_apply_review_handoffs",
@@ -91,16 +181,16 @@
     "get_more_tools"
   ],
   "sourceSha256": {
-    "pluginServer": "d6e6c08e927416d546a6c6219e4b1ccac8b0d5d002266a62fff8f8651e7dc565",
-    "pluginScopes": "2f2eac1c723fec4c902918b97ca9234a10a620cb644d6cd4fc72c8bd1602c051",
-    "jobBriefService": "e8dad5884d6647176c780bf7e87bdf53f24216a7580b0980bff1f1faad6ecb91",
+    "pluginServer": "8e537864c9983e04f48cbd8b632735b794a5ce080b5a792c2c8d223e2b9f9ec8",
+    "pluginScopes": "1bc08af5a67a2e3b5d56dbc566dbfc1cbb00e2bceaaa969be4f8e2eee4234250",
+    "jobBriefService": "10f30d6564472125d24cd52dfd9c4ae54dfb9c6c4958d14f44db4ec9e276d0f2",
     "backendUiRedirect": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceMode": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBinding": "510123c5846db1899960903ecab37c9cf446f7215451149e863f344b4672a93a",
+    "databaseBinding": "fe42e478ecef902d45092f9c40d3b6dc1d005ee4af2ede98dcc847f45e4c4229",
     "databasePoolPolicy": "17c716980598100cfd91aa0630f93ee967652daf256bfaeaffe4b37802e98928",
     "reviewIdentity": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
     "authRateLimit": "6929621038a85cc53da3fe239851de693148cb9fb917504ac04bb4cac44e5e17",
-    "applicationProfileService": "db9c8bb6ef058620eb7a3f4311b3f14cc27352647b4a59f02cca112758d85ffe"
+    "applicationProfileService": "703603a9b3498711bacb9a9352c88cc4b1ffc063fd9fbcf562c194b551c26447"
   }
 }

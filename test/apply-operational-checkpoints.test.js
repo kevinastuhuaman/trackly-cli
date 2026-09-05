@@ -102,6 +102,9 @@ test('access probe requires actual applicant controls and typed terminal states'
   assert.match(probe, /never[\s\S]*private data[\s\S]*probe/i);
   assert.match(probe, /inactive[\s\S]*contract 3\.7\.3[\s\S]*unknown_unobservable/i);
   assert.match(probe, /trackly_employer_source_exact_origin[\s\S]*exact listed origin[\s\S]*do not invent or require an ATS tenant/i);
+  const orchestration = read('skills/trackly-apply/references/batch-orchestration.md');
+  assert.match(orchestration, /Workday[^.]{0,240}`ACCOUNT WALL`[^.]{0,240}authentication-gated[^.]{0,240}browser\s+probe/i);
+  assert.match(orchestration, /Eightfold[^.]{0,240}`ACCOUNT WALL`[^.]{0,240}authentication-gated[^.]{0,240}browser\s+probe/i);
 });
 
 test('phase checkpoint validator accepts complete value-free receipts and rejects unsafe ones', () => {
@@ -1658,6 +1661,9 @@ test('public plugin adaptation preserves the operational reliability gates', () 
   assert.match(pluginProbe, /authentication_required/);
   assert.match(pluginProbe, /account_creation_required/);
   assert.match(pluginProbe, /never[\s\S]*private\s+data[\s\S]*probe/i);
+  assert.match(pluginSkill, /including ordinary OPEN or neutral proposals/i);
+  assert.match(pluginSkill, /trackly_list_apply_access_deferments/);
+  assert.match(pluginSkill, /trackly_clear_apply_access_deferment/);
 
   const pluginResolver = read('plugins/trackly/skills/trackly-apply/references/answer-resolution.md');
   assert.match(pluginResolver, /run-only[\s\S]*exact question[\s\S]*office[\s\S]*jurisdiction[\s\S]*company[\s\S]*provider[\s\S]*global/i);
@@ -1666,11 +1672,11 @@ test('public plugin adaptation preserves the operational reliability gates', () 
 
 test('MCP reliability prompt surfaces the new operating gates before execution', () => {
   const tools = read('mcp/apply-tools.js');
-  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*latest explicit target/i);
-  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*genuine applicant fields/i);
-  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*exact accessible jobs[^']*before form mutation/i);
-  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*deterministic fields[^']*question packet/i);
-  assert.match(tools, /skill 4\.7\.1 reliability gate:[^']*phase checkpoint/i);
-  assert.match(tools, /run the skill 4\.7\.1 deterministic answer resolver/i);
-  assert.doesNotMatch(tools, /run the skill 4\.6 deterministic answer resolver/i);
+  assert.match(tools, /skill 4\.8\.0 reliability gate:[^']*latest explicit target/i);
+  assert.match(tools, /skill 4\.8\.0 reliability gate:[^']*genuine applicant fields/i);
+  assert.match(tools, /skill 4\.8\.0 reliability gate:[^']*exact accessible jobs[^']*before form mutation/i);
+  assert.match(tools, /skill 4\.8\.0 reliability gate:[^']*deterministic fields[^']*question packet/i);
+  assert.match(tools, /skill 4\.8\.0 reliability gate:[^']*phase checkpoint/i);
+  assert.match(tools, /run the skill 4\.8\.0 deterministic answer resolver/i);
+  assert.doesNotMatch(tools, /run the skill 4\.7\.1 deterministic answer resolver/i);
 });

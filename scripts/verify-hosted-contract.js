@@ -11,7 +11,7 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'bf980e3c48aa0817f8860a308dba4d5e054ca34f1e4b4bfdf1ace0402ad73799';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '0539c0da82d68aaae70116f5fba6e8ea8a1a738d485390fc13ce9325288f9507';
 const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
   applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
   applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
@@ -1816,7 +1816,7 @@ const REVIEWED_GLOBAL_MIDDLEWARE_CALL_DIGESTS = Object.freeze([
   'c9c8443c9a480263e54218e603a7ed927d1e4e411c7a4542e80206cb5b3ddecd',
   '81d41aba94334a95d3a6002fd6ced8069b9739cd52c6679c6293e01c3f547f75',
   '1eac0496bd02d2dadc4227b753c0ca2d04169bf3c43bec0f5d1eaa0c4bd4bf96',
-  'f730c8df64484529aff713b1a49bdfcc570b99fb682f60d17a5fde0f9eed529a',
+  'bd4ab8e932b5a0322aebc16ad4be159574a9f608887a0b455fff8bf4e572a7d2',
   '12def47c0dc1628a891b9045ed9c275af25dd73660929d528943f95a98c34855',
   'bc0d7d12f97ab6e9e79b00fa3701899806387b16353d9575628545a06644b2e9',
   'd63cf7bbc1fae45f475807325f4178283bfea854bf4aeecaf7754f66e509e0a5',
@@ -2858,7 +2858,7 @@ function assertActiveFunctionAstSha256(source, name, expectedSha256, sourcePath)
 function assertPluginUiContractSemantics(
   source,
   sourcePath,
-  { htmlAstSha256 = 'a5962f5687896272ef8ca365e93be831a0bde5e637d7ecb96e7437585362e3cc' } = {},
+  { htmlAstSha256 = 'fdf5383a28895b7052955d56ecb7ddea73fa1a281fa557818123e7fe57392721' } = {},
 ) {
   assertActiveVariableInitializerAst(
     source,
@@ -3211,7 +3211,7 @@ function assertInternalSecretCompatibility(
   jwtSource,
   mcpTokenSourcePath,
   jwtSourcePath,
-  { verifyTokenAstSha256 = '92ba92722519a3112f5c52bfa5cd779c3a396e2ae00ee7c3bf81933057991086' } = {},
+  { verifyTokenAstSha256 = '05cb81ab55522c1c8805c33e415988cb66fad7936e4a7889c03df6201b8b0769' } = {},
 ) {
   const sharedSecretExpression = "jwtSecretFromEnv || sessionSecretFromEnv || (isProduction ? '' : 'local-dev-jwt-secret')";
   for (const [source, sourcePath] of [
@@ -3287,6 +3287,39 @@ function assertActiveClassMethodDefinitionAst(
     canonicalSchemaAst(methods[0]),
     canonicalSchemaAst(fixture),
     `${className}.${methodName} in ${sourcePath} must preserve its locked executable semantics`,
+  );
+}
+
+function assertActiveClassMethodAstSha256(
+  source,
+  className,
+  methodName,
+  expectedSha256,
+  sourcePath,
+) {
+  const program = parseFullSource(source, sourcePath).program;
+  const classes = program.body.flatMap((statement) => {
+    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+    return declaration?.type === 'ClassDeclaration' && declaration.id?.name === className
+      ? [declaration]
+      : [];
+  });
+  assert.equal(classes.length, 1, `${sourcePath} must define exactly one top-level ${className} class`);
+  const members = classes[0].body.body.filter((member) => !member.static);
+  const runtimeKey = (member) => {
+    if (member.key?.type === 'Identifier' || member.key?.type === 'StringLiteral') return member.key.name || member.key.value;
+    return null;
+  };
+  const matchingMembers = members.filter((member) => runtimeKey(member) === methodName);
+  assert.equal(matchingMembers.length, 1, `${className}.${methodName} in ${sourcePath} must have exactly one runtime member`);
+  const method = matchingMembers[0];
+  assert.equal(method.type, 'ClassMethod', `${className}.${methodName} in ${sourcePath} must be a method, not a field`);
+  assert.equal(method.computed, false, `${className}.${methodName} in ${sourcePath} must not use a computed key`);
+  assert.equal(method.key?.type, 'Identifier', `${className}.${methodName} in ${sourcePath} must use an identifier key`);
+  assert.equal(
+    sha256ExactBytes(JSON.stringify(canonicalSchemaAst(method))),
+    expectedSha256,
+    `${className}.${methodName} in ${sourcePath} must preserve its locked active semantic AST`,
   );
 }
 
@@ -3547,10 +3580,15 @@ function assertUnshadowedImportBinding(source, importedName, localName, moduleNa
       const importBinding = parent?.type === 'ImportSpecifier'
         || parent?.type === 'ImportDefaultSpecifier'
         || parent?.type === 'ImportNamespaceSpecifier';
+      const reviewedReExport = parent?.type === 'ExportSpecifier';
       const reviewedMemberRead = (parent?.type === 'MemberExpression'
           || parent?.type === 'OptionalMemberExpression')
         && parentKey === 'object';
-      if (!importBinding && !reviewedMemberRead) forbiddenBindings.push(node);
+      const reviewedTypeNamespaceRead = parent?.type === 'TSQualifiedName'
+        && parentKey === 'left';
+      if (!importBinding && !reviewedReExport && !reviewedMemberRead && !reviewedTypeNamespaceRead) {
+        forbiddenBindings.push(node);
+      }
     }
     for (const [key, child] of Object.entries(node)) {
       if (AST_METADATA_FIELDS.has(key)) continue;
@@ -6715,10 +6753,7 @@ const LOCAL_ONLY_TOOLS = [
   'trackly_validate_apply_tab_keep_set',
   'trackly_validate_apply_resume_upload',
 ];
-const LOCAL_ONLY_CONSTANTS = [
-  'applyUploadStages',
-  'applyUploadFailureCodes',
-];
+const LOCAL_ONLY_CONSTANTS = [];
 const HOSTED_ONLY_TOOLS = [
   'trackly_chat',
 ];
@@ -6727,6 +6762,12 @@ for (const constantName of [
   'applyExecutionMaxTarget',
   'applyBrowserSurfaces',
   'applyAccessClassifications',
+  'applyObservedAccessClassifications',
+  'applyAccessKnowledgeSources',
+  'applyAccessFreshnessStates',
+  'applySchedulingEffects',
+  'applyAccessDefermentScopes',
+  'applyAccessMatchedScopes',
   'applyExecutionDispositionSources',
   'applyExecutionStopReasonCodes',
   'applyProbeCleanupPreferences',
@@ -7243,70 +7284,11 @@ assertActiveVariableInitializerAst(
   'new TracklyOAuthProvider()',
   hostedOAuthProviderPath,
 );
-assertActiveClassMethodDefinitionAst(
+assertActiveClassMethodAstSha256(
   hostedOAuthProviderSource,
   'TracklyOAuthProvider',
   'verifyAccessToken',
-  `async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const decoded = verifyMcpAccessToken(token);
-
-    if (!decoded) {
-      throw new InvalidTokenError('Invalid or expired MCP access token');
-    }
-
-    if (decoded.identityClass === 'review' || isConfiguredReviewUserId(decoded.userId)) {
-      throw new InvalidTokenError('Invalid or expired MCP access token');
-    }
-
-    let grant: McpGrantRow;
-    try {
-      const result = await pool.query<McpGrantRow>(
-        \`SELECT oauth_grant.grant_id, oauth_grant.user_id, oauth_grant.client_id,
-                oauth_grant.consented_scopes, oauth_grant.resource, users.auth_epoch
-         FROM mcp_oauth_grants AS oauth_grant
-         JOIN users ON users.id = oauth_grant.user_id
-         WHERE oauth_grant.grant_id = $1
-           AND oauth_grant.revoked_at IS NULL
-           AND oauth_grant.expires_at > NOW()\`,
-        [decoded.grant_id],
-      );
-      if (result.rows.length !== 1) {
-        throw new InvalidTokenError('Invalid or expired MCP access token');
-      }
-      grant = result.rows[0];
-      const authoritativeScopes = normalizeMcpScopes(grant.consented_scopes);
-      const currentAuthEpoch = normalizeAuthEpoch(grant.auth_epoch, 0);
-      if (
-        grant.user_id !== decoded.userId
-        || grant.client_id !== decoded.client_id
-        || normalizeMcpResource(grant.resource) !== decoded.resource
-        || currentAuthEpoch === null
-        || currentAuthEpoch !== decoded.authEpoch
-        || !isScopeSubset(decoded.scopes, authoritativeScopes)
-      ) {
-        throw new InvalidTokenError('Invalid or expired MCP access token');
-      }
-      await requireMcpEntitlement(decoded.userId);
-    } catch (error) {
-      if (error instanceof InvalidTokenError) throw error;
-      throw new InvalidTokenError('Invalid or expired MCP access token');
-    }
-
-    return {
-      token,
-      clientId: decoded.client_id,
-      scopes: decoded.scopes,
-      expiresAt: decoded.exp!,
-      extra: {
-        userId: decoded.userId,
-        email: decoded.email,
-        name: decoded.name,
-        authEpoch: decoded.authEpoch,
-        grantId: decoded.grant_id,
-        resource: decoded.resource,
-      },
-    };
-  }`,
+  '62835448113ca2c33089a25b3d10c9f7aaee697591ea6a407dc67fe94e992e0c',
   hostedOAuthProviderPath,
 );
 assertImportBinding(
@@ -7503,37 +7485,10 @@ assertActiveFunctionDefinitionAst(
   }`,
   hostedPluginSourcePath,
 );
-assertActiveFunctionDefinitionAst(
+assertActiveFunctionAstSha256(
   hostedPluginSource,
   'projectApplyStartResult',
-  `function projectApplyStartResult(
-    response: any,
-    requestedTarget: number,
-    options: { resumed: boolean; started: boolean; targetMismatch: boolean },
-  ) {
-    const execution = response?.execution;
-    const activeTarget = readinessCount(execution?.targetCount ?? execution?.target);
-    return {
-      view: 'apply' as const,
-      success: response?.success !== false,
-      active: response?.active === true
-        || execution?.status === 'running'
-        || execution?.status === 'target_reached',
-      resumed: options.resumed,
-      started: options.started,
-      targetMismatch: options.targetMismatch,
-      target: activeTarget ?? readinessCount(requestedTarget),
-      requestedTarget: readinessCount(requestedTarget),
-      activeTarget,
-      executionId: readinessCount(execution?.id),
-      revision: readinessCount(execution?.revision),
-      status: safeExecutionStatus(execution?.status),
-      batchId: null,
-      memberIds: [],
-      nextAction: options.targetMismatch ? 'use_active_target' as const : 'advance_or_refresh' as const,
-      noSubmit: true as const,
-    };
-  }`,
+  'e09e0121659f164554ec4bbafd70f64593d21f78cce2da1abe1394abd0eebaa8',
   hostedPluginSourcePath,
 );
 assertActiveFunctionDefinitionAst(
@@ -7913,6 +7868,8 @@ const mutationAnnotationContract = {
   trackly_save_application_answers: 'mutationAnnotations(true, false)',
   trackly_grant_sensitive_storage_consent: 'mutationAnnotations(false, true)',
   trackly_revoke_sensitive_storage_consent: 'mutationAnnotations(true, false)',
+  trackly_defer_apply_access: 'mutationAnnotations(true, true)',
+  trackly_clear_apply_access_deferment: 'mutationAnnotations(true, true)',
   trackly_start_or_resume_apply: 'mutationAnnotations(false, true)',
   trackly_get_apply_work: 'mutationAnnotations()',
   trackly_report_apply_progress: 'mutationAnnotations()',
@@ -8713,6 +8670,7 @@ const applyOutputProperties = schemaObjectPropertyAsts(
 const applyOutputContract = {
   view: "z.literal('apply')",
   success: 'z.boolean()',
+  enabled: 'z.boolean().optional()',
   active: 'z.boolean()',
   resumed: 'z.boolean()',
   started: 'z.boolean()',
@@ -8725,7 +8683,8 @@ const applyOutputContract = {
   status: 'z.enum(APPLY_EXECUTION_STATUS_VALUES).nullable()',
   batchId: 'nullableCountSchema',
   memberIds: 'z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET)',
-  nextAction: "z.enum(['work_ready', 'use_active_target', 'advance_or_refresh', 'restart_after_reauthorization', 'complete', 'manual_review'])",
+  proposedWave: 'applyProposedWaveOutputSchema.optional()',
+  nextAction: "z.enum(['work_ready', 'use_active_target', 'advance_or_refresh', 'restart_after_reauthorization', 'access_review', 'complete', 'manual_review', 'capability_disabled'])",
   noSubmit: 'z.literal(true)',
 };
 assert.deepEqual(
@@ -8801,6 +8760,12 @@ assertWrappedHandlerStatementSequenceAst(
   `let execution = await orchestrationRequest(
     'GET', \`/api/jobscout/apply/executions/\${startResult.executionId}\`,
   );
+  let proposedWave = projectApplyProposedWave(
+    execution?.accessProposal ?? execution?.proposedWave,
+    execution,
+  )
+    ?? startResult.proposedWave
+    ?? activeProposedWave;
   let batchId = readinessCount(execution?.execution?.unresolvedWaves?.[0]?.batchId);`,
   hostedPluginSourcePath,
 );
@@ -8819,8 +8784,8 @@ assertWrappedHandlerStatementSequenceAst(
 assert.doesNotMatch(startOrResume, /\bleaseToken\b|\/claim|\/api\/jobscout\/apply\/runs/);
 
 for (const [name, digest] of Object.entries({
-  projectApplyWorkSnapshot: 'af81b1dbea04eac9272230e759f7764d2993a863fea5adaf4f73102629599103',
-  projectApplyWorkResponse: '9c0b03f3eeec7d5d7aef2d3fde45fe452471ae299806b338cad9a9592a9f5308',
+  projectApplyWorkSnapshot: 'ecc51625ca11f480ecabf86363b4a663cef565f36c221611a1f9f7766cc0c1e7',
+  projectApplyWorkResponse: '81407d09384775f21f0fae0ba2440e641b2aaec20722c3afe94541688ef04396',
   projectApplyWorkExecution: 'b4bf7d4fe1720870cb579a4c3dc7fbc88df0b1e0b2abcaece9a3b4ef86cb77ea',
   projectApplyWorkProgress: '5ec96731c10aa70a10ebde09d1ba118c55e32e366a30b394cce1b9e0a57bd568',
   readinessCount: '3d130acc0da6a240ee0a07b4da2cec356ee7113e44cd5ffbed42a5c31f50f299',
@@ -8843,7 +8808,7 @@ assertActiveVariableInitializerAst(
   `[
     'target', 'durablyReviewReady', 'submitted', 'reservedReviewSlots', 'currentlyFilling',
     'awaitingAnswer', 'authParked', 'excluded', 'conflicted', 'attempted',
-    'remainingCandidates',
+    'remainingCandidates', 'availableCandidateCount', 'deferredCandidateCount',
   ] as const`,
   hostedPluginSourcePath,
 );
@@ -9025,6 +8990,7 @@ assertBabelPropertyExpression(
       expectedRevision: z.number().int().min(1),
       browserSurface: z.enum(APPLY_BROWSER_SURFACES),
       idempotencyKey: z.string().min(16).max(200).regex(SAFE_IDEMPOTENCY_KEY),
+      accessReviewApproval: accessReviewApprovalSchema.optional(),
     }).strict(),
   ])`,
   'trackly_report_apply_progress descriptor',
@@ -9104,6 +9070,7 @@ const progressOutputContract = {
   success: 'z.boolean()',
   operation: "z.enum(['bind_surface', 'resume_parked', 'record_dispositions', 'record_observations', 'advance'])",
   recordedCount: 'z.number().int().nonnegative()',
+  enabled: 'z.boolean().optional()',
   batchId: 'nullableCountSchema.optional()',
   memberIds: 'z.array(z.number().int().min(1)).max(APPLY_EXECUTION_MAX_TARGET).optional()',
   binding: `z.object({
@@ -9124,7 +9091,8 @@ const progressOutputContract = {
     allowedOperations: z.array(z.enum(APPLY_EXECUTION_MEMBER_OPERATIONS)),
     replay: z.boolean(),
   }).strict().optional()`,
-  nextAction: "z.enum(['work_ready', 'advance_or_refresh']).optional()",
+  proposedWave: 'applyProposedWaveOutputSchema.optional()',
+  nextAction: "z.enum(['work_ready', 'access_review', 'advance_or_refresh', 'capability_disabled']).optional()",
   noSubmit: 'z.literal(true)',
 };
 assert.deepEqual(
@@ -9454,6 +9422,7 @@ module.exports = {
   assertActiveFunctionDirectStatementAst,
   assertActiveTopLevelStatementAst,
   assertActiveFunctionDefinitionAst,
+  assertActiveClassMethodAstSha256,
   assertActiveFunctionAstSha256,
   assertLivePluginRouterMount,
   assertImmutablePluginScopeFreeMethods,

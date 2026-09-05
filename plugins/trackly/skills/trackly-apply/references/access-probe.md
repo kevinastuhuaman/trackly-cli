@@ -34,3 +34,8 @@ submit-time CAPTCHA may remain reviewable because the user owns Submit.
 Never enter credentials, create an account, solve OTP/CAPTCHA, or enter private
 data during the probe. Revalidate identity after every redirect. When browser
 and accessibility evidence conflict, use `unknown_unobservable`, never access.
+
+Keep the audit UI's four labels (`OPEN`, `ACCOUNT WALL`, `VARIES`, `UNKNOWN`)
+separate from these detailed live classifications. Curated `OPEN` and recent
+accessibility can schedule a probe; they never authorize `fill_form`.
+`freshLiveProbeRequired` remains true for every proposed member.
