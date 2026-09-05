@@ -91,8 +91,8 @@ its computed-key guard.
 
 ## Verification
 
-`npm test` passes all 520 tests. `npm run test:hosted-contract` passes the
-checked-in 3.8.1 hosted fixture. The backend-coupled check must be rerun against
+`npm test` passes. `npm run test:hosted-contract` passes the checked-in 3.8.1
+hosted fixture. The backend-coupled check must be rerun against
 the exact coordinated backend release candidate before merge; current backend
 `origin/main` is 3.8.0/job-company only, while provider scope and clear-to-fresh
 all-deferred recomputation remain pending in backend PR #1769.

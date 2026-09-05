@@ -275,19 +275,10 @@ const accessProposalSchema = z.object({
       message: 'empty accessProposal members require no available candidates and at least one deferred candidate',
     });
   }
-  if (proposal.members.length === 0 && proposal.deferredCandidateCount > 0) {
-    if (!allDeferred && !recoveryBlocked) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['rationaleCode'],
-        message: 'all-deferred access proposals must use all_candidates_user_deferred rationale',
-      });
-    }
-    // The initial 3.8.0 backend response omitted this optional mapping. When
-    // it is present, the mapping is validated and cached so the agent can
-    // offer an exact clear action; when it is absent, the proposal remains a
-    // safe stop/expiry state until a refreshed backend receipt supplies IDs.
-  }
+  // The initial 3.8.0 backend response omitted this optional mapping. When
+  // it is present, the mapping is validated and cached so the agent can offer
+  // an exact clear action; when it is absent, the proposal remains a safe
+  // stop/expiry state until a refreshed backend receipt supplies IDs.
   if (new Set(proposal.members.map(({ jobId }) => jobId)).size !== proposal.members.length) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -496,16 +487,17 @@ function rejectInactiveExecution(response, context) {
   // A preserved terminal execution is intentionally returned with
   // `active: false` for read-only reconciliation. Only reject the
   // contradictory combination where that same response still asks the
-  // caller to perform an access review.
+  // caller to perform more work. Preserved terminals are valid only with
+  // nextAction `none`.
   if (
     response.active === false
     && response.execution !== undefined
-    && response.progress?.nextAction === 'access_review'
+    && response.progress?.nextAction !== 'none'
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['active'],
-      message: 'active=false responses must not include an execution payload',
+      message: 'active=false terminal responses must use nextAction none',
     });
   }
 }
@@ -1277,7 +1269,7 @@ function registerApplyTools(
 
   server.tool(
     'trackly_advance_apply_execution',
-    'Advance an execution transactionally for the current browser surface. Returns the immutable proposedWave with frozen accessKnowledge receipts and never opens a browser. Same-key replay returns the same members, order, and rationale. Optional hash-bound accessReviewApproval probes exact deferred job IDs only after personal deferments are cleared.',
+    'Advance an execution transactionally for the current browser surface. Returns the immutable proposedWave with frozen accessKnowledge receipts and never opens a browser. Same-key replay returns the same members, order, and rationale. Optional hash-bound accessReviewApproval probes the exact proposed job IDs only after personal deferments are cleared.',
     {
       executionId: z.number().int().min(1),
       expectedRevision: z.number().int().min(1),

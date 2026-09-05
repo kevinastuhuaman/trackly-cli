@@ -1318,6 +1318,16 @@ test('active execution validation accepts ordinary envelopes with active-state m
     .registrations.get('trackly_get_active_apply_execution');
   await assert.rejects(contradictoryRegistration.handler({}), z.ZodError);
 
+  const contradictoryInactiveAdvance = {
+    ...response,
+    active: false,
+    preserved: true,
+    progress: { ...response.progress, nextAction: 'advance' },
+  };
+  const contradictoryAdvanceRegistration = registerRuntimeTools(contradictoryInactiveAdvance)
+    .registrations.get('trackly_get_active_apply_execution');
+  await assert.rejects(contradictoryAdvanceRegistration.handler({}), z.ZodError);
+
   const missingProposal = registerRuntimeTools({
     ...response,
     progress: { ...response.progress, nextAction: 'access_review' },
