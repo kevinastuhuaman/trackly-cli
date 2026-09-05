@@ -28,8 +28,10 @@ agent-facing skill instructions.
 
 ## Symptoms
 
-The response schemas accepted an empty `proposedWave` or `accessProposal`, even
-though an access-review continuation requires a concrete member set. After an
+The response schemas accepted an empty `proposedWave` or `accessProposal` without
+checking its counts. An access-review continuation normally requires a concrete
+member set, while the all-deferred case legitimately has no members and must be
+recognized by zero available candidates plus a positive deferred count. After an
 approval returned another `nextAction: access_review`, the new proposal was not
 cached, so the next exact approval was rejected locally. Matching nested
 `accessKnowledge` values by raw JSON text also made harmless object key order
@@ -46,7 +48,9 @@ The verifier's member lookup likewise happened before its computed-key guard.
 
 ## Solution
 
-- Require at least one member in access-review proposal and wave arrays.
+- Require a nonempty member set for normal access-review proposals, while
+  accepting the bounded all-deferred shape with zero available candidates and at
+  least one deferred candidate.
 - Validate ordinary active-execution envelopes with the active-state metadata
   without forcing a proposal onto non-review progress responses.
 - Canonicalize nested `accessKnowledge` objects by key before comparing the

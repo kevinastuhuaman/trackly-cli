@@ -1770,7 +1770,7 @@ test('advance accepts hash-bound accessReviewApproval and validates proposedWave
   assert.equal(stopped.calls.length, 2);
 });
 
-test('access-review validation rejects empty proposals, ignores key order, and caches follow-up proposals', async () => {
+test('access-review validation bounds all-deferred proposals, ignores key order, and caches follow-up proposals', async () => {
   const frozenIdentity = {
     jobId: 88,
     memberPosition: 0,
@@ -1827,7 +1827,29 @@ test('access-review validation rejects empty proposals, ignores key order, and c
     ...overrides,
   });
 
-  const empty = registerRuntimeTools({
+  const allDeferredProposal = {
+    ...accessProposal,
+    availableCandidateCount: 0,
+    deferredCandidateCount: 1,
+    members: [],
+  };
+  const allDeferred = registerRuntimeTools({
+    success: true,
+    executionId: 41,
+    createdWave: false,
+    revision: 4,
+    proposedWave: [],
+    accessProposal: allDeferredProposal,
+    progress: {
+      ...proposalProgress,
+      remainingCandidates: 1,
+      availableCandidateCount: 0,
+      deferredCandidateCount: 1,
+    },
+  }).registrations.get('trackly_advance_apply_execution');
+  await assert.doesNotReject(allDeferred.handler(allDeferred.schema.parse(advanceInput())));
+
+  const invalidEmpty = registerRuntimeTools({
     success: true,
     executionId: 41,
     createdWave: false,
@@ -1836,10 +1858,7 @@ test('access-review validation rejects empty proposals, ignores key order, and c
     accessProposal: { ...accessProposal, members: [] },
     progress: proposalProgress,
   }).registrations.get('trackly_advance_apply_execution');
-  await assert.rejects(
-    empty.handler(empty.schema.parse(advanceInput())),
-    z.ZodError,
-  );
+  await assert.rejects(invalidEmpty.handler(invalidEmpty.schema.parse(advanceInput())), z.ZodError);
 
   const reorderedAccessKnowledge = {
     freshLiveProbeRequired: sampleAccessKnowledge.freshLiveProbeRequired,

@@ -216,8 +216,16 @@ const accessProposalSchema = z.object({
         === values.length
     ), { message: 'blockedJobDeferments must contain unique job/deferment pairs' })
     .optional(),
-  members: z.array(richProposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+  members: z.array(richProposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
 }).strict().superRefine((proposal, context) => {
+  if (proposal.members.length === 0
+    && (proposal.availableCandidateCount !== 0 || proposal.deferredCandidateCount < 1)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['members'],
+      message: 'empty accessProposal members require no available candidates and at least one deferred candidate',
+    });
+  }
   if (new Set(proposal.members.map(({ jobId }) => jobId)).size !== proposal.members.length) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -334,7 +342,7 @@ const proposedWaveResponseSchema = z.object({
   createdWave: z.boolean(),
   batchId: z.number().int().min(1).optional(),
   revision: z.number().int().min(1),
-  proposedWave: z.array(proposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
   progress: executionProgressSchema,
   replay: z.boolean().optional(),
@@ -365,7 +373,7 @@ const getExecutionAccessReviewResponseSchema = z.object({
   success: z.literal(true),
   execution: applyExecutionSchema,
   progress: executionProgressSchema,
-  proposedWave: z.array(proposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
 }).strict().superRefine(validateMatchingProposal);
 const activeExecutionAccessReviewResponseSchema = getExecutionAccessReviewResponseSchema.innerType().extend({
@@ -376,7 +384,7 @@ const startExecutionAccessReviewResponseSchema = z.object({
   success: z.literal(true),
   execution: applyExecutionSchema,
   progress: executionProgressSchema,
-  proposedWave: z.array(proposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
+  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
 }).strict().superRefine(validateMatchingProposal);
 const advanceExecutionResponseSchema = z.object({
