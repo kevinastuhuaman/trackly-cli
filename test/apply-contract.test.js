@@ -70,8 +70,17 @@ test('Apply skill and orchestration bind access-review approval to the exact ser
     path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'),
     'utf8',
   );
+  assert.match(orchestration, /trackly_list_apply_access_deferments/);
+  assert.match(orchestration, /trackly_defer_apply_access/);
+  assert.match(orchestration, /trackly_clear_apply_access_deferment/);
   assert.match(orchestration, /clear[^\n]*defermentId/i);
   assert.match(orchestration, /using a\s+Trackly `jobId`/i);
+  assert.doesNotMatch(orchestration, /trackly_clear_apply_access_deferment` using a\s+Trackly `jobId`/i);
+  assert.ok(
+    orchestration.indexOf('Clear any\nactive personal deferment before probing')
+      < orchestration.indexOf('Probe those exact job IDs'),
+    'clear-before-probe guidance must precede the probe instruction',
+  );
 });
 
 test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {

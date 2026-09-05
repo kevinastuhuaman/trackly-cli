@@ -88,12 +88,11 @@ rule, regardless of whether another accessible candidate remains.
 
 Read `progress.availableCandidateCount`, `progress.deferredCandidateCount`, and
 `nextAction`. When `nextAction` is `access_review`, return the bounded deferred
-proposal, open nothing, and do not report the queue as exhausted. Probe those
-exact job IDs only with hash-bound `accessReviewApproval` after clearing any
-active personal deferment. List or create deferments only through
+proposal, open nothing, and do not report the queue as exhausted. Clear any
+active personal deferment before probing. Probe those exact job IDs only with
+hash-bound `accessReviewApproval` after clearing that deferment. List or create deferments only through
 `trackly_list_apply_access_deferments` and `trackly_defer_apply_access` using a
-Trackly `jobId`. Clear only the exact user-selected `defermentId` returned by
-deferment discovery or creation. Never submit a URL, provider name, or raw chat.
+Trackly `jobId`. Clear only through `trackly_clear_apply_access_deferment` using the exact user-selected `defermentId` returned by deferment discovery or creation. Never submit a URL, provider name, or raw chat.
 Scope `provider` is the approved global
 user-policy boundary: the server derives that identity and blocks matching
 candidates across companies, proposal approval, recovery, and replay. Create a
