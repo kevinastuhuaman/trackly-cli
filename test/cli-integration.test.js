@@ -14,9 +14,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createTempConfigDir, seedApiKey, startMockServer, runCli } = require('./helpers');
+const packageVersion = require('../package.json').version;
 
 test('published package version has a dated changelog section', () => {
-  const packageVersion = require('../package.json').version;
   const changelog = fs.readFileSync(path.join(__dirname, '..', 'CHANGELOG.md'), 'utf8');
 
   assert.match(changelog, new RegExp(
@@ -687,7 +687,7 @@ test('agent doctor explains that exact resume validation is deferred to a real A
 
   assert.equal(result.stderr, '');
   assert.ok(result.stdout.includes(
-    'CLI: 0.18.0; MCP contract: 3.8.1',
+    `CLI: ${packageVersion}; MCP contract: 3.8.1`,
   ));
   assert.match(result.stdout, /Skill: 4\.8\.0; digest: [a-f0-9]{64}/);
   assert.match(result.stdout, /Resume validation: available \(exact bytes are verified during an active Apply run\)/);

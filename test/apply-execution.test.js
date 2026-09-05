@@ -2507,3 +2507,22 @@ test('access deferment tools use jobId-derived scopes and discovered ids', async
     z.ZodError,
   );
 });
+
+test('access deferment discovery accepts the backend active-deferment limit', async () => {
+  const deferments = Array.from({ length: 20 }, (_, index) => ({
+    id: index + 1,
+    jobId: 1000 + index,
+    scope: 'job',
+    createdAt: '2026-09-05T12:00:00.000Z',
+    persistsUntilCleared: true,
+  }));
+  const atLimit = registerRuntimeTools({ success: true, deferments })
+    .registrations.get('trackly_list_apply_access_deferments');
+  await assert.doesNotReject(atLimit.handler({}));
+
+  const aboveLimit = registerRuntimeTools({
+    success: true,
+    deferments: [...deferments, { ...deferments[0], id: 21, jobId: 1020 }],
+  }).registrations.get('trackly_list_apply_access_deferments');
+  await assert.rejects(aboveLimit.handler({}), z.ZodError);
+});

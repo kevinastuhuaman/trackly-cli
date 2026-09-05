@@ -3,18 +3,17 @@ title: Bind access-review approval to validated proposal receipts
 date: 2026-09-05
 category: integration-issues
 module: Trackly Apply access-review facade
-problem_type: integration_bug
+problem_type: integration_issue
 component: mcp_facade
 symptoms:
   - A compact backend proposal could be rejected because the client required display identity fields in both projections
   - Active execution recovery could reject the backend's enabled metadata or expose access_review without its proposal
   - An empty access-review proposal could pass the client response schema and reach approval handling
-  - A follow-up proposal returned after approval was not retained for the next hash-bound continuation
-  - Equivalent accessKnowledge objects with different key order were rejected as mismatched
-  - Computed instance members could evade the hosted runtime-method shadow check
+  - Follow-up proposal caching and key-order-sensitive accessKnowledge comparisons could reject a valid continuation
+  - The deferment list reused the execution-wave cap instead of naming the backend's active-deferment limit
 root_cause: missing_validation
 resolution_type: code_fix
-severity: major
+severity: high
 related_components: [api_layer, contract_verifier, documentation]
 tags: [trackly-apply, access-review, proposal-receipt, zod, hosted-contract, fail-closed]
 ---
@@ -88,6 +87,8 @@ its computed-key guard.
 - Keep the local and adapted Apply skills explicit about
   `accessProposal.approvalHash`, and distinguish creation `jobId` values from
   the discovered `defermentId` required to clear a deferment.
+- Validate deferment discovery against the backend's dedicated active-deferment
+  limit rather than coupling it to the numerically equal execution-wave limit.
 
 ## Verification
 
@@ -99,7 +100,8 @@ contains `jobId` and `accessKnowledge` and omits `memberPosition` and display
 identity; the client therefore accepts that deployed shape while binding any
 optional returned position to the rich receipt. Provider scope, richer identity,
 and clear-to-fresh all-deferred recomputation remain pending in backend PR
-#1769.
+#1769. The backend store's active-deferment limit is 20; the CLI now names and
+tests that boundary independently from the execution-wave limit.
 
 ## Prevention
 
