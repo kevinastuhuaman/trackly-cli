@@ -1115,6 +1115,12 @@ test('active execution validation accepts ordinary envelopes with active-state m
   };
   const registration = registerRuntimeTools(response).registrations.get('trackly_get_active_apply_execution');
   assert.deepEqual(await registration.handler({}), response);
+
+  const missingProposal = registerRuntimeTools({
+    ...response,
+    progress: { ...response.progress, nextAction: 'access_review' },
+  }).registrations.get('trackly_get_active_apply_execution');
+  await assert.rejects(missingProposal.handler({}), z.ZodError);
 });
 
 test('advance replay returns the backend current revision and progress unchanged', async () => {

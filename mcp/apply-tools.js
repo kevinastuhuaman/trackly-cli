@@ -393,14 +393,20 @@ const getExecutionResponseSchema = z.object({
   execution: applyExecutionSchema,
   progress: compatibleExecutionProgressSchema,
 }).strict();
+const activeExecutionOrdinaryResponseSchema = getExecutionResponseSchema.extend({
+  active: z.boolean().optional(),
+  preserved: z.boolean().optional(),
+}).strict().superRefine((response, context) => {
+  if (response.progress.nextAction === 'access_review') {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['progress', 'nextAction'],
+      message: 'access_review responses must include proposedWave and accessProposal',
+    });
+  }
+});
 const activeExecutionResponseSchema = z.union([
-  z.object({
-    success: z.literal(true),
-    execution: applyExecutionSchema,
-    progress: compatibleExecutionProgressSchema,
-    active: z.boolean().optional(),
-    preserved: z.boolean().optional(),
-  }).strict(),
+  activeExecutionOrdinaryResponseSchema,
   activeExecutionAccessReviewResponseSchema,
 ]);
 const accessDefermentSchema = z.object({
