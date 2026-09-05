@@ -811,8 +811,8 @@ function registerApplyTools(
       const response = rawResponse?.proposedWave !== undefined || rawResponse?.accessProposal !== undefined
         ? startExecutionAccessReviewResponseSchema.parse(rawResponse)
         : rawResponse;
-      if (response.proposedWave !== undefined && response.executionId !== undefined) {
-        rememberAccessProposal(response.executionId, response.revision, null, response);
+      if (response.proposedWave !== undefined && response.execution?.id !== undefined) {
+        rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
       }
       return response;
     }, 'Failed to start apply execution')
