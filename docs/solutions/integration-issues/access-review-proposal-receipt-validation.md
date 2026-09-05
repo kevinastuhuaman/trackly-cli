@@ -94,8 +94,12 @@ its computed-key guard.
 `npm test` passes. `npm run test:hosted-contract` passes the checked-in 3.8.1
 hosted fixture. The backend-coupled check must be rerun against
 the exact coordinated backend release candidate before merge; current backend
-`origin/main` is 3.8.0/job-company only, while provider scope and clear-to-fresh
-all-deferred recomputation remain pending in backend PR #1769.
+`origin/main` is 3.8.0/job-company only. Its direct CLI compact projection
+contains `jobId` and `accessKnowledge` and omits `memberPosition` and display
+identity; the client therefore accepts that deployed shape while binding any
+optional returned position to the rich receipt. Provider scope, richer identity,
+and clear-to-fresh all-deferred recomputation remain pending in backend PR
+#1769.
 
 ## Prevention
 

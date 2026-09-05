@@ -472,7 +472,8 @@ const startExecutionResponseSchema = z.union([
   startExecutionOrdinaryResponseSchema,
 ]);
 function rejectAccessReviewWithoutProposal(response, context) {
-  if (response.progress.nextAction === 'access_review') {
+  if (response.progress.nextAction === 'access_review'
+    && (response.proposedWave === undefined || response.accessProposal === undefined)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['progress', 'nextAction'],
