@@ -39,17 +39,39 @@ const {
 test('hosted verifier rejects runtime verifyAccessToken shadow members', () => {
   for (const member of [
     "['verifyAccessToken']() { return null; }",
+    "['verify' + 'AccessToken']() { return null; }",
+    "const key = 'verifyAccessToken'; [key]() { return null; }",
     "verifyAccessToken = () => null;",
     "['verifyAccessToken'] = () => null;",
+    "['verify' + 'AccessToken'] = () => null;",
   ]) {
-    const source = `class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member} }`;
+    const source = member.startsWith('const ')
+      ? `${member.split('; ')[0]}; class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member.split('; ').slice(1).join('; ')} }`
+      : `class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member} }`;
     assert.throws(
       () => assertActiveClassMethodAstSha256(
         source, 'TracklyOAuthProvider', 'verifyAccessToken', '0'.repeat(64), 'fixture.ts',
       ),
-      /exactly one runtime member|must be a method|must use an identifier key|must not use a computed key/,
+      /computed instance member|exactly one runtime member|must be a method|must use an identifier key|must not use a computed key/,
     );
   }
+});
+
+test('Apply skill and orchestration bind access-review approval to the exact server receipt', () => {
+  for (const relativePath of [
+    ['skills', 'trackly-apply', 'SKILL.md'],
+    ['plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'],
+  ]) {
+    const skill = fs.readFileSync(path.join(__dirname, '..', ...relativePath), 'utf8');
+    assert.match(skill, /accessProposal\.approvalHash/);
+    assert.doesNotMatch(skill, /proposedWave\.approvalHash/);
+  }
+  const orchestration = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'),
+    'utf8',
+  );
+  assert.match(orchestration, /clear[^\n]*defermentId/i);
+  assert.match(orchestration, /using a\s+Trackly `jobId`/i);
 });
 
 test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {

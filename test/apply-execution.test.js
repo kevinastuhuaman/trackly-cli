@@ -1074,6 +1074,49 @@ test('start execution returns numeric identity plus authoritative progress and n
   assert.equal(result.progress.nextAction, 'advance');
 });
 
+test('active execution validation accepts ordinary envelopes with active-state metadata', async () => {
+  const response = {
+    success: true,
+    active: true,
+    preserved: false,
+    execution: {
+      id: 41,
+      userId: 7,
+      mode: 'complete_next_n_accessible',
+      targetCount: 1,
+      orderingVersion: 3,
+      queueSnapshotAt: '2026-08-28T12:00:00.000Z',
+      originalSnapshotHash: 'a'.repeat(64),
+      status: 'running',
+      revision: 4,
+      expiresAt: '2026-08-29T12:00:00.000Z',
+      recoverableUntil: '2026-09-04T12:00:00.000Z',
+      sourceExecutionId: null,
+      sourceSnapshotHash: null,
+      currentWave: null,
+      unresolvedWaves: [],
+    },
+    progress: {
+      target: 1,
+      durablyReviewReady: 0,
+      submitted: 0,
+      reservedReviewSlots: 0,
+      currentlyFilling: 0,
+      awaitingAnswer: 0,
+      authParked: 0,
+      excluded: 0,
+      conflicted: 0,
+      attempted: 0,
+      remainingCandidates: 1,
+      queueExhausted: false,
+      targetReached: false,
+      nextAction: 'advance',
+    },
+  };
+  const registration = registerRuntimeTools(response).registrations.get('trackly_get_active_apply_execution');
+  assert.deepEqual(await registration.handler({}), response);
+});
+
 test('advance replay returns the backend current revision and progress unchanged', async () => {
   const response = {
     success: true,
@@ -1719,6 +1762,156 @@ test('advance accepts hash-bound accessReviewApproval and validates proposedWave
     /exact returned proposal/i,
   );
   assert.equal(stopped.calls.length, 2);
+});
+
+test('access-review validation rejects empty proposals, ignores key order, and caches follow-up proposals', async () => {
+  const frozenIdentity = {
+    jobId: 88,
+    memberPosition: 0,
+    jobTitle: 'Product Manager',
+    companyName: 'Example Co',
+    provider: 'greenhouse',
+    requisitionUrl: 'https://boards.greenhouse.io/example/jobs/88',
+  };
+  const approvalHash = 'c'.repeat(64);
+  const followUpHash = 'e'.repeat(64);
+  const proposedWave = [{ ...frozenIdentity, accessKnowledge: sampleAccessKnowledge }];
+  const accessProposal = {
+    proposalId: 7,
+    approvalHash,
+    rationaleCode: 'access_review',
+    knowledgeRevision: 1,
+    evaluatedAt: '2026-08-28T12:00:00.000Z',
+    availableCandidateCount: 1,
+    deferredCandidateCount: 0,
+    members: [{
+      ...frozenIdentity,
+      rationaleCode: 'ats_default_open',
+      receiptHash: 'd'.repeat(64),
+      accessKnowledge: sampleAccessKnowledge,
+    }],
+  };
+  const proposalProgress = {
+    target: 1,
+    achievementCount: 0,
+    completed: 0,
+    durablyReviewReady: 0,
+    submitted: 0,
+    reservedReviewSlots: 0,
+    currentlyFilling: 0,
+    awaitingAnswer: 0,
+    authParked: 0,
+    excluded: 0,
+    conflicted: 0,
+    attempted: 0,
+    remainingCandidates: 1,
+    availableCandidateCount: 1,
+    deferredCandidateCount: 0,
+    queueExhausted: false,
+    targetReached: false,
+    nextAction: 'access_review',
+    historicalProjection: { achievementCount: 0, completed: 0 },
+    currentProjection: { durablyReviewReady: 0, submitted: 0 },
+  };
+  const advanceInput = (overrides = {}) => ({
+    executionId: 41,
+    expectedRevision: 3,
+    browserSurface: 'codex_in_app',
+    idempotencyKey: 'access-review-test-key-0001',
+    ...overrides,
+  });
+
+  const empty = registerRuntimeTools({
+    success: true,
+    executionId: 41,
+    createdWave: false,
+    revision: 4,
+    proposedWave: [],
+    accessProposal: { ...accessProposal, members: [] },
+    progress: proposalProgress,
+  }).registrations.get('trackly_advance_apply_execution');
+  await assert.rejects(
+    empty.handler(empty.schema.parse(advanceInput())),
+    z.ZodError,
+  );
+
+  const reorderedAccessKnowledge = {
+    freshLiveProbeRequired: sampleAccessKnowledge.freshLiveProbeRequired,
+    evaluatedAt: sampleAccessKnowledge.evaluatedAt,
+    knowledgeRevision: sampleAccessKnowledge.knowledgeRevision,
+    rationaleCode: sampleAccessKnowledge.rationaleCode,
+    effectiveSchedulingEffect: sampleAccessKnowledge.effectiveSchedulingEffect,
+    userPreference: sampleAccessKnowledge.userPreference,
+    observedAccess: sampleAccessKnowledge.observedAccess,
+  };
+  const reordered = registerRuntimeTools({
+    success: true,
+    executionId: 41,
+    createdWave: false,
+    revision: 4,
+    proposedWave,
+    accessProposal: {
+      ...accessProposal,
+      members: [{ ...accessProposal.members[0], accessKnowledge: reorderedAccessKnowledge }],
+    },
+    progress: proposalProgress,
+  }).registrations.get('trackly_advance_apply_execution');
+  await assert.doesNotReject(reordered.handler(reordered.schema.parse(advanceInput())));
+
+  const followUpProposal = {
+    ...accessProposal,
+    proposalId: 8,
+    approvalHash: followUpHash,
+    members: [{ ...accessProposal.members[0], receiptHash: 'f'.repeat(64) }],
+  };
+  let requestCount = 0;
+  const followUp = registerRuntimeTools(() => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return {
+        success: true,
+        executionId: 41,
+        createdWave: false,
+        revision: 4,
+        proposedWave,
+        accessProposal,
+        progress: proposalProgress,
+      };
+    }
+    if (requestCount === 2) {
+      return {
+        success: true,
+        executionId: 41,
+        createdWave: false,
+        revision: 5,
+        proposedWave,
+        accessProposal: followUpProposal,
+        progress: { ...proposalProgress, nextAction: 'access_review' },
+      };
+    }
+    return {
+      success: true,
+      executionId: 41,
+      createdWave: true,
+      batchId: 91,
+      revision: 6,
+      progress: { ...proposalProgress, nextAction: 'continue_current_wave' },
+    };
+  }).registrations.get('trackly_advance_apply_execution');
+  await followUp.handler(followUp.schema.parse(advanceInput({
+    idempotencyKey: 'first-proposal-test-key',
+  })));
+  await followUp.handler(followUp.schema.parse(advanceInput({
+    expectedRevision: 4,
+    idempotencyKey: 'first-approval-test-key',
+    accessReviewApproval: { jobIds: [88], approvalHash },
+  })));
+  await followUp.handler(followUp.schema.parse(advanceInput({
+    expectedRevision: 5,
+    idempotencyKey: 'follow-up-approval-test-key',
+    accessReviewApproval: { jobIds: [88], approvalHash: followUpHash },
+  })));
+  assert.equal(requestCount, 3);
 });
 
 test('access deferment tools use jobId-derived scopes and discovered ids', async () => {

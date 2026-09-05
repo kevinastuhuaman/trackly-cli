@@ -216,7 +216,7 @@ const accessProposalSchema = z.object({
         === values.length
     ), { message: 'blockedJobDeferments must contain unique job/deferment pairs' })
     .optional(),
-  members: z.array(richProposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  members: z.array(richProposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
 }).strict().superRefine((proposal, context) => {
   if (new Set(proposal.members.map(({ jobId }) => jobId)).size !== proposal.members.length) {
     context.addIssue({
@@ -278,6 +278,20 @@ const compatibleExecutionProgressSchema = executionProgressSchema.extend({
     submitted: z.number().int().min(0),
   }).strict().optional(),
 }).strict();
+function canonicalizeAccessKnowledge(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeAccessKnowledge);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [
+      key,
+      canonicalizeAccessKnowledge(value[key]),
+    ]));
+  }
+  return value;
+}
+function accessKnowledgeEqual(left, right) {
+  return JSON.stringify(canonicalizeAccessKnowledge(left))
+    === JSON.stringify(canonicalizeAccessKnowledge(right));
+}
 function validateMatchingProposal(response, context) {
   const simpleIds = response.proposedWave.map(({ jobId }) => jobId);
   const richIds = response.accessProposal.members.map(({ jobId }) => jobId);
@@ -304,7 +318,7 @@ function validateMatchingProposal(response, context) {
       || member.companyName !== rich.companyName
       || member.provider !== rich.provider
       || member.requisitionUrl !== rich.requisitionUrl
-      || JSON.stringify(member.accessKnowledge) !== JSON.stringify(rich.accessKnowledge)
+      || !accessKnowledgeEqual(member.accessKnowledge, rich.accessKnowledge)
       || rich.rationaleCode !== rich.accessKnowledge.rationaleCode;
   })) {
     context.addIssue({
@@ -320,7 +334,7 @@ const proposedWaveResponseSchema = z.object({
   createdWave: z.boolean(),
   batchId: z.number().int().min(1).optional(),
   revision: z.number().int().min(1),
-  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  proposedWave: z.array(proposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
   progress: executionProgressSchema,
   replay: z.boolean().optional(),
@@ -351,7 +365,7 @@ const getExecutionAccessReviewResponseSchema = z.object({
   success: z.literal(true),
   execution: applyExecutionSchema,
   progress: executionProgressSchema,
-  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  proposedWave: z.array(proposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
 }).strict().superRefine(validateMatchingProposal);
 const activeExecutionAccessReviewResponseSchema = getExecutionAccessReviewResponseSchema.innerType().extend({
@@ -362,7 +376,7 @@ const startExecutionAccessReviewResponseSchema = z.object({
   success: z.literal(true),
   execution: applyExecutionSchema,
   progress: executionProgressSchema,
-  proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  proposedWave: z.array(proposedWaveMemberSchema).min(1).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
 }).strict().superRefine(validateMatchingProposal);
 const advanceExecutionResponseSchema = z.object({
@@ -379,6 +393,16 @@ const getExecutionResponseSchema = z.object({
   execution: applyExecutionSchema,
   progress: compatibleExecutionProgressSchema,
 }).strict();
+const activeExecutionResponseSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    execution: applyExecutionSchema,
+    progress: compatibleExecutionProgressSchema,
+    active: z.boolean().optional(),
+    preserved: z.boolean().optional(),
+  }).strict(),
+  activeExecutionAccessReviewResponseSchema,
+]);
 const accessDefermentSchema = z.object({
   id: z.number().int().min(1),
   jobId: z.number().int().min(1),
@@ -634,7 +658,7 @@ const startApplyRunSchema = z.object({
   }
 });
 
-const APPLY_RELIABILITY_PROMPT = 'Protocol 3.7 / skill 4.8.0 reliability gate: recover active work first. Consume the exact proposedWave and frozen accessKnowledge receipts before opening any browser. Rank OPEN ahead of neutral VARIES/UNKNOWN, then fresh ACCOUNT WALL; never auto-select an active user deferment. Historical OPEN never authorizes fill_form; freshLiveProbeRequired remains true. When nextAction is access_review, display the exact accessProposal and approvalHash, then obtain explicit approval for those exact jobIds and call the hash-bound approval continuation; if access is deferred, wait for probe, clear-deferment, stop, or expiry. Do not open a browser or report the queue exhausted. Retain the latest explicit target as hard, prove genuine applicant fields before counting access, obtain approval for the exact accessible jobs before form mutation, fill all deterministic fields before one true-gap question packet, and validate each value-free phase checkpoint. Every checkpoint action must use its canonical continuationAllowed value; review/manual_submit, captcha/at_submit, trust/origin_mismatch, and observability/unverifiable_state require false. Fail closed on a rejected checkpoint. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. An active personal deferment blocks exact recovery until cleared. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
+const APPLY_RELIABILITY_PROMPT = 'Protocol 3.7 / skill 4.8.0 reliability gate: recover active work first. Consume the exact proposedWave and frozen accessKnowledge receipts before opening any browser. Rank OPEN ahead of neutral VARIES/UNKNOWN, then fresh ACCOUNT WALL; never auto-select an active user deferment. Historical OPEN never authorizes fill_form; freshLiveProbeRequired remains true. When nextAction is access_review, including ordinary OPEN or neutral proposals, display the exact accessProposal and accessProposal.approvalHash, obtain explicit approval for those exact ordered jobIds, and call the hash-bound approval continuation; if a personal deferment blocks approval, list its stable deferment ID and offer clear-deferment, stop, or expiry. Do not open a browser or report the queue exhausted. Retain the latest explicit target as hard, prove genuine applicant fields before counting access, obtain approval for the exact accessible jobs before form mutation, fill all deterministic fields before one true-gap question packet, and validate each value-free phase checkpoint. Every checkpoint action must use its canonical continuationAllowed value; review/manual_submit, captcha/at_submit, trust/origin_mismatch, and observability/unverifiable_state require false. Fail closed on a rejected checkpoint. After full local context loss, list recoverable executions, show only stable job identity, obtain explicit confirmation of the exact candidate set, and call exact-member recovery without substitutions. An active personal deferment blocks exact recovery until cleared. Treat recovered tab presence, form state, and mutation authority as three separate facts; reacquire a fresh browser binding and inspection epoch before mutation. Before resolving broad submission statements, list active review handoffs for the execution; use only an explicit receipt or the sole returned active receipt, classify every member as detected, user_confirmed, unresolved, or contradictory, and claim that exact handoff before writing outcomes. Use provider-specific positive success evidence; an unchanged URL or title is never negative evidence. Validate an exact expected browser keep set locally before finalization. For resume uploads, negotiate the browser surface capabilities, identify the semantic control, arm the chooser before clicking, attach the immediately verified file, prove the user-facing filename committed, and recheck parser-modified fields. Use compact snapshots and server-provided mutability. Preserve user-edited and unknown non-empty fields. Never reopen parked work without explicit user resumption. Never click Submit.';
 
 function registerApplyTools(
   server,
@@ -829,9 +853,7 @@ function registerApplyTools(
     wrapTool(async () => {
       const rawResponse = await applyControlRequest('GET', '/api/jobscout/apply/executions/active');
       const response = rawResponse?.execution !== undefined || rawResponse?.progress !== undefined
-        ? (rawResponse?.active !== undefined || rawResponse?.preserved !== undefined
-          ? activeExecutionAccessReviewResponseSchema.parse(rawResponse)
-          : validateGetExecutionResponse(rawResponse))
+        ? activeExecutionResponseSchema.parse(rawResponse)
         : rawResponse;
       if (response?.execution?.id && response.proposedWave !== undefined) {
         rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
@@ -1097,6 +1119,9 @@ function registerApplyTools(
           jobIds: [...body.accessReviewApproval.jobIds],
           idempotencyKey,
         });
+        if (response.proposedWave !== undefined && response.progress?.nextAction === 'access_review') {
+          rememberAccessProposal(executionId, response.revision, body.browserSurface, response);
+        }
       } else if (response.proposedWave !== undefined) {
         rememberAccessProposal(executionId, response.revision, body.browserSurface, response);
       } else {
