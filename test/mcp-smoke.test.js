@@ -12,6 +12,7 @@ const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = require('@modelcontextprotocol/sdk/inMemory.js');
 const { createErrorResult, createServer, throwMcpResourceError } = require('../mcp/server');
 const { createMaintenanceError, createTracklyAccessError } = require('../lib/client');
+const applyContract = require('../contracts/trackly-apply-tools.json');
 
 const BIN_PATH = path.join(__dirname, '..', 'bin', 'trackly');
 
@@ -90,6 +91,38 @@ test('local MCP preserves retryable application-profile schema rollout errors', 
   assert.equal(payload.status, 503);
   assert.equal(payload.code, 'application_profile_schema_pending');
   assert.equal(payload.retryable, true);
+});
+
+test('local MCP preserves only versioned Apply batch conflict codes', () => {
+  for (const conflictCode of [
+    'submission_in_progress',
+    'access_deferment_limit_reached',
+    'access_deferments_active',
+  ]) {
+    assert.ok(
+      applyContract.constants.applyBatchConflictCodes.includes(conflictCode),
+      `${conflictCode} must be published by the Apply contract`,
+    );
+    const result = createErrorResult({
+      status: 409,
+      error: 'apply_batch_conflict',
+      conflictCode,
+    }, 'Apply batch conflict');
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.status, 409);
+    assert.equal(payload.error, 'apply_batch_conflict');
+    assert.equal(payload.conflictCode, conflictCode);
+  }
+
+  for (const error of [
+    { status: 409, error: 'apply_batch_conflict', conflictCode: 'future_conflict' },
+    { status: 400, error: 'apply_batch_conflict', conflictCode: 'submission_in_progress' },
+    { status: 409, error: 'other_error', conflictCode: 'submission_in_progress' },
+  ]) {
+    const result = createErrorResult(error, 'Apply batch conflict');
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, 'conflictCode'), false);
+  }
 });
 
 test('local MCP resource errors use JSON-RPC -32002 with structured maintenance data', () => {

@@ -3756,10 +3756,10 @@ test('brand validation accepts the exact approved PNG replacement state', () => 
   }, png);
 });
 
-test('public skills reference only the locked 18-tool facade', () => {
+test('public skills reference only the locked 21-tool facade', () => {
   const lock = json('plugins/trackly/skill-lock.json');
   const actual = referencedTools(path.join(PLUGIN, 'skills'));
-  assert.equal(lock.publicToolAllowlist.length, 18);
+  assert.equal(lock.publicToolAllowlist.length, 21);
   assert.equal(lock.hostedMcpToolAllowlist.length, 55);
   assert.equal(new Set(lock.hostedMcpToolAllowlist).size, 55);
   assert.deepEqual(actual, [...lock.publicToolAllowlist].sort());
@@ -3781,6 +3781,7 @@ test('public skills reference only the locked 18-tool facade', () => {
     advanceReceipt: 'returns_access_review_proposal_or_prepared_batch_and_member_ids',
     orderingV3AccessReview: 'exact_ordered_job_ids_and_approval_hash_required_before_nonempty_batch_creation',
     allDeferredAccessReview: 'proposal_only_no_batch_created',
+    accessDefermentRecovery: 'owner_scoped_list_create_and_same_session_idempotent_clear',
     applyWorkOutput: 'discriminated_allowlisted_structured_content',
     applyWorkProfileProjection: 'requested_global_fields_plus_member_bound_exact_office_fields_and_resume_availability_boolean_only',
     applyWorkNavigation: 'bounded_frozen_requisition_identity_with_server_verified_origin_and_tenant_policy',
@@ -3864,6 +3865,9 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /`explicitUserResume: true`/);
   assert.match(skill, /Never infer or auto-resume parked work/);
   assert.match(skill, /never send a snapshot/);
+  assert.match(skill, /display each server-frozen member in exact `memberPosition` order/i);
+  assert.match(skill, /job ID, company, title, provider, requisition URL, and value-free `accessKnowledge` reason/i);
+  assert.match(skill, /missing, noncontiguous, or mismatched identity blocks approval/i);
   assert.match(skill, /Before any form mutation, require a verified end-to-end preservation path/);
   assert.match(skill, /complete current controller-owned and user-owned tab inventories/);
   assert.match(skill, /Before ending every browser turn/);

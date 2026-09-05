@@ -35,5 +35,8 @@
   },
   "3.8.0": {
     "contractSha256": "5404c2f210b584d4f1327d34e9753530c56a9dd963ea9524081d0d00b229df2e"
+  },
+  "3.8.1": {
+    "contractSha256": "49028b8a8e1d75a8db6e54dd91001195f8a2e50b1f0ff6554750bd243dde4c6e"
   }
 }

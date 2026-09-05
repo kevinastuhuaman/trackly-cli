@@ -78,10 +78,13 @@ data or form mutation.
 
 Rank `OPEN`, then neutral `VARIES`/`UNKNOWN`, then fresh `ACCOUNT WALL`. Never
 select an active user deferment automatically. Workday starts as `ACCOUNT WALL`,
-and Eightfold is also a known authentication-gated provider for this workflow:
-they start as `ACCOUNT WALL`
-and must not be opened for a browser probe while Greenhouse or other `OPEN`/
-neutral alternatives exist. Static safety exclusions always override `OPEN`.
+is authentication-gated for this workflow, and must not be opened for a browser
+probe while Greenhouse or other `OPEN`/neutral alternatives exist. Eightfold
+starts as `ACCOUNT WALL`, is independently authentication-gated, and must not be
+opened for a browser probe under the same condition. Static safety exclusions
+always override `OPEN`.
+An active job, company, or provider deferment is an unconditional no-browser
+rule, regardless of whether another accessible candidate remains.
 
 Read `progress.availableCandidateCount`, `progress.deferredCandidateCount`, and
 `nextAction`. When `nextAction` is `access_review`, return the bounded deferred
@@ -90,13 +93,26 @@ exact job IDs only with hash-bound `accessReviewApproval` after clearing any
 active personal deferment. List, defer, or clear deferments only through
 `trackly_list_apply_access_deferments`, `trackly_defer_apply_access`, and
 `trackly_clear_apply_access_deferment` using a Trackly `jobId`; never submit a
-URL or raw chat. Global policy is admin/review-only.
+URL, provider name, or raw chat. Scope `provider` is the approved global
+user-policy boundary: the server derives that identity and blocks matching
+candidates across companies, proposal approval, recovery, and replay. Create a
+provider deferment only after the current authenticated user explicitly requests
+that persistent provider policy; never infer it from this shared skill.
 
 Pause after every `proposedWave`. Same-key advance replay returns the same
 member IDs, order, and rationale. Browser probing requires explicit wave
-approval. Show each proposed job with a short reason such as “Greenhouse
-default: OPEN, audited 6 days ago; fresh probe still required.” Never describe
-a proposed job as accessible until the current probe proves it.
+approval, including when every proposed job is OPEN or neutral. Show every
+server-frozen member in exact `memberPosition` order with its job ID, company,
+title, provider, requisition URL, and a short value-free reason such as
+“Greenhouse default: OPEN, audited 6 days ago; fresh probe still required.”
+Require each simple `proposedWave` identity to equal the corresponding rich
+`accessProposal.members[]` identity. Missing, noncontiguous, or mismatched
+identity blocks approval; never substitute chat, browser state, search results,
+or a later mutable job lookup. Never describe a proposed job as accessible until the current
+probe proves it. Bind approval to the unchanged
+ordered `accessProposal.members[].jobId` values and the exact server-provided
+`accessProposal.approvalHash`; never invent a hash or reuse a general request
+to apply as approval of a specific proposed wave.
 `freshLiveProbeRequired` remains true for every classification.
 
 ## Exact recovery after local context loss

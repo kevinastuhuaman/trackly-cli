@@ -103,7 +103,8 @@ test('access probe requires actual applicant controls and typed terminal states'
   assert.match(probe, /inactive[\s\S]*contract 3\.7\.3[\s\S]*unknown_unobservable/i);
   assert.match(probe, /trackly_employer_source_exact_origin[\s\S]*exact listed origin[\s\S]*do not invent or require an ATS tenant/i);
   const orchestration = read('skills/trackly-apply/references/batch-orchestration.md');
-  assert.match(orchestration, /Workday[\s\S]*Eightfold[\s\S]*authentication-gated[\s\S]*must not be opened[\s\S]*browser/i);
+  assert.match(orchestration, /Workday[^.]{0,240}`ACCOUNT WALL`[^.]{0,240}authentication-gated[^.]{0,240}browser\s+probe/i);
+  assert.match(orchestration, /Eightfold[^.]{0,240}`ACCOUNT WALL`[^.]{0,240}authentication-gated[^.]{0,240}browser\s+probe/i);
 });
 
 test('phase checkpoint validator accepts complete value-free receipts and rejects unsafe ones', () => {
@@ -1660,6 +1661,9 @@ test('public plugin adaptation preserves the operational reliability gates', () 
   assert.match(pluginProbe, /authentication_required/);
   assert.match(pluginProbe, /account_creation_required/);
   assert.match(pluginProbe, /never[\s\S]*private\s+data[\s\S]*probe/i);
+  assert.match(pluginSkill, /including ordinary OPEN or neutral proposals/i);
+  assert.match(pluginSkill, /trackly_list_apply_access_deferments/);
+  assert.match(pluginSkill, /trackly_clear_apply_access_deferment/);
 
   const pluginResolver = read('plugins/trackly/skills/trackly-apply/references/answer-resolution.md');
   assert.match(pluginResolver, /run-only[\s\S]*exact question[\s\S]*office[\s\S]*jurisdiction[\s\S]*company[\s\S]*provider[\s\S]*global/i);

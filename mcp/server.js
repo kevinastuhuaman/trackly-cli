@@ -6,6 +6,7 @@ const { McpError } = require('@modelcontextprotocol/sdk/types.js');
 const { z } = require('zod');
 const { apiRequest, createTracklyAccessError, hasAuth, maintenanceOutput } = require('../lib/client');
 const { version: PACKAGE_VERSION } = require('../package.json');
+const APPLY_CONTRACT = require('../contracts/trackly-apply-tools.json');
 const { registerApplyTools } = require('./apply-tools');
 const { configureMcpAnalytics, shutdownMcpAnalytics } = require('./analytics');
 
@@ -83,6 +84,11 @@ const SORT_VALUES = ['newest', 'match'];
 // stage value, NOT the legacy action name. Hoisted to module scope so it's not
 // rebuilt on every tool invocation.
 const ACTION_TO_STAGE = { applied: 'applied', saved: 'backlog', dismissed: 'discarded' };
+const APPLY_BATCH_CONFLICT_CODES = new Set(
+  Array.isArray(APPLY_CONTRACT.constants?.applyBatchConflictCodes)
+    ? APPLY_CONTRACT.constants.applyBatchConflictCodes.filter((code) => typeof code === 'string')
+    : [],
+);
 
 function createErrorResult(error, fallbackMessage, extra = {}) {
   const normalizedMaintenance = maintenanceOutput(error);
@@ -109,6 +115,17 @@ function createErrorResult(error, fallbackMessage, extra = {}) {
 
   if (error?.status) {
     payload.status = error.status;
+  }
+
+  // Apply batch conflicts are a versioned, bounded error surface. Preserve a
+  // code only when the HTTP envelope and code both match the published
+  // contract; never reflect arbitrary backend error properties into MCP data.
+  if (
+    error?.status === 409
+    && error?.error === 'apply_batch_conflict'
+    && APPLY_BATCH_CONFLICT_CODES.has(error?.conflictCode)
+  ) {
+    payload.conflictCode = error.conflictCode;
   }
 
   if (

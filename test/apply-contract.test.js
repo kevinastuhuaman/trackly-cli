@@ -38,7 +38,9 @@ const {
 test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {
   const reviewedSource = `
     import { z } from 'zod';
+    export { z };
     const schema = z.object({ value: z.string() });
+    function acceptsShape<Shape extends z.ZodRawShape>(shape: Shape) { return shape; }
   `;
   assert.doesNotThrow(() => assertUnshadowedImportBinding(
     reviewedSource,
@@ -1079,12 +1081,33 @@ test('documented local MCP tool count matches every registered tool', () => {
 });
 
 test('local MCP Apply schemas match each complete versioned input schema', () => {
-  assert.equal(contract.contractVersion, '3.8.0');
+  assert.equal(contract.contractVersion, '3.8.1');
   for (const [name, expectedSchema] of Object.entries(contract.tools)) {
     const localSchema = typeof expectedSchema === 'string' ? expectedSchema : expectedSchema.local;
     const executableSchema = LOCAL_VALIDATION_SCHEMAS[name] || toolArguments(name)[2];
     assert.equal(normalizeSchema(executableSchema), localSchema, `${name} schema drifted`);
   }
+});
+
+test('Apply contract publishes the accessible execution protocol and conflict code surface', () => {
+  assert.equal(contract.constants.applyExecutionProtocolVersion, 'trackly-apply-execution/v3');
+  assert.equal(contract.constants.applyAccessKnowledgeOrderingVersion, 3);
+  assert.deepEqual(contract.constants.applyBatchConflictCodes, [
+    'state_changed',
+    'lease_unavailable',
+    'idempotency_key_reused',
+    'fixed_batch_not_found',
+    'execution_child_batch',
+    'fixed_batch_not_active',
+    'fixed_batch_revision_changed',
+    'submission_in_progress',
+    'attestation_dependencies_changed',
+    'legacy_fixed_batch_active',
+    'dedicated_recovery_required',
+    'recovery_migration_not_ready',
+    'access_deferment_limit_reached',
+    'access_deferments_active',
+  ]);
 });
 
 test('Apply contract publishes mixed-packet, replay, and access-knowledge invariants', () => {
@@ -1097,10 +1120,19 @@ test('Apply contract publishes mixed-packet, replay, and access-knowledge invari
     accessReviewApprovalJobIdsMustBeUnique: true,
     accessReviewApprovalRequiresClearedPersonalDeferment: true,
     sameKeyReplayReturnsIdenticalProposedWaveAndRationale: true,
+    proposedWaveIncludesFrozenIdentity: true,
+    approvalReceiptBindsFrozenIdentity: true,
   });
   assert.deepEqual(contract.toolInputInvariants.trackly_defer_apply_access, {
     serverDerivesIdentityFromJobId: true,
     agentsCannotSubmitUrlsOrRawChat: true,
+    providerScopeAppliesAcrossCompanies: true,
+  });
+  assert.deepEqual(contract.toolInputInvariants.trackly_clear_apply_access_deferment, {
+    clearRequiresDiscoveredDefermentId: true,
+    idempotentReplayPreserved: true,
+    clearReceiptIncludesClearedAt: true,
+    clearReceiptPersistsUntilClearedFalse: true,
   });
 });
 
@@ -2574,12 +2606,20 @@ test('Apply skill 4.8.0 requires protocol 3.7.0 for new work and preserves activ
   assert.match(skill, /trackly_list_apply_access_deferments/);
   assert.match(skill, /trackly_defer_apply_access/);
   assert.match(skill, /trackly_clear_apply_access_deferment/);
+  assert.match(skill, /including ordinary OPEN or neutral proposals/i);
+  assert.match(skill, /show each server-frozen member in `memberPosition` order/i);
+  assert.match(skill, /job ID, company, title, provider, requisition URL, and value-free scheduling reason/i);
+  assert.match(skill, /Missing, noncontiguous, or mismatched identity blocks approval/i);
+  assert.match(skill, /unchanged `accessProposal\.members\[\]\.jobId` order/i);
+  assert.match(skill, /server-provided `accessProposal\.approvalHash`/i);
   assert.match(skill, /freshLiveProbeRequired` remains true/);
   const orchestration = fs.readFileSync(path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'), 'utf8');
   assert.match(orchestration, /protocol 3\.5 or newer and the compact-snapshot capability enabled/i);
   assert.match(orchestration, /protocol 3\.4 execution remains get-or-stop-only legacy recovery/i);
   assert.match(orchestration, /When `nextAction` is `access_review`/);
   assert.match(orchestration, /Workday starts as `ACCOUNT WALL`/);
+  assert.match(orchestration, /Require each simple `proposedWave` identity to equal the corresponding rich/i);
+  assert.match(orchestration, /job ID, company,\s+title, provider, requisition URL, and a short value-free reason/i);
 });
 
 test('terminal Apply executions remain visible but are never resumed', () => {
