@@ -3306,6 +3306,11 @@ function assertActiveClassMethodAstSha256(
   });
   assert.equal(classes.length, 1, `${sourcePath} must define exactly one top-level ${className} class`);
   const members = classes[0].body.body.filter((member) => !member.static);
+  assert.equal(
+    members.some((member) => member.computed),
+    false,
+    `${className}.${methodName} must not contain computed instance members`,
+  );
   const runtimeKey = (member) => {
     if (member.key?.type === 'Identifier' || member.key?.type === 'StringLiteral') return member.key.name || member.key.value;
     return null;

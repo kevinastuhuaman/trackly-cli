@@ -39,17 +39,55 @@ const {
 test('hosted verifier rejects runtime verifyAccessToken shadow members', () => {
   for (const member of [
     "['verifyAccessToken']() { return null; }",
+    "['verify' + 'AccessToken']() { return null; }",
+    "const key = 'verifyAccessToken'; [key]() { return null; }",
     "verifyAccessToken = () => null;",
     "['verifyAccessToken'] = () => null;",
+    "['verify' + 'AccessToken'] = () => null;",
   ]) {
-    const source = `class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member} }`;
+    const source = member.startsWith('const ')
+      ? `${member.split('; ')[0]}; class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member.split('; ').slice(1).join('; ')} }`
+      : `class TracklyOAuthProvider { verifyAccessToken() { return null; } ${member} }`;
     assert.throws(
       () => assertActiveClassMethodAstSha256(
         source, 'TracklyOAuthProvider', 'verifyAccessToken', '0'.repeat(64), 'fixture.ts',
       ),
-      /exactly one runtime member|must be a method|must use an identifier key|must not use a computed key/,
+      /computed instance member|exactly one runtime member|must be a method|must use an identifier key|must not use a computed key/,
     );
   }
+});
+
+test('Apply skill and orchestration bind access-review approval to the exact server receipt', () => {
+  const localSkill = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(localSkill, /accessProposal\.approvalHash/);
+  assert.doesNotMatch(localSkill, /proposedWave\.approvalHash/);
+  const hostedSkill = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(hostedSkill, /proposedWave\.approvalHash/);
+  assert.match(hostedSkill, /accessProposal\.approvalHash/);
+  const orchestration = fs.readFileSync(
+    path.join(__dirname, '..', 'skills', 'trackly-apply', 'references', 'batch-orchestration.md'),
+    'utf8',
+  );
+  assert.match(orchestration, /trackly_list_apply_access_deferments/);
+  assert.match(orchestration, /trackly_defer_apply_access/);
+  assert.match(orchestration, /trackly_clear_apply_access_deferment/);
+  assert.match(orchestration, /trackly_clear_apply_access_deferment` using[^`]*`defermentId`/i);
+  assert.match(orchestration, /using a\s+Trackly `jobId`/i);
+  assert.doesNotMatch(orchestration, /trackly_clear_apply_access_deferment` using a\s+Trackly `jobId`/i);
+  const clearBeforeProbeIndex = orchestration.search(/Clear any\s+active personal deferment before probing/i);
+  const probeIndex = orchestration.search(/probe those exact job IDs/i);
+  assert.notEqual(clearBeforeProbeIndex, -1, 'clear-before-probe guidance must be present');
+  assert.notEqual(probeIndex, -1, 'probe instruction must be present');
+  assert.ok(
+    clearBeforeProbeIndex < probeIndex,
+    'clear-before-probe guidance must precede the probe instruction',
+  );
 });
 
 test('coordinated hosted bindings resolve to unshadowed reviewed imports', () => {
@@ -2624,8 +2662,8 @@ test('Apply skill 4.8.0 requires protocol 3.7.0 for new work and preserves activ
   assert.match(skill, /trackly_defer_apply_access/);
   assert.match(skill, /trackly_clear_apply_access_deferment/);
   assert.match(skill, /including ordinary OPEN or neutral proposals/i);
-  assert.match(skill, /show each server-frozen member in `memberPosition` order/i);
-  assert.match(skill, /job ID, company, title, provider, requisition URL, and value-free scheduling reason/i);
+  assert.match(skill, /show each (?:rich )?server-frozen member in (?:exact )?`memberPosition` order/i);
+  assert.match(skill, /compact `proposedWave` projection with each member's `jobId` and `accessKnowledge`/i);
   assert.match(skill, /Missing, noncontiguous, or mismatched identity blocks approval/i);
   assert.match(skill, /unchanged `accessProposal\.members\[\]\.jobId` order/i);
   assert.match(skill, /server-provided `accessProposal\.approvalHash`/i);
@@ -2635,8 +2673,13 @@ test('Apply skill 4.8.0 requires protocol 3.7.0 for new work and preserves activ
   assert.match(orchestration, /protocol 3\.4 execution remains get-or-stop-only legacy recovery/i);
   assert.match(orchestration, /When `nextAction` is `access_review`/);
   assert.match(orchestration, /Workday starts as `ACCOUNT WALL`/);
-  assert.match(orchestration, /Require each simple `proposedWave` identity to equal the corresponding rich/i);
-  assert.match(orchestration, /job ID, company,\s+title, provider, requisition URL, and a short value-free reason/i);
+  assert.match(orchestration, /local\s+projection contains each member's `jobId` and value-free `accessKnowledge`/i);
+  assert.match(orchestration, /job IDs and scheduling\s+reasons in order/i);
+  const hostedSkill = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(hostedSkill, /Display each server-frozen member in exact `memberPosition` order/i);
 });
 
 test('terminal Apply executions remain visible but are never resumed', () => {
