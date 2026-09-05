@@ -815,7 +815,7 @@ function registerApplyTools(
       const response = rawResponse?.proposedWave !== undefined || rawResponse?.accessProposal !== undefined
         ? startExecutionAccessReviewResponseSchema.parse(rawResponse)
         : rawResponse;
-      if (response.proposedWave !== undefined && response.execution?.id !== undefined) {
+      if (response?.proposedWave !== undefined && response?.execution?.id !== undefined) {
         rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
       }
       return response;
