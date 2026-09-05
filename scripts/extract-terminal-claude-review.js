@@ -92,13 +92,11 @@ function hasUnsafeMarkdownDelimiter(value) {
       const label = value.slice(index + 1, closeLabel);
       if (!/[\p{L}\p{N}]/u.test(label)) return true;
       if (value[closeLabel + 1] === '(') {
-        const closeTarget = value.indexOf(')', closeLabel + 2);
-        if (closeTarget === -1 || isEscapedAt(value, closeTarget)
-            || closeTarget === closeLabel + 2) return true;
-        index = closeTarget;
-      } else {
-        index = closeLabel;
+        // Review text is posted with a trusted bot identity. Keep destinations
+        // in inline code so prompt-injected findings cannot publish links.
+        return true;
       }
+      index = closeLabel;
       continue;
     }
     if (character === ']') return true;
@@ -111,7 +109,9 @@ function hasUnsafeMarkdownDelimiter(value) {
     while (close !== -1 && isEscapedAt(value, close)) {
       close = value.indexOf(delimiter, close + runLength);
     }
-    if (close === -1 || !/[\p{L}\p{N}]/u.test(value.slice(index + runLength, close))) return true;
+    const content = close === -1 ? '' : value.slice(index + runLength, close);
+    if (close === -1 || !/[\p{L}\p{N}]/u.test(content)
+        || hasUnsafeMarkdownDelimiter(content)) return true;
     index = close + runLength - 1;
   }
   return false;

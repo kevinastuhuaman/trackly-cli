@@ -508,12 +508,12 @@ test('Claude review backstop permits Markdown delimiters only when escaped or in
   }
 });
 
-test('Claude review backstop accepts visible, line-balanced Markdown and intraword underscores', () => {
+test('Claude review backstop accepts visible, line-balanced emphasis and intraword underscores', () => {
   for (const description of [
     'Preserve expected_revision during replay.',
     'Preserve **visible emphasis** in the finding.',
     'Preserve _visible emphasis_ in the finding.',
-    'See [the contract](https://example.invalid/contract) for context.',
+    'Preserve [the visible label] as literal text.',
     'Keep ~~deprecated behavior~~ out of the path.',
   ]) {
     const result = runExtractor([{ type: 'result', result: [
@@ -524,6 +524,27 @@ test('Claude review backstop accepts visible, line-balanced Markdown and intrawo
       `lib/a.js:1 — 🟢 P3 — ${description}`,
     ].join('\n') }]);
     assert.equal(result.status, 0, `${description}: ${result.stderr}`);
+  }
+});
+
+test('Claude review backstop rejects link destinations and nested hidden markup', () => {
+  for (const description of [
+    '[external](https://example.invalid/finding)',
+    '[protocol relative](//example.invalid/finding)',
+    '[email](mailto:security@example.invalid)',
+    '[repository relative](/trackly-app/trackly-cli/issues/1)',
+    '**[](https://example.invalid/hidden-finding)**',
+    '_[](https://example.invalid/hidden-finding)_',
+    '~~[](https://example.invalid/hidden-finding)~~',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      `lib/a.js:1 — 🟡 P2 — ${description}`,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, description);
   }
 });
 
