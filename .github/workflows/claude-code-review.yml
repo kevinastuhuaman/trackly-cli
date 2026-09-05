@@ -546,6 +546,10 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments?sort=created&direction=desc&per_page=100" \
             | python3 -c 'import json,sys,os; h=os.environ["HEAD_SHA"]; d=json.load(sys.stdin); d=d if isinstance(d,list) else []; print(sum(1 for c in d if isinstance(c,dict) and c.get("commit_id")==h and (c.get("user") or {}).get("login")=="github-actions[bot]"))' 2>/dev/null || echo -1)"
           echo "github-actions[bot] inline comments on head ${HEAD_SHA}: ${N}"
+          if [ "$N" = "-1" ]; then
+            echo "::error::Could not determine whether the exact head has inline Claude review comments."
+            exit 1
+          fi
           if [ "$N" != "0" ]; then
             echo "Inline review present (${N} comment(s)); no backstop needed."
             exit 0
@@ -570,9 +574,11 @@ jobs:
               "https://api.github.com/repos/${{ github.repository }}/contents/scripts/extract-terminal-claude-review.js?ref=${BASE_SHA}" \
               > "$TRUSTED_EXTRACTOR_JSON"; then
             echo "::error::Could not load the Claude review extractor from trusted base ${BASE_SHA}."
+            exit 1
           elif ! python3 -c 'import base64,json,sys;print(base64.b64decode(json.load(open(sys.argv[1]))["content"]).decode(),end="")' \
               "$TRUSTED_EXTRACTOR_JSON" > "$TRUSTED_EXTRACTOR"; then
             echo "::error::Could not decode the trusted Claude review extractor."
+            exit 1
           elif [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ] \
               && REVIEW_TEXT="$(node "$TRUSTED_EXTRACTOR" "$EXEC_FILE")"; then
             REVIEW_TEXT="$(printf '%s' "$REVIEW_TEXT" | head -c 60000)"

@@ -6,6 +6,10 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const extractor = path.join(__dirname, '..', 'scripts', 'extract-terminal-claude-review.js');
+const workflow = fs.readFileSync(
+  path.join(__dirname, '..', '.github', 'workflows', 'claude-code-review.yml'),
+  'utf8',
+);
 
 function runExtractor(events) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-claude-review-'));
@@ -70,4 +74,10 @@ test('Claude review backstop fails closed when the final result is incomplete', 
     { type: 'result', result: 'Posting findings now.' },
   ]);
   assert.equal(result.status, 1);
+});
+
+test('Claude review workflow fails closed when review state or trusted code is unavailable', () => {
+  assert.match(workflow, /if \[ "\$N" = "-1" \]; then[\s\S]*?exit 1/);
+  assert.match(workflow, /Could not load the Claude review extractor[\s\S]*?exit 1/);
+  assert.match(workflow, /Could not decode the trusted Claude review extractor[\s\S]*?exit 1/);
 });
