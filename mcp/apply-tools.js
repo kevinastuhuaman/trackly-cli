@@ -354,6 +354,10 @@ const getExecutionAccessReviewResponseSchema = z.object({
   proposedWave: z.array(proposedWaveMemberSchema).max(APPLY_EXECUTION_MAX_TARGET),
   accessProposal: accessProposalSchema,
 }).strict().superRefine(validateMatchingProposal);
+const activeExecutionAccessReviewResponseSchema = getExecutionAccessReviewResponseSchema.innerType().extend({
+  active: z.boolean().optional(),
+  preserved: z.boolean().optional(),
+}).strict().superRefine(validateMatchingProposal);
 const startExecutionAccessReviewResponseSchema = z.object({
   success: z.literal(true),
   execution: applyExecutionSchema,
@@ -825,7 +829,9 @@ function registerApplyTools(
     wrapTool(async () => {
       const rawResponse = await applyControlRequest('GET', '/api/jobscout/apply/executions/active');
       const response = rawResponse?.execution !== undefined || rawResponse?.progress !== undefined
-        ? validateGetExecutionResponse(rawResponse)
+        ? (rawResponse?.active !== undefined || rawResponse?.preserved !== undefined
+          ? activeExecutionAccessReviewResponseSchema.parse(rawResponse)
+          : validateGetExecutionResponse(rawResponse))
         : rawResponse;
       if (response?.execution?.id && response.proposedWave !== undefined) {
         rememberAccessProposal(response.execution.id, response.execution.revision, null, response);
