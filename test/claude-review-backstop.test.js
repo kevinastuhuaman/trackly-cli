@@ -77,6 +77,7 @@ test('Claude review backstop fails closed when the final result is incomplete', 
 });
 
 test('Claude review workflow fails closed when review state or trusted code is unavailable', () => {
+  assert.match(workflow, /N="\$\(curl -sS --fail/);
   assert.match(workflow, /if \[ "\$N" = "-1" \]; then[\s\S]*?exit 1/);
   assert.match(workflow, /Could not load the Claude review extractor[\s\S]*?exit 1/);
   assert.match(workflow, /Could not decode the trusted Claude review extractor[\s\S]*?exit 1/);
