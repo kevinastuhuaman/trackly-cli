@@ -188,10 +188,12 @@ jobs:
             exit 0
           fi
           if [ "$BYTES" -gt "$MAXLEN" ]; then
+            echo "partial=true" >> "$GITHUB_OUTPUT"
             TRUNC_NOTE="[NOTE: diff truncated at ${MAXLEN} bytes - coverage is PARTIAL; state that explicitly in the verdict and do not claim full coverage.]"
             DIFF="$(printf '%s\n%s' "$(head -c "$MAXLEN" "$DIFF_FILE")" "$TRUNC_NOTE")"
             echo "::warning title=Diff truncated::PR diff exceeds ${MAXLEN} bytes; inline copy truncated."
           else
+            echo "partial=false" >> "$GITHUB_OUTPUT"
             DIFF="$(cat "$DIFF_FILE")"
           fi
           echo "Changed files:"; printf '%s\n' "$FILES"
@@ -320,18 +322,26 @@ jobs:
 
             ## 🔵 Claude Code Review
 
-            Then give the counts of 🔴/🟡/🟢 and a one-line recommendation
-            (APPROVE / REQUEST_CHANGES / COMMENT). If there are zero findings
-            and the review input was not truncated, still post this verdict
-            comment saying "LGTM — no issues found (checked correctness,
-            security, data-loss, tests, performance)." If the review input
-            contains `[NOTE: diff truncated`, say "Partial LGTM — no issues
-            found in the visible diff (coverage was partial because the diff
-            was truncated)" and do not claim full coverage.
+            Then use exactly one standalone counts line, coverage line, and
+            recommendation line in these formats:
+            `Counts: 🔴 P1: N / 🟡 P2: N / 🟢 P3: N`
+            `Coverage: FULL|PARTIAL`
+            `Recommendation: APPROVE|REQUEST_CHANGES|COMMENT`
+            These must be the first three nonblank lines after the header, in
+            that order. After them, include only the required clean-verdict
+            line or one `path:line — severity — finding` line per finding. Do
+            not wrap terminal records in lists, code blocks, HTML, or prose.
+            If there are zero findings
+            and the review input was not truncated, use exactly:
+            `LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`
+            If the review input
+            contains `[NOTE: diff truncated`, use exactly:
+            `Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).`
+            Do not claim full coverage.
 
             STEP 4 — ALSO end your run with a final text message containing the
             COMPLETE review: the `## 🔵 Claude Code Review` header, the 🔴/🟡/🟢
-            counts, the recommendation, and every finding as a
+            counts, coverage, recommendation, and every finding as a
             `path:line — severity — finding` line. This is a REQUIRED backstop —
             a downstream step publishes this final text as the exact-run terminal
             record, even when inline comments also land.
@@ -443,18 +453,26 @@ jobs:
 
             ## 🔵 Claude Code Review
 
-            Then give the counts of 🔴/🟡/🟢 and a one-line recommendation
-            (APPROVE / REQUEST_CHANGES / COMMENT). If there are zero findings
-            and the review input was not truncated, still post this verdict
-            comment saying "LGTM — no issues found (checked correctness,
-            security, data-loss, tests, performance)." If the review input
-            contains `[NOTE: diff truncated`, say "Partial LGTM — no issues
-            found in the visible diff (coverage was partial because the diff
-            was truncated)" and do not claim full coverage.
+            Then use exactly one standalone counts line, coverage line, and
+            recommendation line in these formats:
+            `Counts: 🔴 P1: N / 🟡 P2: N / 🟢 P3: N`
+            `Coverage: FULL|PARTIAL`
+            `Recommendation: APPROVE|REQUEST_CHANGES|COMMENT`
+            These must be the first three nonblank lines after the header, in
+            that order. After them, include only the required clean-verdict
+            line or one `path:line — severity — finding` line per finding. Do
+            not wrap terminal records in lists, code blocks, HTML, or prose.
+            If there are zero findings
+            and the review input was not truncated, use exactly:
+            `LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`
+            If the review input
+            contains `[NOTE: diff truncated`, use exactly:
+            `Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).`
+            Do not claim full coverage.
 
             STEP 4 — ALSO end your run with a final text message containing the
             COMPLETE review: the `## 🔵 Claude Code Review` header, the 🔴/🟡/🟢
-            counts, the recommendation, and every finding as a
+            counts, coverage, recommendation, and every finding as a
             `path:line — severity — finding` line. This is a REQUIRED backstop —
             a downstream step publishes this final text as the exact-run terminal
             record, even when inline comments also land.
@@ -532,6 +550,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EXEC_FILE_PRIMARY: ${{ steps.claude-review.outputs.execution_file }}
           EXEC_FILE_FALLBACK: ${{ steps.claude-review-fallback.outputs.execution_file }}
+          PARTIAL_COVERAGE: ${{ steps.precompute.outputs.partial }}
         run: |
           set -uo pipefail
           # Publish the terminal text from this exact execution even when inline
@@ -543,6 +562,11 @@ jobs:
             EXEC_FILE="$EXEC_FILE_FALLBACK"
           fi
           REVIEW_TEXT=""
+          case "$PARTIAL_COVERAGE" in
+            true) COVERAGE_FLAG="--partial" ;;
+            false) COVERAGE_FLAG="--full" ;;
+            *) echo "::error::Trusted diff-coverage state is missing or invalid."; exit 1 ;;
+          esac
           TRUSTED_EXTRACTOR_JSON="$RUNNER_TEMP/trusted-claude-review-extractor.json"
           TRUSTED_EXTRACTOR="$RUNNER_TEMP/extract-terminal-claude-review.js"
           if ! curl -sS --fail \
@@ -557,8 +581,12 @@ jobs:
             echo "::error::Could not decode the trusted Claude review extractor."
             exit 1
           elif [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ] \
-              && REVIEW_TEXT="$(node "$TRUSTED_EXTRACTOR" "$EXEC_FILE")"; then
-            REVIEW_TEXT="$(printf '%s' "$REVIEW_TEXT" | head -c 60000)"
+              && REVIEW_TEXT="$(node "$TRUSTED_EXTRACTOR" "$EXEC_FILE" "$COVERAGE_FLAG")"; then
+            REVIEW_BYTES="$(printf '%s' "$REVIEW_TEXT" | wc -c | tr -d '[:space:]')"
+            if ! [[ "$REVIEW_BYTES" =~ ^[0-9]+$ ]] || [ "$REVIEW_BYTES" -gt 60000 ]; then
+              echo "::error title=Oversized review::The complete terminal review exceeds the safe GitHub comment limit; refusing to truncate findings."
+              exit 1
+            fi
             NOTE="_(exact-run terminal record; inline comments may also be present.)_"
             case "$REVIEW_TEXT" in
               "## 🔵 Claude Code Review"*) BODY="$REVIEW_TEXT"$'\n\n'"$NOTE" ;;
