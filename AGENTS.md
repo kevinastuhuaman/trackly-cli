@@ -105,9 +105,9 @@ All requests hit `https://closeai.mba` (configurable via `~/.trackly/config.json
 2. **Version is runtime-derived from `package.json`.** The `lib/client.js` and `mcp/server.js` files read version at runtime. Release-critical edits: `package.json` + `server.json`.
 3. **Auth tokens at `~/.trackly/config.json`.** File permissions are 0600. Do not change.
 4. **Keep dependencies minimal.** Direct runtime dependencies are
-   `@modelcontextprotocol/sdk`, `@posthog/mcp`, `posthog-node`, `zod`, Hono, and
-   exact `fast-uri` / `ip-address` / `qs` security pins that guarantee the SDK's
-   audited patched resolution. PostHog is MCP-only and relays through Trackly's
+   `@modelcontextprotocol/sdk`, `@posthog/mcp`, `posthog-node`, `zod`, and Hono.
+   Exact transitive `fast-uri` / `ip-address` / `qs` security overrides guarantee
+   the SDK's audited patched resolution. PostHog is MCP-only and relays through Trackly's
    backend; no project key or numeric user ID is stored locally. HTTP uses raw
    `node:https`/`node:http`, and the local MCP transport remains stdio-only.
 5. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).

@@ -11,11 +11,14 @@ const workflow = fs.readFileSync(
   'utf8',
 );
 
-function runExtractor(events, coverage = 'full') {
+function runExtractor(events, coverage = 'full', options = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-claude-review-'));
   const executionFile = path.join(directory, 'execution.jsonl');
   fs.writeFileSync(executionFile, events.map((event) => JSON.stringify(event)).join('\n'));
-  const result = spawnSync(process.execPath, [extractor, executionFile, `--${coverage}`], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [extractor, executionFile, `--${coverage}`], {
+    encoding: 'utf8',
+    ...options,
+  });
   fs.rmSync(directory, { recursive: true, force: true });
   return result;
 }
@@ -36,6 +39,45 @@ test('Claude review backstop accepts a complete terminal verdict', () => {
   assert.equal(result.stdout, review);
 });
 
+test('Claude review backstop accepts a whole-file event array', () => {
+  const review = [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: APPROVE',
+    'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).',
+  ].join('\n');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-claude-review-array-'));
+  const executionFile = path.join(directory, 'execution.json');
+  fs.writeFileSync(executionFile, JSON.stringify([{ type: 'result', result: review }]));
+  const result = spawnSync(process.execPath, [extractor, executionFile, '--full'], { encoding: 'utf8' });
+  fs.rmSync(directory, { recursive: true, force: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, review.replace(
+    'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 0',
+    'Counts: 🔴 0 / 🟡 0 / 🟢 0',
+  ));
+});
+
+test('Claude review backstop accepts a terminal assistant-text event when no result exists', () => {
+  const review = [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: APPROVE',
+    'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).',
+  ].join('\n');
+  const result = runExtractor([
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Planning.' }] } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: review }] } },
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, review.replace(
+    'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 0',
+    'Counts: 🔴 0 / 🟡 0 / 🟢 0',
+  ));
+});
+
 test('Claude review backstop accepts labeled counts and Markdown emphasis', () => {
   const review = [
     '## 🔵 Claude Code Review',
@@ -46,7 +88,10 @@ test('Claude review backstop accepts labeled counts and Markdown emphasis', () =
   ].join('\n');
   const result = runExtractor([{ type: 'result', result: review }]);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, review);
+  assert.equal(result.stdout, review.replace(
+    'Counts: 🔴 P1: **0** / 🟡 P2: **0** / 🟢 P3: **1**',
+    'Counts: 🔴 0 / 🟡 0 / 🟢 1',
+  ));
 });
 
 test('Claude review backstop accepts P1 findings with REQUEST_CHANGES', () => {
@@ -59,7 +104,10 @@ test('Claude review backstop accepts P1 findings with REQUEST_CHANGES', () => {
   ].join('\n');
   const result = runExtractor([{ type: 'result', result: review }]);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, review);
+  assert.equal(result.stdout, review.replace(
+    'Counts: 🔴 P1: 1 / 🟡 P2: 0 / 🟢 P3: 0',
+    'Counts: 🔴 1 / 🟡 0 / 🟢 0',
+  ));
 });
 
 test('Claude review backstop rejects intermediate planning text', () => {
@@ -345,6 +393,8 @@ test('Claude review backstop rejects a second finding hidden in one record', () 
     'safe.js:1 — 🟢 P3 — [critical file].js:2 — 🔴 P1 — Hidden blocker.',
     'safe.js:1 — 🟢 P3 — issue;src/c.js:3 — 🔴 P1 — Hidden blocker.',
     'safe.js:1 — 🟢 P3 — issue — 🔴 P1 — Hidden blocker.',
+    'safe.js:1 — 🟢 P3 — Looks safe.—🔴P1—Hidden blocker.',
+    'safe.js:1 — 🟢 P3 — Looks safe.🔴Hidden blocker.',
   ]) {
     const result = runExtractor([{ type: 'result', result: [
       '## 🔵 Claude Code Review',
@@ -489,9 +539,9 @@ test('Claude review backstop requires each finding row to close Markdown formatt
   }
 });
 
-test('Claude review backstop permits Markdown delimiters only when escaped or inside inline code', () => {
+test('Claude review backstop permits unsafe Markdown literals only inside inline code', () => {
   for (const description of [
-    'Escape the \\* marker.',
+    'Show the `\\*` escape literally.',
     'Use `snake_case` for the identifier.',
     'Compare `[label](url)` as literal code.',
     'Keep `~~text~~` literal.',
@@ -527,12 +577,18 @@ test('Claude review backstop accepts visible, line-balanced emphasis and intrawo
   }
 });
 
-test('Claude review backstop rejects link destinations and nested hidden markup', () => {
+test('Claude review backstop rejects clickable links and nested hidden markup', () => {
   for (const description of [
     '[external](https://example.invalid/finding)',
     '[protocol relative](//example.invalid/finding)',
     '[email](mailto:security@example.invalid)',
     '[repository relative](/trackly-app/trackly-cli/issues/1)',
+    'Visit https://example.invalid/finding for context.',
+    'Visit http://example.invalid/finding for context.',
+    'Visit ftp://example.invalid/finding for context.',
+    'Visit www.example.invalid/finding for context.',
+    'Email security@example.invalid for context.',
+    'Open mailto:security@example.invalid for context.',
     '**[](https://example.invalid/hidden-finding)**',
     '_[](https://example.invalid/hidden-finding)_',
     '~~[](https://example.invalid/hidden-finding)~~',
@@ -546,6 +602,153 @@ test('Claude review backstop rejects link destinations and nested hidden markup'
     ].join('\n') }]);
     assert.equal(result.status, 1, description);
   }
+});
+
+test('Claude review backstop rejects autolinks and mentions anywhere in a rendered finding row', () => {
+  for (const finding of [
+    'www.example.invalid:12 — 🟡 P2 — This path becomes a link.',
+    'lib/a.js:1 — 🟡 P2 — Notify @kevinastuhuaman about this.',
+    '@trackly-app/review.js:1 — 🟡 P2 — This path can ping a team.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      finding,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, finding);
+  }
+});
+
+test('Claude review backstop rejects GitHub issue, commit, and compare autolinks', () => {
+  for (const description of [
+    'See #136 for context.',
+    'See GH-136 for context.',
+    'See octocat/Hello-World#1 for context.',
+    'The regression began at e6224f9d.',
+    'Compare e6224f9...debe407.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      `lib/a.js:1 — 🟡 P2 — ${description}`,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, description);
+  }
+});
+
+test('Claude review backstop rejects GitHub emoji shortcodes outside inline code', () => {
+  for (const description of [
+    'This hides :red_circle: P1 after the declared severity.',
+    'This hides :yellow_circle: P2 after the declared severity.',
+    'This renders :warning: as an unreviewed symbol.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 0 / 🟡 0 / 🟢 1',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      `lib/a.js:1 — 🟢 P3 — ${description}`,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, description);
+  }
+});
+
+test('Claude review backstop rejects Markdown escapes that become unsafe after rendering', () => {
+  for (const description of [
+    'See octocat/Hello\\-World#1 for context.',
+    'Looks safe. :red\\_circle: P1 hidden.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 0 / 🟡 0 / 🟢 1',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      `lib/a.js:1 — 🟢 P3 — ${description}`,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, description);
+  }
+});
+
+test('Claude review backstop rejects list markers that wrap finding rows', () => {
+  for (const finding of [
+    '1. lib/a.js:1 — 🟢 P3 — Ordered list.',
+    '1) lib/a.js:1 — 🟢 P3 — Parenthesized list.',
+    '+ lib/a.js:1 — 🟢 P3 — Unordered list.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 0 / 🟡 0 / 🟢 1',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      finding,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, finding);
+  }
+});
+
+test('Claude review backstop rejects Unicode spacing that can disguise another finding', () => {
+  for (const spacing of ['\u00a0', '\u2009', '\u202f']) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 1',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      `safe.js:1 — 🟢 P3 — Looks safe.${spacing}—${spacing}🔴 P1${spacing}—${spacing}Hidden blocker.`,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, JSON.stringify(spacing));
+  }
+});
+
+test('Claude review backstop permits link-like text and mentions inside inline code', () => {
+  for (const description of [
+    'Reject `https://example.invalid/finding` before publishing.',
+    'Reject `security@example.invalid` before publishing.',
+    'Reject `@trackly-app` before publishing.',
+    'Reject `🔴 P1` outside a counted finding.',
+    'Reject `:red_circle: P1` outside inline code.',
+    'Reject `octocat/Hello\\-World#1` outside inline code.',
+    'Reject `octocat/Hello-World#1` outside inline code.',
+    'Reject `e6224f9...debe407` outside inline code.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 1',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      `lib/a.js:1 — 🟢 P3 — ${description}`,
+    ].join('\n') }]);
+    assert.equal(result.status, 0, `${description}: ${result.stderr}`);
+  }
+});
+
+test('Claude review backstop parses a long safe description in bounded time', () => {
+  const result = runExtractor([{ type: 'result', result: [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 1',
+    'Coverage: FULL',
+    'Recommendation: COMMENT',
+    `lib/a.js:1 — 🟢 P3 — ${'a'.repeat(30000)}`,
+  ].join('\n') }], 'full', { timeout: 2000 });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('Claude review backstop canonicalizes counts so a clean verdict is not a gate finding', () => {
+  const result = runExtractor([{ type: 'result', result: [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: APPROVE',
+    'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).',
+  ].join('\n') }]);
+  assert.equal(result.status, 0, result.stderr);
+  const gateFindingDetector = /recommendation[^\n]*request[_ -]?changes|🔴\s*[1-9]|🟡\s*[1-9]|🟢\s*[1-9]|(^|\s)P[0-3](\s|:|—|-|$)/im;
+  assert.doesNotMatch(result.stdout, gateFindingDetector);
+  assert.match(result.stdout, /^Counts: 🔴 0 \/ 🟡 0 \/ 🟢 0$/m);
 });
 
 test('Claude review backstop rejects mixed backtick runs without an exact closer', () => {
@@ -574,6 +777,35 @@ test('Claude review backstop requires request changes for a P1 finding', () => {
   assert.equal(result.status, 1);
 });
 
+test('Claude review backstop requires comment for findings without a P1', () => {
+  for (const { counts, findings } of [
+    {
+      counts: 'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+      findings: ['lib/a.js:1 — 🟡 P2 — Fix the fragile fallback.'],
+    },
+    {
+      counts: 'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 1',
+      findings: ['lib/a.js:1 — 🟢 P3 — Clarify the fallback.'],
+    },
+    {
+      counts: 'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 1',
+      findings: [
+        'lib/a.js:1 — 🟡 P2 — Fix the fragile fallback.',
+        'lib/b.js:2 — 🟢 P3 — Clarify the boundary.',
+      ],
+    },
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      counts,
+      'Coverage: FULL',
+      'Recommendation: REQUEST_CHANGES',
+      ...findings,
+    ].join('\n') }]);
+    assert.equal(result.status, 1, counts);
+  }
+});
+
 test('Claude review backstop fails closed when the final result is incomplete', () => {
   const result = runExtractor([
     {
@@ -592,6 +824,14 @@ test('Claude review workflow always publishes this run and fails closed without 
   assert.match(workflow, /Could not decode the trusted Claude review extractor[\s\S]*?exit 1/);
   assert.doesNotMatch(workflow, /head -c 60000/);
   assert.match(workflow, /REVIEW_BYTES[\s\S]*?refusing to truncate findings[\s\S]*?exit 1/);
+  assert.doesNotMatch(workflow, /mcp__github_inline_comment__create_inline_comment|classify_inline_comments/);
+  assert.equal((workflow.match(/^\s+--tools=$/gm) || []).length, 2);
+  assert.doesNotMatch(workflow, /--tools ""/);
+  assert.equal((workflow.match(/Outside inline code, do/g) || []).length, 2);
+  assert.equal((workflow.match(/`Counts: 🔴 N \/ 🟡 N \/ 🟢 N`/g) || []).length, 2);
+  assert.equal((workflow.match(/Use APPROVE only for a full-coverage zero-finding review\./g) || []).length, 2);
+  assert.equal((workflow.match(/use REQUEST_CHANGES when any P1/g) || []).length, 2);
+  assert.match(workflow, /lacked the required valid terminal verdict; inline comments are insufficient review coverage/);
 });
 
 test('Claude review workflow only trusts the protected default branch as its base', () => {
@@ -608,7 +848,7 @@ test('Claude review workflow only trusts the protected default branch as its bas
 test('Claude review workflow binds every posted result to its head and run', () => {
   assert.equal((workflow.match(/HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/g) || []).length, 3);
   assert.equal((workflow.match(/RUN_URL: \$\{\{ github\.server_url \}\}\/\$\{\{ github\.repository \}\}\/actions\/runs\/\$\{\{ github\.run_id \}\}/g) || []).length, 3);
-  assert.match(workflow, /exact-run terminal record for head \\`\$\{HEAD_SHA\}\\`; \[workflow run\]\(\$\{RUN_URL\}\)/);
+  assert.match(workflow, /exact-run terminal record for head \\`\$\{HEAD_SHA\}\\`; \[workflow run\]\(\$\{RUN_URL\}\)\./);
 });
 
 test('Claude review workflow binds a diff over 100 KB to trusted partial coverage', () => {

@@ -44,6 +44,8 @@ function normalizeFindingLine(line) {
   return line.replace(/^`([^`\r\n]+:\d+(?:-\d+)?)`/, '$1');
 }
 
+const COUNT_LINE = /^counts:[ \t]*🔴(?:[ \t]*P1)?[ \t]*:?[ \t]*(\d+)[ \t]*\/[ \t]*🟡(?:[ \t]*P2)?[ \t]*:?[ \t]*(\d+)[ \t]*\/[ \t]*🟢(?:[ \t]*P3)?[ \t]*:?[ \t]*(\d+)[ \t]*$/iu;
+
 function isEscapedAt(value, position) {
   let backslashes = 0;
   for (let cursor = position - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) {
@@ -118,6 +120,7 @@ function hasUnsafeMarkdownDelimiter(value) {
 }
 
 function parseFindingLine(line) {
+  if (/^[ \t]*(?:[-+*]|\d+[.)])[ \t]+/u.test(line)) return { invalid: true };
   const normalized = normalizeFindingLine(line);
   const match = normalized.match(
     /^([A-Za-z0-9_.@/+][A-Za-z0-9_.@/+() -]*:\d+(?:-\d+)?)[ \t]+[—-][ \t]+(🔴|🟡|🟢)(?:[ \t]*P([1-3]))?[ \t]+[—-][ \t]+(\S.*)$/u,
@@ -125,13 +128,20 @@ function parseFindingLine(line) {
   if (!match) return null;
   const description = match[4];
   const outsideInlineCode = markdownOutsideInlineCode(match[4]);
-  if (outsideInlineCode === null
-      || /[\p{Cc}\p{Cs}\p{Bidi_Control}\p{Default_Ignorable_Code_Point}]/u.test(description)
+  const renderedRow = markdownOutsideInlineCode(line);
+  if (outsideInlineCode === null || renderedRow === null
+      || /[\p{Cc}\p{Cs}\p{Bidi_Control}\p{Default_Ignorable_Code_Point}]/u.test(line)
+      || /[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/u.test(renderedRow)
       || !/[\p{L}\p{N}]/u.test(description)
-      || /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);/iu.test(outsideInlineCode)
+      || /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);/iu.test(renderedRow)
+      || /\b(?:https?|ftp):\/\/|\bwww\.|\bmailto:/iu.test(renderedRow)
+      || renderedRow.includes('@')
+      || renderedRow.includes('\\')
+      || /(?:^|[^\p{L}\p{N}_])(?:#\d+|gh-\d+|[a-z0-9_.-]{1,39}\/[a-z0-9_.-]{1,100}#\d+|[0-9a-f]{7,40})(?![\p{L}\p{N}_])/iu.test(renderedRow)
+      || /:[a-z0-9_+-]{1,64}:/iu.test(renderedRow)
       || hasUnsafeMarkdownDelimiter(outsideInlineCode)
-      || /<!--|-->|<[^>\r\n]*>|!\[|~~~/i.test(outsideInlineCode)
-      || /[ \t]+[—-][ \t]+(?:🔴|🟡|🟢)(?:[ \t]*P[1-3])?[ \t]+[—-][ \t]+/u.test(outsideInlineCode)) {
+      || /<!--|-->|<[^>\r\n]*>|!\[|~~~/i.test(renderedRow)
+      || /[🔴🟡🟢]/u.test(outsideInlineCode)) {
     return { invalid: true };
   }
   return { invalid: false, severity: match[2], level: match[3] };
@@ -141,8 +151,7 @@ function isTerminalReview(review, coverage) {
   if (coverage !== 'full' && coverage !== 'partial') return false;
   const lines = review.split(/\r?\n/).filter((line) => line.trim() !== '');
   if (lines[0] !== '## 🔵 Claude Code Review') return false;
-  const countLine = /^counts:[ \t]*🔴(?:[ \t]*P1)?[ \t]*:?[ \t]*(\d+)[ \t]*\/[ \t]*🟡(?:[ \t]*P2)?[ \t]*:?[ \t]*(\d+)[ \t]*\/[ \t]*🟢(?:[ \t]*P3)?[ \t]*:?[ \t]*(\d+)[ \t]*$/iu;
-  const countMatch = normalizeMetadataLine(lines[1] || '').match(countLine);
+  const countMatch = normalizeMetadataLine(lines[1] || '').match(COUNT_LINE);
   if (!countMatch) return false;
   const severityCounts = new Map([
     ['🔴', Number(countMatch[1])],
@@ -191,7 +200,20 @@ function isTerminalReview(review, coverage) {
   if (recommendation === 'approve') return false;
   if (hasFullVerdict || hasPartialVerdict) return false;
   if (severityCounts.get('🔴') > 0 && recommendation !== 'request_changes') return false;
+  if (severityCounts.get('🔴') === 0 && recommendation !== 'comment') return false;
   return [...severityCounts].every(([symbol, count]) => findingCounts.get(symbol) === count);
+}
+
+function canonicalizeCountRecord(review) {
+  let nonEmptyLine = 0;
+  return review.split(/\r?\n/).map((line) => {
+    if (line.trim() === '') return line;
+    nonEmptyLine += 1;
+    if (nonEmptyLine !== 2) return line;
+    const countMatch = normalizeMetadataLine(line).match(COUNT_LINE);
+    if (!countMatch) return line;
+    return `Counts: 🔴 ${Number(countMatch[1])} / 🟡 ${Number(countMatch[2])} / 🟢 ${Number(countMatch[3])}`;
+  }).join('\n');
 }
 
 const executionFile = process.argv[2];
@@ -208,7 +230,7 @@ try {
     console.error('Claude execution ended without the required terminal review verdict.');
     process.exit(1);
   }
-  process.stdout.write(review);
+  process.stdout.write(canonicalizeCountRecord(review));
 } catch (error) {
   console.error(`Could not recover Claude review output: ${error.message}`);
   process.exit(1);

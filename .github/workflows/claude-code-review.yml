@@ -1,7 +1,7 @@
 name: Claude Code Review
 
-# Posts severity-ranked INLINE review comments on every PR — a SINGLE-PASS,
-# high-recall design.
+# Posts one severity-ranked, validated terminal review on every PR — a
+# SINGLE-PASS, high-recall design.
 #
 # WHY (2026-07-01 rewrite): this workflow previously ran the official
 # `code-review` PLUGIN on Sonnet 4.6. That plugin is precision-gated
@@ -32,11 +32,10 @@ name: Claude Code Review
 #   github_token (unvalidated; the App may lack the needed PR-comment scopes) —
 #   intentionally not done.
 # Security: the diff is precomputed in a trusted step and injected INLINE into
-#   the prompt. Claude gets only the inline-comment MCP tool; repo file-reading,
-#   shell, git, edit/write, and web tools stay disallowed. Large diffs are capped
-#   honestly as PARTIAL coverage instead of being persisted for model reads. The
-#   review posts via direct GitHub REST API calls + the inline-comment MCP tool
-#   (no runtime `gh` install needed).
+#   the prompt. Claude gets no tools. Large diffs are capped honestly as PARTIAL
+#   coverage instead of being persisted for model reads. A base-branch extractor
+#   validates the terminal grammar and rendered-content policy before the job's
+#   own token posts the canonical review through GitHub's REST API.
 # Hardened (/ce-code-review pass): no-SIGPIPE diff truncation, randomized
 #   GITHUB_ENV delimiter, has_diff gate + empty-diff guard, precompute
 #   continue-on-error, and a visible PR notice when review can't run (so a
@@ -91,8 +90,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          # PR HEAD sha (not the synthetic merge commit) so diff line numbers
-          # match the head the inline-comment API posts against.
+          # PR HEAD sha (not the synthetic merge commit) so the review input
+          # and exact-run terminal record describe the same revision.
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
@@ -241,15 +240,9 @@ jobs:
           settings: |
             {"env": {"API_FORCE_IDLE_TIMEOUT": "1"}}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Post with the job's own read-scoped GITHUB_TOKEN (contents:read +
-          # pull-requests/issues: write) rather than the action's default
-          # contents:write App token. Caps tool-escape blast radius.
+          # The action receives the job token for PR context only. Claude gets
+          # no tools and cannot publish model-authored content directly.
           github_token: ${{ github.token }}
-          # Post inline comments immediately instead of buffering + classifying
-          # them post-session. Classification is a silent no-op under OAuth, and
-          # its buffer has leaked findings across PRs on stateful runners — set
-          # false so every finding lands on THIS PR.
-          classify_inline_comments: "false"
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -257,8 +250,8 @@ jobs:
             You are reviewing a pull request for trackly-cli — a Node.js CLI and
             MCP server for AI-agent job tracking (search, apply, track). The PR diff is provided INLINE below. You have no repo
             file-reading, Bash/git/Edit/Write/web tools. Review only the inline
-            diff; do not claim full coverage if it is truncated. Anchor every
-            inline comment to a line that appears in the inline diff map.
+            diff; do not claim full coverage if it is truncated. Cite every
+            finding with a path and line that appears in the inline diff map.
 
             Report findings with HIGH RECALL. Surface every genuine issue you see,
             including lower-confidence ones — tag each with a severity label
@@ -289,13 +282,10 @@ jobs:
             numbers, and ALSO track DELETED (left-side, `-`) lines so you catch
             regressions introduced by removed code (dropped guards, error
             handling, or cleanup) - a review that only looks at added lines
-            misses deletion bugs. EVERY inline comment MUST target a (file,
+            misses deletion bugs. EVERY finding record MUST cite a (file,
             line) pair that appears in that map - either an ADDED/CHANGED
             right-side line, or, for a finding about removed code, a DELETED
-            left-side line posted with the tool's side:LEFT / old-line
-            parameter. The GitHub API rejects (HTTP 422 "could not be resolved")
-            any comment whose path+line is not part of the PR diff, and that is
-            the #1 cause of a run posting nothing. If the inline diff includes a
+            left-side line. If the inline diff includes a
             truncation NOTE, state PARTIAL coverage explicitly and do not claim
             full coverage.
 
@@ -307,34 +297,34 @@ jobs:
             ${{ env.REVIEW_DIFF }}
             ```
 
-            STEP 2 — Post each finding as an inline comment using
-            `mcp__github_inline_comment__create_inline_comment` with
-            `confirmed: true` and ALWAYS
-            `commit_id: ${{ github.event.pull_request.head.sha }}` (the diff map
-            was built from that exact SHA; pinning prevents a mid-run push from
-            anchoring stale findings or failing with 422). Never comment on a
-            line outside the STEP 1 map; if a finding concerns code outside the
-            diff, describe it in the verdict with the path in backticks instead of
-            anchoring there. Post ONE comment per unique issue.
-
-            STEP 3 — Post the overall verdict as ONE inline comment, anchored to
-            the FIRST ADDED/CHANGED line of the first file (if the PR is
-            deletion-only, anchor to a DELETED left-side line; if neither is
-            anchorable, emit the verdict to the job log prefixed `VERDICT:` so the
-            run is never silently empty). Begin the verdict comment with this exact
+            STEP 2 — End your run with one COMPLETE review as your final text
+            message. A trusted downstream step validates and publishes that
+            text; you have no commenting or other tools. Begin with this exact
             header line:
 
             ## 🔵 Claude Code Review
 
             Then use exactly one standalone counts line, coverage line, and
             recommendation line in these formats:
-            `Counts: 🔴 P1: N / 🟡 P2: N / 🟢 P3: N`
+            `Counts: 🔴 N / 🟡 N / 🟢 N`
             `Coverage: FULL|PARTIAL`
             `Recommendation: APPROVE|REQUEST_CHANGES|COMMENT`
             These must be the first three nonblank lines after the header, in
             that order. After them, include only the required clean-verdict
             line or one `path:line — severity — finding` line per finding. Do
             not wrap terminal records in lists, code blocks, HTML, or prose.
+            Use APPROVE only for a full-coverage zero-finding review. Use COMMENT
+            for a partial zero-finding review or a P2/P3-only review. Never use
+            APPROVE when findings exist, and use REQUEST_CHANGES when any P1
+            exists.
+            Finding descriptions may use plain text, balanced emphasis, and
+            balanced one- or two-backtick inline code. Outside inline code, do
+            not include URLs, email addresses, @mentions, repository/issue/commit
+            references, links, images, HTML, entities, non-ASCII spacing,
+            invisible characters, backslash escapes, severity symbols, GitHub
+            emoji shortcodes, or list-marker prefixes. Put a
+            necessary literal URL, email, @mention, severity symbol, or emoji
+            shortcode inside inline code.
             If there are zero findings
             and the review input was not truncated, use exactly:
             `LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`
@@ -342,19 +332,12 @@ jobs:
             contains `[NOTE: diff truncated`, use exactly:
             `Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).`
             Do not claim full coverage.
-
-            STEP 4 — ALSO end your run with a final text message containing the
-            COMPLETE review: the `## 🔵 Claude Code Review` header, the 🔴/🟡/🟢
-            counts, coverage, recommendation, and every finding as a
-            `path:line — severity — finding` line. This is a REQUIRED backstop —
-            a downstream step publishes this final text as the exact-run terminal
-            record, even when inline comments also land.
           claude_args: |
             --model ${{ env.CLAUDE_REVIEW_MODEL }}
             --fallback-model ${{ env.CLAUDE_REVIEW_FALLBACK_MODEL }}
-            --tools "mcp__github_inline_comment__create_inline_comment"
-            --allowedTools "mcp__github_inline_comment__create_inline_comment"
-            --disallowedTools "Read,Grep,Glob,Bash,Edit,Write,WebFetch,WebSearch,NotebookEdit"
+            # v1.0.176 drops an empty next argument and emits a broken bare
+            # --tools. The equals form reaches Claude Code as an empty list.
+            --tools=
 
       # FALLBACK review — berkeley token (CLAUDE_CODE_OAUTH_TOKEN_FALLBACK). Runs
       # ONLY when the primary step did not succeed (e.g. jimmy hit its session
@@ -376,11 +359,6 @@ jobs:
             {"env": {"API_FORCE_IDLE_TIMEOUT": "1"}}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK }}
           github_token: ${{ github.token }}
-          # Post inline comments immediately instead of buffering + classifying
-          # them post-session. Classification is a silent no-op under OAuth, and
-          # its buffer has leaked findings across PRs on stateful runners — set
-          # false so every finding lands on THIS PR.
-          classify_inline_comments: "false"
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -388,8 +366,8 @@ jobs:
             You are reviewing a pull request for trackly-cli — a Node.js CLI and
             MCP server for AI-agent job tracking (search, apply, track). The PR diff is provided INLINE below. You have no repo
             file-reading, Bash/git/Edit/Write/web tools. Review only the inline
-            diff; do not claim full coverage if it is truncated. Anchor every
-            inline comment to a line that appears in the inline diff map.
+            diff; do not claim full coverage if it is truncated. Cite every
+            finding with a path and line that appears in the inline diff map.
 
             Report findings with HIGH RECALL. Surface every genuine issue you see,
             including lower-confidence ones — tag each with a severity label
@@ -420,13 +398,10 @@ jobs:
             numbers, and ALSO track DELETED (left-side, `-`) lines so you catch
             regressions introduced by removed code (dropped guards, error
             handling, or cleanup) - a review that only looks at added lines
-            misses deletion bugs. EVERY inline comment MUST target a (file,
+            misses deletion bugs. EVERY finding record MUST cite a (file,
             line) pair that appears in that map - either an ADDED/CHANGED
             right-side line, or, for a finding about removed code, a DELETED
-            left-side line posted with the tool's side:LEFT / old-line
-            parameter. The GitHub API rejects (HTTP 422 "could not be resolved")
-            any comment whose path+line is not part of the PR diff, and that is
-            the #1 cause of a run posting nothing. If the inline diff includes a
+            left-side line. If the inline diff includes a
             truncation NOTE, state PARTIAL coverage explicitly and do not claim
             full coverage.
 
@@ -438,34 +413,34 @@ jobs:
             ${{ env.REVIEW_DIFF }}
             ```
 
-            STEP 2 — Post each finding as an inline comment using
-            `mcp__github_inline_comment__create_inline_comment` with
-            `confirmed: true` and ALWAYS
-            `commit_id: ${{ github.event.pull_request.head.sha }}` (the diff map
-            was built from that exact SHA; pinning prevents a mid-run push from
-            anchoring stale findings or failing with 422). Never comment on a
-            line outside the STEP 1 map; if a finding concerns code outside the
-            diff, describe it in the verdict with the path in backticks instead of
-            anchoring there. Post ONE comment per unique issue.
-
-            STEP 3 — Post the overall verdict as ONE inline comment, anchored to
-            the FIRST ADDED/CHANGED line of the first file (if the PR is
-            deletion-only, anchor to a DELETED left-side line; if neither is
-            anchorable, emit the verdict to the job log prefixed `VERDICT:` so the
-            run is never silently empty). Begin the verdict comment with this exact
+            STEP 2 — End your run with one COMPLETE review as your final text
+            message. A trusted downstream step validates and publishes that
+            text; you have no commenting or other tools. Begin with this exact
             header line:
 
             ## 🔵 Claude Code Review
 
             Then use exactly one standalone counts line, coverage line, and
             recommendation line in these formats:
-            `Counts: 🔴 P1: N / 🟡 P2: N / 🟢 P3: N`
+            `Counts: 🔴 N / 🟡 N / 🟢 N`
             `Coverage: FULL|PARTIAL`
             `Recommendation: APPROVE|REQUEST_CHANGES|COMMENT`
             These must be the first three nonblank lines after the header, in
             that order. After them, include only the required clean-verdict
             line or one `path:line — severity — finding` line per finding. Do
             not wrap terminal records in lists, code blocks, HTML, or prose.
+            Use APPROVE only for a full-coverage zero-finding review. Use COMMENT
+            for a partial zero-finding review or a P2/P3-only review. Never use
+            APPROVE when findings exist, and use REQUEST_CHANGES when any P1
+            exists.
+            Finding descriptions may use plain text, balanced emphasis, and
+            balanced one- or two-backtick inline code. Outside inline code, do
+            not include URLs, email addresses, @mentions, repository/issue/commit
+            references, links, images, HTML, entities, non-ASCII spacing,
+            invisible characters, backslash escapes, severity symbols, GitHub
+            emoji shortcodes, or list-marker prefixes. Put a
+            necessary literal URL, email, @mention, severity symbol, or emoji
+            shortcode inside inline code.
             If there are zero findings
             and the review input was not truncated, use exactly:
             `LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`
@@ -473,18 +448,10 @@ jobs:
             contains `[NOTE: diff truncated`, use exactly:
             `Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).`
             Do not claim full coverage.
-
-            STEP 4 — ALSO end your run with a final text message containing the
-            COMPLETE review: the `## 🔵 Claude Code Review` header, the 🔴/🟡/🟢
-            counts, coverage, recommendation, and every finding as a
-            `path:line — severity — finding` line. This is a REQUIRED backstop —
-            a downstream step publishes this final text as the exact-run terminal
-            record, even when inline comments also land.
           claude_args: |
             --model ${{ env.CLAUDE_REVIEW_FALLBACK_MODEL }}
-            --tools "mcp__github_inline_comment__create_inline_comment"
-            --allowedTools "mcp__github_inline_comment__create_inline_comment"
-            --disallowedTools "Read,Grep,Glob,Bash,Edit,Write,WebFetch,WebSearch,NotebookEdit"
+            # Keep the equals form; the pinned action drops quoted empties.
+            --tools=
 
       # Detectability backstop (logs): classify the outcome so a silent
       # no-review is visible in the run summary. Distinguishes precompute-miss
@@ -538,14 +505,10 @@ jobs:
             && echo "Posted review-unavailable notice to PR." \
             || echo "::warning::Failed to post review-unavailable notice to the PR."
 
-      # Substance backstop: a review step can SUCCEED yet land NO inline comment
-      # (every finding on an unanchorable line, a rename/mode/binary-only diff, or
-      # the model summarized in chat instead of anchoring). Rather than post a
-      # useless "produced nothing" notice, RECOVER the model's final review text
-      # from the action's execution output file and post IT as the review — so a
-      # run that really produced a review is never silently lost. Only fall back
-      # to a bare notice when no usable text exists. (CodeRabbit L253 + Adversarial.)
-      - name: Backstop — post recovered review text if no inline comment landed
+      # Terminal publication boundary: recover the final review from this exact
+      # action execution, validate it with protected-base code, and only then
+      # publish it. Invalid or missing output posts a visible failure notice.
+      - name: Publish validated exact-run terminal review
         if: >-
           always() && steps.review-workflow.outputs.changed != 'true' &&
           (steps.claude-review.outcome == 'success' ||
@@ -561,9 +524,8 @@ jobs:
           PARTIAL_COVERAGE: ${{ steps.precompute.outputs.partial }}
         run: |
           set -uo pipefail
-          # Publish the terminal text from this exact execution even when inline
-          # comments also landed. A same-head rerun must not borrow comments from
-          # an older run or lose a new finding that could not be anchored inline.
+          # Publish the terminal text from this exact execution. This is the
+          # only model-authored review content allowed onto the PR.
           if [ "${{ steps.claude-review.outcome }}" = "success" ]; then
             EXEC_FILE="$EXEC_FILE_PRIMARY"
           else
@@ -595,7 +557,7 @@ jobs:
               echo "::error title=Oversized review::The complete terminal review exceeds the safe GitHub comment limit; refusing to truncate findings."
               exit 1
             fi
-            NOTE="_(exact-run terminal record for head \`${HEAD_SHA}\`; [workflow run](${RUN_URL}); inline comments may also be present.)_"
+            NOTE="_(exact-run terminal record for head \`${HEAD_SHA}\`; [workflow run](${RUN_URL}).)_"
             case "$REVIEW_TEXT" in
               "## 🔵 Claude Code Review"*) BODY="$REVIEW_TEXT"$'\n\n'"$NOTE" ;;
               *) BODY="## 🔵 Claude Code Review"$'\n\n'"$NOTE"$'\n\n'"$REVIEW_TEXT" ;;
@@ -612,8 +574,8 @@ jobs:
               exit 1
             fi
           else
-            echo "::error title=Incomplete review::A review step succeeded but posted 0 inline comments and did not end with the required terminal verdict."
-            BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ The review ran at head \`${HEAD_SHA}\` ([run](${RUN_URL})) but produced no inline comment and no complete terminal verdict. This check fails closed; intermediate planning text is not review coverage. Re-run the review or use the documented exact-head compensating review path."
+            echo "::error title=Incomplete review::A review step succeeded but lacked the required valid terminal verdict; inline comments are insufficient review coverage."
+            BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ The review ran at head \`${HEAD_SHA}\` ([run](${RUN_URL})) but lacked a valid terminal verdict. This check fails closed; inline comments and intermediate planning text are insufficient review coverage. Re-run the review or use the documented exact-head compensating review path."
             python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_empty.json" || exit 1
             if curl -sS --fail -X POST \
                 -H "Authorization: Bearer ${GH_TOKEN_POST}" \
