@@ -508,6 +508,25 @@ test('Claude review backstop permits Markdown delimiters only when escaped or in
   }
 });
 
+test('Claude review backstop accepts visible, line-balanced Markdown and intraword underscores', () => {
+  for (const description of [
+    'Preserve expected_revision during replay.',
+    'Preserve **visible emphasis** in the finding.',
+    'Preserve _visible emphasis_ in the finding.',
+    'See [the contract](https://example.invalid/contract) for context.',
+    'Keep ~~deprecated behavior~~ out of the path.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: [
+      '## 🔵 Claude Code Review',
+      'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 1',
+      'Coverage: FULL',
+      'Recommendation: COMMENT',
+      `lib/a.js:1 — 🟢 P3 — ${description}`,
+    ].join('\n') }]);
+    assert.equal(result.status, 0, `${description}: ${result.stderr}`);
+  }
+});
+
 test('Claude review backstop rejects mixed backtick runs without an exact closer', () => {
   const finding = Buffer.from(
     'c2FmZS5qczoyIOKAlCDwn5+iIFAzIOKAlCBgYDxicj5gYGBSZWNvbW1lbmRhdGlvbjogQVBQUk9WRWA=',
@@ -563,6 +582,12 @@ test('Claude review workflow only trusts the protected default branch as its bas
     workflow,
     /github\.event\.pull_request\.base\.ref == github\.event\.repository\.default_branch &&/,
   );
+});
+
+test('Claude review workflow binds every posted result to its head and run', () => {
+  assert.equal((workflow.match(/HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/g) || []).length, 3);
+  assert.equal((workflow.match(/RUN_URL: \$\{\{ github\.server_url \}\}\/\$\{\{ github\.repository \}\}\/actions\/runs\/\$\{\{ github\.run_id \}\}/g) || []).length, 3);
+  assert.match(workflow, /exact-run terminal record for head \\`\$\{HEAD_SHA\}\\`; \[workflow run\]\(\$\{RUN_URL\}\)/);
 });
 
 test('Claude review workflow binds a diff over 100 KB to trusted partial coverage', () => {

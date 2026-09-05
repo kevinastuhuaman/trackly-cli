@@ -78,9 +78,41 @@ function markdownOutsideInlineCode(value) {
   return outside;
 }
 
-function hasUnescapedMarkdownDelimiter(value) {
+function hasUnsafeMarkdownDelimiter(value) {
+  const isWordCharacter = (character) => character != null && /[\p{L}\p{N}]/u.test(character);
   for (let index = 0; index < value.length; index += 1) {
-    if ('*_~[]'.includes(value[index]) && !isEscapedAt(value, index)) return true;
+    if (isEscapedAt(value, index)) continue;
+    const character = value[index];
+    if (character === '_' && isWordCharacter(value[index - 1]) && isWordCharacter(value[index + 1])) {
+      continue;
+    }
+    if (character === '[') {
+      const closeLabel = value.indexOf(']', index + 1);
+      if (closeLabel === -1 || isEscapedAt(value, closeLabel)) return true;
+      const label = value.slice(index + 1, closeLabel);
+      if (!/[\p{L}\p{N}]/u.test(label)) return true;
+      if (value[closeLabel + 1] === '(') {
+        const closeTarget = value.indexOf(')', closeLabel + 2);
+        if (closeTarget === -1 || isEscapedAt(value, closeTarget)
+            || closeTarget === closeLabel + 2) return true;
+        index = closeTarget;
+      } else {
+        index = closeLabel;
+      }
+      continue;
+    }
+    if (character === ']') return true;
+    if (!'*_~'.includes(character)) continue;
+    let runLength = 1;
+    while (value[index + runLength] === character) runLength += 1;
+    if ((character === '~' && runLength !== 2) || (character !== '~' && runLength > 2)) return true;
+    const delimiter = character.repeat(runLength);
+    let close = value.indexOf(delimiter, index + runLength);
+    while (close !== -1 && isEscapedAt(value, close)) {
+      close = value.indexOf(delimiter, close + runLength);
+    }
+    if (close === -1 || !/[\p{L}\p{N}]/u.test(value.slice(index + runLength, close))) return true;
+    index = close + runLength - 1;
   }
   return false;
 }
@@ -97,7 +129,7 @@ function parseFindingLine(line) {
       || /[\p{Cc}\p{Cs}\p{Bidi_Control}\p{Default_Ignorable_Code_Point}]/u.test(description)
       || !/[\p{L}\p{N}]/u.test(description)
       || /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);/iu.test(outsideInlineCode)
-      || hasUnescapedMarkdownDelimiter(outsideInlineCode)
+      || hasUnsafeMarkdownDelimiter(outsideInlineCode)
       || /<!--|-->|<[^>\r\n]*>|!\[|~~~/i.test(outsideInlineCode)
       || /[ \t]+[—-][ \t]+(?:🔴|🟡|🟢)(?:[ \t]*P[1-3])?[ \t]+[—-][ \t]+/u.test(outsideInlineCode)) {
     return { invalid: true };

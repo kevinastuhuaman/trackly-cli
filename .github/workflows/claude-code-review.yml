@@ -132,10 +132,11 @@ jobs:
         env:
           GH_TOKEN_POST: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           echo "::warning title=Claude review skipped::This PR changes the Claude review workflow, so automated Claude review is skipped until the workflow lands on the default branch. Use compensating structured review before relying on this gate."
-          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review skipped because this PR changes the Claude review workflow at head ${HEAD_SHA}. This required check is NOT an approval and NOT a clean review result. Use an exact-head compensating structured review before relying on this gate."
+          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review skipped because this PR changes the Claude review workflow at head \`${HEAD_SHA}\` ([run](${RUN_URL})). This required check is NOT an approval and NOT a clean review result. Use an exact-head compensating structured review before relying on this gate."
           python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_self_change_notice.json"
           if curl -sS --fail -X POST \
               -H "Authorization: Bearer ${GH_TOKEN_POST}" \
@@ -518,6 +519,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN_POST: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -uo pipefail
           if [ "${{ steps.precompute.outputs.has_diff }}" != "true" ]; then
@@ -525,7 +528,7 @@ jobs:
           else
             REASON="both workflow auth attempts failed"
           fi
-          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review could not run - ${REASON}. This check fails closed; it is NOT an approval and NOT a clean result. If review auth failed, inspect action logs for OAuth token, usage/quota, model availability, or action config before relying on this gate."
+          BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ Automated review could not run at head \`${HEAD_SHA}\` ([run](${RUN_URL})) - ${REASON}. This check fails closed; it is NOT an approval and NOT a clean result. If review auth failed, inspect action logs for OAuth token, usage/quota, model availability, or action config before relying on this gate."
           python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_notice.json" || { echo "::warning::could not build notice body"; exit 0; }
           curl -sS --fail -X POST \
             -H "Authorization: Bearer ${GH_TOKEN_POST}" \
@@ -551,6 +554,8 @@ jobs:
         env:
           GH_TOKEN_POST: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EXEC_FILE_PRIMARY: ${{ steps.claude-review.outputs.execution_file }}
           EXEC_FILE_FALLBACK: ${{ steps.claude-review-fallback.outputs.execution_file }}
           PARTIAL_COVERAGE: ${{ steps.precompute.outputs.partial }}
@@ -590,7 +595,7 @@ jobs:
               echo "::error title=Oversized review::The complete terminal review exceeds the safe GitHub comment limit; refusing to truncate findings."
               exit 1
             fi
-            NOTE="_(exact-run terminal record; inline comments may also be present.)_"
+            NOTE="_(exact-run terminal record for head \`${HEAD_SHA}\`; [workflow run](${RUN_URL}); inline comments may also be present.)_"
             case "$REVIEW_TEXT" in
               "## 🔵 Claude Code Review"*) BODY="$REVIEW_TEXT"$'\n\n'"$NOTE" ;;
               *) BODY="## 🔵 Claude Code Review"$'\n\n'"$NOTE"$'\n\n'"$REVIEW_TEXT" ;;
@@ -608,7 +613,8 @@ jobs:
             fi
           else
             echo "::error title=Incomplete review::A review step succeeded but posted 0 inline comments and did not end with the required terminal verdict."
-            python3 -c 'import json;print(json.dumps({"body":"## 🔵 Claude Code Review\n\n⚠️ The review ran but produced no inline comment and no complete terminal verdict. This check fails closed; intermediate planning text is not review coverage. Re-run the review or use the documented exact-head compensating review path."}))' > "$RUNNER_TEMP/cr_empty.json" || exit 1
+            BODY="## 🔵 Claude Code Review"$'\n\n'"⚠️ The review ran at head \`${HEAD_SHA}\` ([run](${RUN_URL})) but produced no inline comment and no complete terminal verdict. This check fails closed; intermediate planning text is not review coverage. Re-run the review or use the documented exact-head compensating review path."
+            python3 -c 'import json,sys;print(json.dumps({"body":sys.argv[1]}))' "$BODY" > "$RUNNER_TEMP/cr_empty.json" || exit 1
             if curl -sS --fail -X POST \
                 -H "Authorization: Bearer ${GH_TOKEN_POST}" \
                 -H "Accept: application/vnd.github+json" \
