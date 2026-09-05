@@ -1180,9 +1180,13 @@ function registerApplyTools(
     wrapTool(async ({ defermentId, idempotencyKey }) => {
       if (!discoveredDefermentIds.has(defermentId)) {
         if (clearedDefermentReplayKeys.get(defermentId)?.has(idempotencyKey)) {
-          return accessDefermentClearResponseSchema.parse(await applyControlRequest(
+          const replayResponse = accessDefermentClearResponseSchema.parse(await applyControlRequest(
             'POST', `/api/jobscout/apply/access-deferments/${defermentId}/clear`, {}, idempotencyKey,
           ));
+          if (replayResponse.deferment.id !== defermentId) {
+            throw new Error('Access deferment response does not match the requested deferment id.');
+          }
+          return replayResponse;
         }
         throw new Error('Clear must use a deferment id from the latest list or defer response.');
       }
