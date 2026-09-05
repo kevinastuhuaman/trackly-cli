@@ -34,7 +34,7 @@ The `nextAction` that returns a bounded deferred proposal when only account-wall
 
 ## User deferment
 
-An explicit, persistent, reversible per-user preference to skip a Trackly job or company scope while alternatives exist. The server derives identity from `jobId`; agents cannot submit URLs or raw chat. Global policy is never trained from individual deferments.
+An explicit, persistent, reversible per-user preference to skip a Trackly job, company, or provider scope. Provider scope applies across companies and remains a no-browser policy until explicitly cleared. The server derives identity from `jobId`; agents cannot submit URLs or raw chat. Global policy is never trained from individual deferments.
 
 ## Service-authoritative safety guard
 
