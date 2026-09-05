@@ -554,6 +554,17 @@ test('Claude review workflow always publishes this run and fails closed without 
   assert.match(workflow, /REVIEW_BYTES[\s\S]*?refusing to truncate findings[\s\S]*?exit 1/);
 });
 
+test('Claude review workflow only trusts the protected default branch as its base', () => {
+  assert.match(
+    workflow,
+    /pull_request:\n\s+branches: \[main\]\n\s+types: \[opened, synchronize, reopened, ready_for_review\]/,
+  );
+  assert.match(
+    workflow,
+    /github\.event\.pull_request\.base\.ref == github\.event\.repository\.default_branch &&/,
+  );
+});
+
 test('Claude review workflow binds a diff over 100 KB to trusted partial coverage', () => {
   const fullVerdict = '`LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`';
   const partialVerdict = '`Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).`';

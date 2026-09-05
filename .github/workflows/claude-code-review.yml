@@ -43,6 +43,7 @@ name: Claude Code Review
 #   green check is never mistaken for "reviewed clean").
 on:
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
@@ -51,12 +52,14 @@ concurrency:
 
 jobs:
   claude-review:
-    # Fork guard + draft skip: repository secrets are unavailable to fork code,
-    # and draft PRs skip to save quota.
+    # Default-base + fork guard + draft skip: the trusted extractor comes from
+    # the PR base SHA, so only the protected default branch may supply it.
+    # Repository secrets are unavailable to fork code, and drafts skip quota.
     # trackly-cli is PUBLIC — gate to trusted PR authors (association) AND
     # same-repo head. Do NOT hardcode a personal login (stale kevinastuhuaman gate removed).
     if: |
       github.event.pull_request.draft == false &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (github.event.pull_request.author_association == 'OWNER' ||
        github.event.pull_request.author_association == 'MEMBER' ||
