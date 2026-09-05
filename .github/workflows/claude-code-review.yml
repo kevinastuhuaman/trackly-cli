@@ -333,9 +333,8 @@ jobs:
             COMPLETE review: the `## 🔵 Claude Code Review` header, the 🔴/🟡/🟢
             counts, the recommendation, and every finding as a
             `path:line — severity — finding` line. This is a REQUIRED backstop —
-            if inline anchoring fails for every finding, a downstream step posts
-            this final text so the review is never lost. Emitting it is free when
-            inline posting also succeeds.
+            a downstream step publishes this final text as the exact-run terminal
+            record, even when inline comments also land.
           claude_args: |
             --model ${{ env.CLAUDE_REVIEW_MODEL }}
             --fallback-model ${{ env.CLAUDE_REVIEW_FALLBACK_MODEL }}
@@ -457,9 +456,8 @@ jobs:
             COMPLETE review: the `## 🔵 Claude Code Review` header, the 🔴/🟡/🟢
             counts, the recommendation, and every finding as a
             `path:line — severity — finding` line. This is a REQUIRED backstop —
-            if inline anchoring fails for every finding, a downstream step posts
-            this final text so the review is never lost. Emitting it is free when
-            inline posting also succeeds.
+            a downstream step publishes this final text as the exact-run terminal
+            record, even when inline comments also land.
           claude_args: |
             --model ${{ env.CLAUDE_REVIEW_FALLBACK_MODEL }}
             --tools "mcp__github_inline_comment__create_inline_comment"
@@ -531,35 +529,14 @@ jobs:
         shell: bash
         env:
           GH_TOKEN_POST: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EXEC_FILE_PRIMARY: ${{ steps.claude-review.outputs.execution_file }}
           EXEC_FILE_FALLBACK: ${{ steps.claude-review-fallback.outputs.execution_file }}
         run: |
           set -uo pipefail
-          # Newest-first so freshly-posted head-commit comments are on page 1;
-          # count only github-actions[bot] (how this review posts) so other bots'
-          # comments don't mask an empty Claude review.
-          N="$(curl -sS --fail \
-            -H "Authorization: Bearer ${GH_TOKEN_POST}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments?sort=created&direction=desc&per_page=100" \
-            | python3 -c 'import json,sys,os; h=os.environ["HEAD_SHA"]; d=json.load(sys.stdin); d=d if isinstance(d,list) else []; print(sum(1 for c in d if isinstance(c,dict) and c.get("commit_id")==h and (c.get("user") or {}).get("login")=="github-actions[bot]"))' 2>/dev/null || echo -1)"
-          echo "github-actions[bot] inline comments on head ${HEAD_SHA}: ${N}"
-          if [ "$N" = "-1" ]; then
-            echo "::error::Could not determine whether the exact head has inline Claude review comments."
-            exit 1
-          fi
-          if [ "$N" != "0" ]; then
-            echo "Inline review present (${N} comment(s)); no backstop needed."
-            exit 0
-          fi
-
-          # No inline comment landed. Recover the model's final text from the
-          # execution file of whichever review step succeeded. The extractor
-          # accepts JSON arrays and JSONL, selects the final result (or final
-          # assistant text), and rejects intermediate planning text unless it has
-          # the required header, severity counts, and recommendation.
+          # Publish the terminal text from this exact execution even when inline
+          # comments also landed. A same-head rerun must not borrow comments from
+          # an older run or lose a new finding that could not be anchored inline.
           if [ "${{ steps.claude-review.outcome }}" = "success" ]; then
             EXEC_FILE="$EXEC_FILE_PRIMARY"
           else
@@ -582,7 +559,7 @@ jobs:
           elif [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ] \
               && REVIEW_TEXT="$(node "$TRUSTED_EXTRACTOR" "$EXEC_FILE")"; then
             REVIEW_TEXT="$(printf '%s' "$REVIEW_TEXT" | head -c 60000)"
-            NOTE="_(backstop — inline anchoring was unavailable, so the model's full review is posted here.)_"
+            NOTE="_(exact-run terminal record; inline comments may also be present.)_"
             case "$REVIEW_TEXT" in
               "## 🔵 Claude Code Review"*) BODY="$REVIEW_TEXT"$'\n\n'"$NOTE" ;;
               *) BODY="## 🔵 Claude Code Review"$'\n\n'"$NOTE"$'\n\n'"$REVIEW_TEXT" ;;
@@ -593,7 +570,7 @@ jobs:
                 -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
                 -d @"$RUNNER_TEMP/cr_backstop.json" >/dev/null; then
-              echo "Posted substantive review via backstop (inline anchoring unavailable)."
+              echo "Posted the exact-run terminal review record."
             else
               echo "::error::Failed to post backstop review comment."
               exit 1
