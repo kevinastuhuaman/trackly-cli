@@ -3866,7 +3866,7 @@ test('adapted trackly Apply skill is traceable to its source and safety invarian
   assert.match(skill, /Never infer or auto-resume parked work/);
   assert.match(skill, /never send a snapshot/);
   assert.match(skill, /display each server-frozen member in exact `memberPosition` order/i);
-  assert.match(skill, /job ID, company, title, provider, requisition URL, and value-free `accessKnowledge` reason/i);
+  assert.match(skill, /server-frozen `jobId`, `memberPosition` when returned, and value-free `accessKnowledge` reason/i);
   assert.match(skill, /missing, noncontiguous, or mismatched identity blocks approval/i);
   assert.match(skill, /Before any form mutation, require a verified end-to-end preservation path/);
   assert.match(skill, /complete current controller-owned and user-owned tab inventories/);

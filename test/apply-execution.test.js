@@ -1108,6 +1108,23 @@ test('start execution returns numeric identity plus authoritative progress and n
   assert.equal(typeof result.execution.id, 'number');
   assert.deepEqual(result.progress, response.progress);
   assert.equal(result.progress.nextAction, 'advance');
+
+  const legacyProgress = { ...response.progress };
+  delete legacyProgress.achievementCount;
+  delete legacyProgress.completed;
+  delete legacyProgress.availableCandidateCount;
+  delete legacyProgress.deferredCandidateCount;
+  delete legacyProgress.historicalProjection;
+  delete legacyProgress.currentProjection;
+  const legacyResponse = { ...response, progress: legacyProgress };
+  const legacyRegistration = registerRuntimeTools(legacyResponse)
+    .registrations.get('trackly_start_apply_execution');
+  const legacyResult = await legacyRegistration.handler(legacyRegistration.schema.parse({
+    mode: 'complete_next_n_accessible',
+    target: 10,
+    idempotencyKey: 'legacy-start-compatibility-key',
+  }));
+  assert.deepEqual(legacyResult.progress, legacyProgress);
 });
 
 test('start access-review replays hydrate and cache the detail receipt before approval', async () => {
@@ -1389,7 +1406,7 @@ test('active access reviews hydrate the compact proposal and reject revision rac
     success: true,
     execution,
     progress: proposalProgress,
-    proposedWave: [{ jobId: 88, accessKnowledge: sampleAccessKnowledge }],
+    proposedWave: [{ jobId: 88, memberPosition: 0, accessKnowledge: sampleAccessKnowledge }],
     accessProposal: {
       proposalId: 7,
       approvalHash: 'c'.repeat(64),
@@ -2167,6 +2184,20 @@ test('access-review validation bounds all-deferred proposals, ignores key order,
     },
   }).registrations.get('trackly_advance_apply_execution');
   await assert.doesNotReject(allDeferred.handler(allDeferred.schema.parse(advanceInput())));
+
+  const invalidTerminalMembers = registerRuntimeTools({
+    success: true,
+    executionId: 41,
+    createdWave: false,
+    revision: 4,
+    proposedWave,
+    accessProposal: { ...allDeferredProposal, members: accessProposal.members },
+    progress: { ...proposalProgress, availableCandidateCount: 0, deferredCandidateCount: 1 },
+  }).registrations.get('trackly_advance_apply_execution');
+  await assert.rejects(
+    invalidTerminalMembers.handler(invalidTerminalMembers.schema.parse(advanceInput())),
+    z.ZodError,
+  );
 
   const invalidEmpty = registerRuntimeTools({
     success: true,

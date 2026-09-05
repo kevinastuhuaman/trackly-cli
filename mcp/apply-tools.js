@@ -177,22 +177,9 @@ const accessKnowledgeSchema = z.object({
   evaluatedAt: z.string().datetime(),
   freshLiveProbeRequired: z.literal(true),
 }).strict();
-const OPTIONAL_WAVE_IDENTITY_FIELDS = [
-  'memberPosition', 'jobTitle', 'companyName', 'provider', 'requisitionUrl',
-];
 const OPTIONAL_WAVE_DISPLAY_FIELDS = [
   'jobTitle', 'companyName', 'provider', 'requisitionUrl',
 ];
-function validateOptionalWaveIdentity(member, context) {
-  const present = OPTIONAL_WAVE_IDENTITY_FIELDS.filter((field) => member[field] !== undefined);
-  if (present.length > 0 && present.length < OPTIONAL_WAVE_IDENTITY_FIELDS.length) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: [present[0]],
-      message: 'wave member identity fields must be complete when projected',
-    });
-  }
-}
 function validateOptionalWaveDisplay(member, context) {
   const present = OPTIONAL_WAVE_DISPLAY_FIELDS.filter((field) => member[field] !== undefined);
   if (present.length > 0 && present.length < OPTIONAL_WAVE_DISPLAY_FIELDS.length) {
@@ -210,6 +197,9 @@ const proposedWaveMemberSchema = z.object({
   // approval metadata lives in accessProposal.members. The optional identity
   // fields keep the client forward-compatible with the coordinated full
   // identity projection without trusting them over the rich receipt.
+  // Protocol 3.8.0 compact receipts omit memberPosition. When a coordinated
+  // backend projects it, validate and compare it independently of display
+  // identity fields; never reject the deployed compact shape for its absence.
   memberPosition: z.number().int().min(0).optional(),
   jobTitle: z.string().min(1).refine((value) => Array.from(value).length <= 300, {
     message: 'jobTitle must contain at most 300 Unicode code points',
@@ -222,7 +212,7 @@ const proposedWaveMemberSchema = z.object({
     message: 'requisitionUrl must use HTTPS',
   }).optional(),
   accessKnowledge: accessKnowledgeSchema,
-}).strict().superRefine(validateOptionalWaveIdentity);
+}).strict().superRefine(validateOptionalWaveDisplay);
 const blockedJobDefermentSchema = z.object({
   jobId: z.number().int().min(1),
   defermentId: z.number().int().min(1),
@@ -273,6 +263,13 @@ const accessProposalSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['members'],
       message: 'empty accessProposal members require no available candidates and at least one deferred candidate',
+    });
+  }
+  if (proposal.members.length > 0 && (allDeferred || recoveryBlocked)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['members'],
+      message: 'terminal deferment rationales require an empty accessProposal members array',
     });
   }
   // The initial 3.8.0 backend response omitted this optional mapping. When
@@ -468,7 +465,7 @@ const startExecutionOrdinaryResponseSchema = z.object({
   replay: z.boolean().optional(),
   execution: applyExecutionSchema,
   candidateCount: z.number().int().min(0).optional(),
-  progress: executionProgressSchema,
+  progress: compatibleExecutionProgressSchema,
 }).strict();
 const startExecutionResponseSchema = z.union([
   startExecutionAccessReviewResponseSchema,

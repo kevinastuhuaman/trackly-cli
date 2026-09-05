@@ -77,12 +77,15 @@ test('Apply skill and orchestration bind access-review approval to the exact ser
   assert.match(orchestration, /trackly_list_apply_access_deferments/);
   assert.match(orchestration, /trackly_defer_apply_access/);
   assert.match(orchestration, /trackly_clear_apply_access_deferment/);
-  assert.match(orchestration, /clear[\s\S]*defermentId/i);
+  assert.match(orchestration, /trackly_clear_apply_access_deferment` using[^`]*`defermentId`/i);
   assert.match(orchestration, /using a\s+Trackly `jobId`/i);
   assert.doesNotMatch(orchestration, /trackly_clear_apply_access_deferment` using a\s+Trackly `jobId`/i);
+  const clearBeforeProbeIndex = orchestration.search(/Clear any\s+active personal deferment before probing/i);
+  const probeIndex = orchestration.search(/probe those exact job IDs/i);
+  assert.notEqual(clearBeforeProbeIndex, -1, 'clear-before-probe guidance must be present');
+  assert.notEqual(probeIndex, -1, 'probe instruction must be present');
   assert.ok(
-    orchestration.search(/Clear any\s+active personal deferment before probing/i)
-      < orchestration.search(/probe those exact job IDs/i),
+    clearBeforeProbeIndex < probeIndex,
     'clear-before-probe guidance must precede the probe instruction',
   );
 });
@@ -2672,6 +2675,11 @@ test('Apply skill 4.8.0 requires protocol 3.7.0 for new work and preserves activ
   assert.match(orchestration, /Workday starts as `ACCOUNT WALL`/);
   assert.match(orchestration, /local\s+projection contains each member's `jobId` and value-free `accessKnowledge`/i);
   assert.match(orchestration, /job IDs and scheduling\s+reasons in order/i);
+  const hostedSkill = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'trackly', 'skills', 'trackly-apply', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(hostedSkill, /Display each server-frozen member in exact `memberPosition` order/i);
 });
 
 test('terminal Apply executions remain visible but are never resumed', () => {
