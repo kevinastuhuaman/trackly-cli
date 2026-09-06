@@ -1,0 +1,8 @@
+[
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "result": "## 🔵 Claude Code Review\nCounts: 🔴 0 / 🟡 0 / 🟢 1\nCoverage: FULL\nRecommendation: COMMENT\ndocs/solutions/workflow-issues/superseded-branch-reconciliation.md:27 — 🟢 P3 — Verification cites PR #137 and merged PRs as the source of truth."
+  }
+]

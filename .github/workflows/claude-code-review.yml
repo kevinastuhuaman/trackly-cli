@@ -722,7 +722,11 @@ jobs:
         run: |
           set -uo pipefail
           # Publish the terminal text from this exact execution. This is the
-          # only model-authored review content allowed onto the PR.
+          # only model-authored review content allowed onto the PR. The trusted
+          # extractor isolates the last header-led terminal record and unwraps
+          # one taught inline-code pair on metadata and clean-verdict lines;
+          # autolinks, trailing prose, and incomplete last results still fail
+          # closed.
           if [ -z "${CHANGED_LINES_FILE:-}" ] || [ ! -s "$CHANGED_LINES_FILE" ]; then
             echo "::error::Trusted changed-line map is missing; every finding location must be validated against the reviewed diff."
             exit 1

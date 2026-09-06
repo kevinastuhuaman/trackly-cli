@@ -45,6 +45,33 @@ function normalizeFindingLine(line) {
 }
 
 const COUNT_LINE = /^counts:[ \t]*🔴(?:[ \t]*P1)?[ \t]*:?[ \t]*(\d+)[ \t]*\/[ \t]*🟡(?:[ \t]*P2)?[ \t]*:?[ \t]*(\d+)[ \t]*\/[ \t]*🟢(?:[ \t]*P3)?[ \t]*:?[ \t]*(\d+)[ \t]*$/iu;
+const REVIEW_HEADER = '## 🔵 Claude Code Review';
+const FULL_LGTM = 'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).';
+const PARTIAL_LGTM = 'Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).';
+
+// The workflow prompt teaches the metadata and clean-verdict lines as inline
+// code. Accept one wrapping pair of backticks on those taught lines only;
+// fenced blocks and inner backticks stay outside the grammar.
+function unwrapTaughtInlineCode(line) {
+  const match = /^`([^`\r\n]+)`$/u.exec(line);
+  return match ? match[1] : line;
+}
+
+function taughtMetadataLine(line) {
+  return normalizeMetadataLine(unwrapTaughtInlineCode(line));
+}
+
+// Claude Code's final result string is the whole last assistant turn. Recover
+// the last header-led terminal record from that turn so planning text before
+// the required header cannot hide a complete verdict. Publish only that block.
+function isolateTerminalRecord(review) {
+  const lines = review.split(/\r?\n/);
+  let start = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index] === REVIEW_HEADER) start = index;
+  }
+  return start === -1 ? review : lines.slice(start).join('\n');
+}
 
 function isEscapedAt(value, position) {
   let backslashes = 0;
@@ -191,8 +218,8 @@ function locatorInChangedLines(locator, changedLines) {
 function isTerminalReview(review, coverage, changedLines = null) {
   if (coverage !== 'full' && coverage !== 'partial') return false;
   const lines = review.split(/\r?\n/).filter((line) => line.trim() !== '');
-  if (lines[0] !== '## 🔵 Claude Code Review') return false;
-  const countMatch = normalizeMetadataLine(lines[1] || '').match(COUNT_LINE);
+  if ((lines[0] || '') !== REVIEW_HEADER) return false;
+  const countMatch = taughtMetadataLine(lines[1] || '').match(COUNT_LINE);
   if (!countMatch) return false;
   const severityCounts = new Map([
     ['🔴', Number(countMatch[1])],
@@ -201,9 +228,9 @@ function isTerminalReview(review, coverage, changedLines = null) {
   ]);
   const recommendationLine = /^recommendation:[ \t]*(approve|request[_ -]?changes|comment)[ \t]*$/i;
   const coverageLine = /^coverage:[ \t]*(full|partial)[ \t]*$/i;
-  const coverageMatch = normalizeMetadataLine(lines[2] || '').match(coverageLine);
+  const coverageMatch = taughtMetadataLine(lines[2] || '').match(coverageLine);
   if (!coverageMatch || coverageMatch[1].toLowerCase() !== coverage) return false;
-  const recommendationMatch = normalizeMetadataLine(lines[3] || '').match(recommendationLine);
+  const recommendationMatch = taughtMetadataLine(lines[3] || '').match(recommendationLine);
   if (!recommendationMatch) return false;
   const recommendation = recommendationMatch[1].toLowerCase().replace(/[ -]/g, '_');
 
@@ -218,10 +245,10 @@ function isTerminalReview(review, coverage, changedLines = null) {
       if (finding.level && finding.level !== expectedLevel.get(finding.severity)) return false;
       if (changedLines && !locatorInChangedLines(finding.locator, changedLines)) return false;
       findingCounts.set(finding.severity, findingCounts.get(finding.severity) + 1);
-    } else if (line === 'Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).') {
+    } else if (unwrapTaughtInlineCode(line) === PARTIAL_LGTM) {
       if (hasPartialVerdict) return false;
       hasPartialVerdict = true;
-    } else if (line === 'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).') {
+    } else if (unwrapTaughtInlineCode(line) === FULL_LGTM) {
       if (hasFullVerdict) return false;
       hasFullVerdict = true;
     } else {
@@ -248,13 +275,19 @@ function isTerminalReview(review, coverage, changedLines = null) {
 
 function canonicalizeCountRecord(review) {
   let nonEmptyLine = 0;
-  return review.split(/\r?\n/).map((line) => {
+  return isolateTerminalRecord(review).split(/\r?\n/).map((line) => {
     if (line.trim() === '') return line;
     nonEmptyLine += 1;
-    if (nonEmptyLine !== 2) return line;
-    const countMatch = normalizeMetadataLine(line).match(COUNT_LINE);
-    if (!countMatch) return line;
-    return `Counts: 🔴 ${Number(countMatch[1])} / 🟡 ${Number(countMatch[2])} / 🟢 ${Number(countMatch[3])}`;
+    const taught = unwrapTaughtInlineCode(line);
+    if (nonEmptyLine === 2) {
+      const countMatch = normalizeMetadataLine(taught).match(COUNT_LINE);
+      if (!countMatch) return line;
+      return `Counts: 🔴 ${Number(countMatch[1])} / 🟡 ${Number(countMatch[2])} / 🟢 ${Number(countMatch[3])}`;
+    }
+    if (nonEmptyLine === 3 || nonEmptyLine === 4 || taught === FULL_LGTM || taught === PARTIAL_LGTM) {
+      return taught;
+    }
+    return line;
   }).join('\n');
 }
 
@@ -278,7 +311,9 @@ if (changedLinesFile !== undefined) {
 }
 
 try {
-  const review = extractReview(parseEvents(fs.readFileSync(executionFile, 'utf8'))).trim();
+  const review = isolateTerminalRecord(
+    extractReview(parseEvents(fs.readFileSync(executionFile, 'utf8'))),
+  ).trim();
   if (!isTerminalReview(review, coverage, changedLines)) {
     console.error('Claude execution ended without the required terminal review verdict.');
     process.exit(1);

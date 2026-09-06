@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Recover a complete Claude terminal review when the model wraps the taught
+  metadata or clean-verdict lines in inline code, or prefixes the required
+  header with planning text. Issue autolinks, trailing prose, and incomplete
+  last results still fail closed.
+
 ## [0.18.1] - 2026-09-05
 
 ### Fixed
