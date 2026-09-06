@@ -1197,6 +1197,7 @@ test('Claude review workflow builds and passes the trusted changed-line map', ()
 test('Claude review workflow always publishes this run and fails closed without trusted code', () => {
   assert.doesNotMatch(workflow, /INLINE_REVIEW_PRESENT|comments\?sort=created/);
   assert.match(workflow, /Publish the terminal text from this exact execution/);
+  assert.match(workflow, /isolates the last header-led terminal record and unwraps/);
   assert.match(workflow, /Could not load the Claude review extractor[\s\S]*?exit 1/);
   assert.match(workflow, /Could not decode the trusted Claude review extractor[\s\S]*?exit 1/);
   assert.doesNotMatch(workflow, /head -c 60000/);
