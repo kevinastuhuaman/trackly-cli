@@ -151,8 +151,9 @@ The complete 58-tool inventory is in `docs/trackly-tools.md`. Local-only helpers
 6. **The `ask` command has a 20/day rate limit** enforced server-side (429 response).
 7. **Keep dependencies minimal.** Direct runtime dependencies are
    `@modelcontextprotocol/sdk`, `@posthog/mcp`, `posthog-node`, `zod`, Hono, and
-   exact `fast-uri` / `ip-address` security pins that guarantee the SDK's
-   audited patched resolution. The pins must be reviewed and bumped manually
+   the security pins `fast-uri` and `ip-address`, which are declared directly
+   *and* overridden (together with `qs` and `@hono/node-server`) so the SDK's
+   audited patched resolution is guaranteed at every depth. The pins must be reviewed and bumped manually
    when upstream constraints change. PostHog is MCP-only and relays through
    Trackly's backend; no project key or numeric user ID is stored locally. The
    local MCP transport remains stdio-only; do not add or initialize an HTTP

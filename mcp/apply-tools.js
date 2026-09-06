@@ -35,6 +35,7 @@ const APPLY_ACCESS_FRESHNESS_STATES = APPLY_CONTRACT.constants.applyAccessFreshn
 const APPLY_SCHEDULING_EFFECTS = APPLY_CONTRACT.constants.applySchedulingEffects;
 const APPLY_ACCESS_DEFERMENT_SCOPES = APPLY_CONTRACT.constants.applyAccessDefermentScopes;
 const APPLY_ACCESS_MATCHED_SCOPES = APPLY_CONTRACT.constants.applyAccessMatchedScopes;
+const APPLY_ACCESS_DEFERMENT_MAX_ACTIVE = 20;
 const APPLY_BATCH_MAX_MEMBERS = 100;
 const APPLY_BATCH_MAX_CHECKPOINTS_PER_REQUEST = 20;
 const APPLY_BATCH_MAX_ACTIONS_PER_CHECKPOINT = 25;
@@ -548,7 +549,7 @@ const clearedAccessDefermentSchema = accessDefermentSchema.extend({
 }).strict();
 const accessDefermentListResponseSchema = z.object({
   success: z.literal(true),
-  deferments: z.array(accessDefermentSchema).max(APPLY_EXECUTION_MAX_TARGET),
+  deferments: z.array(accessDefermentSchema).max(APPLY_ACCESS_DEFERMENT_MAX_ACTIVE),
 }).strict().refine(({ deferments }) => (
   new Set(deferments.map(({ id }) => id)).size === deferments.length
 ), { message: 'deferment IDs must be unique' });
@@ -835,12 +836,20 @@ function registerApplyTools(
   }
   const pendingAccessProposalByExecution = new Map();
   const replayableAccessApprovalByExecution = new Map();
+  const MAX_ACCESS_PROPOSAL_BINDINGS = 64;
+  function setBoundedAccessProposalBinding(bindings, executionId, value) {
+    bindings.delete(executionId);
+    bindings.set(executionId, value);
+    while (bindings.size > MAX_ACCESS_PROPOSAL_BINDINGS) {
+      bindings.delete(bindings.keys().next().value);
+    }
+  }
   function rememberAccessProposal(executionId, revision, browserSurface, response) {
     if (response.progress?.nextAction !== 'access_review') {
       pendingAccessProposalByExecution.delete(executionId);
       return response;
     }
-    pendingAccessProposalByExecution.set(executionId, {
+    setBoundedAccessProposalBinding(pendingAccessProposalByExecution, executionId, {
       revision,
       browserSurface,
       approvalHash: response.accessProposal.approvalHash,
@@ -1308,7 +1317,7 @@ function registerApplyTools(
       }
       if (body.accessReviewApproval) {
         pendingAccessProposalByExecution.delete(executionId);
-        replayableAccessApprovalByExecution.set(executionId, {
+        setBoundedAccessProposalBinding(replayableAccessApprovalByExecution, executionId, {
           revision: body.expectedRevision,
           browserSurface: body.browserSurface,
           approvalHash: body.accessReviewApproval.approvalHash,

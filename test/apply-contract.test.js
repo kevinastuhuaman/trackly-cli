@@ -2501,10 +2501,13 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
   fs.mkdirSync(path.join(temporaryRoot, 'contracts'), { recursive: true });
   fs.mkdirSync(path.join(temporaryRoot, 'plugins', 'trackly'), { recursive: true });
+  fs.mkdirSync(path.join(temporaryRoot, 'mcp'), { recursive: true });
   for (const relativePath of [
     ['contracts', 'trackly-apply-tools.json'],
     ['plugins', 'trackly', 'skill-lock.json'],
     ['plugins', 'trackly', 'hosted-contract-fixture.json'],
+    ['mcp', 'apply-tools.js'],
+    ['mcp', 'server.js'],
   ]) {
     fs.copyFileSync(path.join(__dirname, '..', ...relativePath), path.join(temporaryRoot, ...relativePath));
   }
@@ -2522,6 +2525,50 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
     });
   };
 
+  assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
+  const lifecycleDrift = structuredClone(originalFixture);
+  lifecycleDrift.hostedPluginLifecycle.accessDefermentRecovery = 'owner_scoped_list_create_and_same_session_idempotent_clear';
+  assert.throws(
+    verifyFixture(lifecycleDrift),
+    /hosted plugin lifecycle snapshot drifted from the packaged public lifecycle contract/,
+  );
+  const localApplyPath = path.join(temporaryRoot, 'mcp', 'apply-tools.js');
+  const localApplySource = fs.readFileSync(localApplyPath, 'utf8');
+  const firstRegistration = localApplySource.search(/^  server\.tool\(\n    'trackly_get_apply_queue',/m);
+  assert.notEqual(firstRegistration, -1);
+  fs.writeFileSync(
+    localApplyPath,
+    `${localApplySource.slice(0, firstRegistration)}  if (dependencies.disabled) return;\n${localApplySource.slice(firstRegistration)}`,
+  );
+  assert.throws(
+    verifyFixture(structuredClone(originalFixture)),
+    /registerApplyTools .* must reach every local registration without an earlier branch, return, or throw/,
+  );
+  fs.writeFileSync(localApplyPath, localApplySource);
+  assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
+  const localServerPath = path.join(temporaryRoot, 'mcp', 'server.js');
+  const localServerSource = fs.readFileSync(localServerPath, 'utf8');
+  const registration = localServerSource.match(/^  registerApplyTools\(server, \{\n(?:.*\n)*?  \}\);\n/m);
+  assert.ok(registration, 'server.js must call registerApplyTools inside createServer');
+  const deadRegistration = localServerSource
+    .replace(registration[0], '')
+    .replace(/^  return server;\n/m, `  return server;\n${registration[0]}`);
+  assert.notEqual(deadRegistration, localServerSource);
+  fs.writeFileSync(localServerPath, deadRegistration);
+  assert.throws(
+    verifyFixture(structuredClone(originalFixture)),
+    /must end with its sole return after its locked direct statement/,
+  );
+  fs.writeFileSync(localServerPath, localServerSource);
+  assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
+  const detachedImport = localServerSource.replace(
+    "const { registerApplyTools } = require('./apply-tools');",
+    "const { registerApplyTools } = require('./apply-tools-shadow');",
+  );
+  assert.notEqual(detachedImport, localServerSource);
+  fs.writeFileSync(localServerPath, detachedImport);
+  assert.throws(verifyFixture(structuredClone(originalFixture)), /registerApplyTools/);
+  fs.writeFileSync(localServerPath, localServerSource);
   assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
   const renamed = structuredClone(originalFixture);
   renamed.publicTools[0][0] = 'trackly_shadow_search';

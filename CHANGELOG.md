@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-09-05
+
 ### Fixed
 
 - Align Apply access-review parsing and guidance with the compact 3.8.x
@@ -14,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   execution recovery envelopes, while retaining the 3.8.1 provider-scope
   contract for the coordinated backend release. Legacy all-deferred receipts
   without deferment mappings remain safe stop/expiry states until refreshed.
+  Proposal approval and replay bindings now use bounded in-memory caches.
+- Fail the Claude review workflow closed when its recovered output contains
+  intermediate planning text instead of a complete terminal review verdict.
+- Recapture the hosted contract fixture from the deployed backend merge of
+  provider-wide deferments (close-ai #1769, merge `254e1c6f`) after migration
+  507 completed, lock the backend's `owner_scoped_list_create_and_idempotent_clear`
+  deferment lifecycle, update the locked start-or-resume data flow, and let the
+  reachability check accept hoisted helper function declarations.
+- Bind the hosted plugin lifecycle into the contract fixture and run the local
+  registration reachability checks in fixture-only mode, so CI can no longer
+  pass while the backend-coupled verifier would fail.
+- Validate every Claude review finding location against a trusted changed-line
+  map built from the exact diff the reviewer saw, covering added and deleted
+  lines and ignoring forged file headers; a misstated path or line now fails
+  the terminal review record closed, and the trusted base extractor must
+  support that validation before a record is published. Diffs containing
+  binary or otherwise opaque entries are reviewed as partial coverage.
 
 ## [0.18.0] - 2026-09-04
 

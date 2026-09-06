@@ -1196,6 +1196,19 @@ test('local Apply registrations are bound to the helper reached by createServer'
     ),
     /must not alias, escape, or otherwise reference server outside direct catalog registrations/,
   );
+  assert.deepEqual(
+    directToolRegistrationsInNamedParameterFunction(
+      applySource.replace(
+        "server.tool('trackly_zero'",
+        "function rememberState(key, value) { cache.set(key, value); }\n      server.tool('trackly_zero'",
+      ),
+      'registerApplyTools',
+      'server',
+      'tool',
+      'hoisted helper before local registration fixture',
+    ).map(({ name }) => name),
+    ['trackly_zero'],
+  );
   for (const [label, prefix] of [
     ['return', 'if (disabled) return;'],
     ['throw', "throw new Error('disabled');"],
@@ -3781,7 +3794,7 @@ test('public skills reference only the locked 21-tool facade', () => {
     advanceReceipt: 'returns_access_review_proposal_or_prepared_batch_and_member_ids',
     orderingV3AccessReview: 'exact_ordered_job_ids_and_approval_hash_required_before_nonempty_batch_creation',
     allDeferredAccessReview: 'proposal_only_no_batch_created',
-    accessDefermentRecovery: 'owner_scoped_list_create_and_same_session_idempotent_clear',
+    accessDefermentRecovery: 'owner_scoped_list_create_and_idempotent_clear',
     applyWorkOutput: 'discriminated_allowlisted_structured_content',
     applyWorkProfileProjection: 'requested_global_fields_plus_member_bound_exact_office_fields_and_resume_availability_boolean_only',
     applyWorkNavigation: 'bounded_frozen_requisition_identity_with_server_verified_origin_and_tenant_policy',
