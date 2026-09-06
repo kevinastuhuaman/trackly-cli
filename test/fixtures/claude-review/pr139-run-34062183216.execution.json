@@ -1,0 +1,28 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "model": "claude-sonnet-5"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "text",
+          "text": "I'll build the changed-line map from the inline diff, then emit the required terminal record.\n\n## 🔵 Claude Code Review\n`Counts: 🔴 0 / 🟡 0 / 🟢 0`\n`Coverage: FULL`\n`Recommendation: APPROVE`\n`LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`"
+        }
+      ]
+    }
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "duration_ms": 34512,
+    "num_turns": 1,
+    "total_cost_usd": 0.1306827,
+    "permission_denials": [],
+    "result": "I'll build the changed-line map from the inline diff, then emit the required terminal record.\n\n## 🔵 Claude Code Review\n`Counts: 🔴 0 / 🟡 0 / 🟢 0`\n`Coverage: FULL`\n`Recommendation: APPROVE`\n`LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`"
+  }
+]

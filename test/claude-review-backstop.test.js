@@ -116,6 +116,25 @@ test('Claude review backstop accepts P1 findings with REQUEST_CHANGES', () => {
   ));
 });
 
+test('Claude review backstop recovers the reconstructed PR 139 fallback execution', () => {
+  const fixtureDir = path.join(__dirname, 'fixtures', 'claude-review');
+  const executionFile = path.join(fixtureDir, 'pr139-run-34062183216.execution.json');
+  const changedLinesFile = path.join(fixtureDir, 'pr139-run-34062183216.changed-lines.json');
+  const rejectedFile = path.join(fixtureDir, 'pr139-autolink-rejected.execution.json');
+  const recovered = spawnSync(process.execPath, [extractor, executionFile, '--full', changedLinesFile], { encoding: 'utf8' });
+  assert.equal(recovered.status, 0, recovered.stderr);
+  assert.equal(recovered.stdout, [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 0 / 🟡 0 / 🟢 0',
+    'Coverage: FULL',
+    'Recommendation: APPROVE',
+    'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).',
+  ].join('\n'));
+  const rejected = spawnSync(process.execPath, [extractor, rejectedFile, '--full', changedLinesFile], { encoding: 'utf8' });
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /without the required terminal review verdict/i);
+});
+
 test('Claude review backstop rejects intermediate planning text', () => {
   const result = runExtractor([
     { type: 'assistant', message: { content: [{ type: 'text', text: 'Posting findings now.' }] } },
@@ -133,6 +152,41 @@ test('Claude review backstop rejects planning text prefixed to verdict markers',
     'Recommendation: APPROVE',
   ].join('\n') }]);
   assert.equal(result.status, 1);
+});
+
+test('Claude review backstop accepts taught backtick-wrapped metadata and clean verdicts', () => {
+  const result = runExtractor([{ type: 'result', result: [
+    '## 🔵 Claude Code Review',
+    '`Counts: 🔴 0 / 🟡 0 / 🟢 0`',
+    '`Coverage: FULL`',
+    '`Recommendation: APPROVE`',
+    '`LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`',
+  ].join('\n') }]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 0 / 🟡 0 / 🟢 0',
+    'Coverage: FULL',
+    'Recommendation: APPROVE',
+    'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).',
+  ].join('\n'));
+});
+
+test('Claude review backstop publishes only the terminal record after planning text', () => {
+  const review = [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 0 / 🟡 0 / 🟢 0',
+    'Coverage: FULL',
+    'Recommendation: APPROVE',
+    'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).',
+  ].join('\n');
+  const result = runExtractor([{ type: 'result', result: [
+    'I am still building the changed-line map from the inline diff.',
+    '',
+    review,
+  ].join('\n') }]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, review);
 });
 
 test('Claude review backstop rejects counts and recommendation embedded in finding prose', () => {
