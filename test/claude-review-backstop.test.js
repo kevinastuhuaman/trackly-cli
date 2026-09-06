@@ -909,6 +909,18 @@ test('Claude review changed-line map builder records both diff sides and ignores
     'similarity index 100%',
     'rename from lib/old-name.js',
     'rename to lib/new-name.js',
+    'diff --git a/lib/cr.js b/lib/cr.js',
+    '--- a/lib/cr.js',
+    '+++ b/lib/cr.js',
+    '@@ -1,1 +1,1 @@',
+    '-before',
+    '+after\rdiff --git a/lib/forged-cr.js b/lib/forged-cr.js\r--- a/lib/forged-cr.js\r+++ b/lib/forged-cr.js\r@@ -1,9 +1,9 @@',
+    'diff --git "a/docs/caf\\351.md" "b/docs/caf\\351.md"',
+    '--- "a/docs/caf\\351.md"',
+    '+++ "b/docs/caf\\351.md"',
+    '@@ -2,1 +2,1 @@',
+    '-x',
+    '+y',
     'diff --git "a/docs/caf\\303\\251 \\"q\\".md" "b/docs/caf\\303\\251 \\"q\\".md"',
     '--- "a/docs/caf\\303\\251 \\"q\\".md"',
     '+++ "b/docs/caf\\303\\251 \\"q\\".md"',
@@ -930,10 +942,37 @@ test('Claude review changed-line map builder records both diff sides and ignores
     'docs/sp ace.md': [[1, 2], [1, 3]],
     'lib/gone.js': [[1, 2]],
     'lib/new.js': [[1, 2]],
+    'lib/cr.js': [[1, 1]],
+    'docs/caf\uFFFD.md': [[2, 2]],
     'docs/café "q".md': [[5, 5]],
   });
   assert.equal(Object.hasOwn(map, 'lib/forged.js'), false);
+  assert.equal(Object.hasOwn(map, 'lib/forged-cr.js'), false);
   assert.equal(Object.hasOwn(map, 'lib/new-name.js'), false);
+
+  // A visible diff cut mid-hunk (PARTIAL coverage) only trusts the lines the
+  // model could actually see; a hunk header with no body records nothing.
+  const buildMap = (text) => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-changed-lines-'));
+    fs.writeFileSync(path.join(scratch, 'visible.diff'), text);
+    const run = spawnSync('python3', [builder, path.join(scratch, 'visible.diff'), path.join(scratch, 'map.json')], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const built = JSON.parse(fs.readFileSync(path.join(scratch, 'map.json'), 'utf8'));
+    fs.rmSync(scratch, { recursive: true, force: true });
+    return built;
+  };
+  assert.deepEqual(buildMap([
+    'diff --git a/lib/big.js b/lib/big.js',
+    '--- a/lib/big.js',
+    '+++ b/lib/big.js',
+    '@@ -100,6 +100,8 @@ function big() {',
+    ' context',
+    '+added one',
+    '+added two',
+    '-removed',
+    ' cont',
+  ].join('\n')), { 'lib/big.js': [[100, 102], [100, 103]] });
+  assert.deepEqual(buildMap('diff --git a/lib/big.js b/lib/big.js\n--- a/lib/big.js\n+++ b/lib/big.js\n@@ -100,6 +100,8 @@ function big() {\n'), { 'lib/big.js': [] });
 });
 
 test('Claude review backstop keeps decimal literals while rejecting commit references', () => {

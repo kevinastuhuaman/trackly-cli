@@ -2555,7 +2555,19 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
     .replace(/^  return server;\n/m, `  return server;\n${registration[0]}`);
   assert.notEqual(deadRegistration, localServerSource);
   fs.writeFileSync(localServerPath, deadRegistration);
-  assert.throws(verifyFixture(structuredClone(originalFixture)));
+  assert.throws(
+    verifyFixture(structuredClone(originalFixture)),
+    /must end with its sole return after its locked direct statement/,
+  );
+  fs.writeFileSync(localServerPath, localServerSource);
+  assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
+  const detachedImport = localServerSource.replace(
+    "const { registerApplyTools } = require('./apply-tools');",
+    "const { registerApplyTools } = require('./apply-tools-shadow');",
+  );
+  assert.notEqual(detachedImport, localServerSource);
+  fs.writeFileSync(localServerPath, detachedImport);
+  assert.throws(verifyFixture(structuredClone(originalFixture)), /registerApplyTools/);
   fs.writeFileSync(localServerPath, localServerSource);
   assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
   const renamed = structuredClone(originalFixture);
