@@ -68,7 +68,7 @@ function isolateTerminalRecord(review) {
   const lines = review.split(/\r?\n/);
   let start = -1;
   for (let index = 0; index < lines.length; index += 1) {
-    if (unwrapTaughtInlineCode(lines[index]) === REVIEW_HEADER) start = index;
+    if (lines[index] === REVIEW_HEADER) start = index;
   }
   return start === -1 ? review : lines.slice(start).join('\n');
 }
@@ -218,7 +218,7 @@ function locatorInChangedLines(locator, changedLines) {
 function isTerminalReview(review, coverage, changedLines = null) {
   if (coverage !== 'full' && coverage !== 'partial') return false;
   const lines = review.split(/\r?\n/).filter((line) => line.trim() !== '');
-  if (unwrapTaughtInlineCode(lines[0] || '') !== REVIEW_HEADER) return false;
+  if ((lines[0] || '') !== REVIEW_HEADER) return false;
   const countMatch = taughtMetadataLine(lines[1] || '').match(COUNT_LINE);
   if (!countMatch) return false;
   const severityCounts = new Map([
@@ -284,13 +284,7 @@ function canonicalizeCountRecord(review) {
       if (!countMatch) return line;
       return `Counts: 🔴 ${Number(countMatch[1])} / 🟡 ${Number(countMatch[2])} / 🟢 ${Number(countMatch[3])}`;
     }
-    if (
-      nonEmptyLine === 1
-      || nonEmptyLine === 3
-      || nonEmptyLine === 4
-      || taught === FULL_LGTM
-      || taught === PARTIAL_LGTM
-    ) {
+    if (nonEmptyLine === 3 || nonEmptyLine === 4 || taught === FULL_LGTM || taught === PARTIAL_LGTM) {
       return taught;
     }
     return line;

@@ -154,6 +154,18 @@ test('Claude review backstop rejects planning text prefixed to verdict markers',
   assert.equal(result.status, 1);
 });
 
+test('Claude review backstop rejects a backtick-wrapped review header', () => {
+  const result = runExtractor([{ type: 'result', result: [
+    '`## 🔵 Claude Code Review`',
+    '`Counts: 🔴 0 / 🟡 0 / 🟢 0`',
+    '`Coverage: FULL`',
+    '`Recommendation: APPROVE`',
+    '`LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`',
+  ].join('\n') }]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /without the required terminal review verdict/i);
+});
+
 test('Claude review backstop accepts taught backtick-wrapped metadata and clean verdicts', () => {
   const result = runExtractor([{ type: 'result', result: [
     '## 🔵 Claude Code Review',
