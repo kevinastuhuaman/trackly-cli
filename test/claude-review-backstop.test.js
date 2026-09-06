@@ -1059,11 +1059,67 @@ test('Claude review backstop accepts Unicode changed paths in finding locators',
   for (const rejected of ['docs/cafe.md:5', 'docs/foo:bar.md:6', 'docs/foo:5', 'docs/caf\uFFFD.md:5']) {
     assert.equal(runExtractor([{ type: 'result', result: review(rejected) }], 'full', {}, changedLines).status, 1, rejected);
   }
+  // A bare locator is part of the rendered row, so link markup in the path is
+  // rejected even when the trusted map contains that exact filename. Balanced
+  // emphasis and intraword underscores stay valid, matching the description
+  // grammar; wrapping the locator in inline code is still accepted.
+  const markupPaths = { 'docs/*bold*.md': [[5, 5]], 'docs/[label](https:/evil.example).md': [[1, 1]], 'docs/a_b_c.md': [[2, 2]], 'docs/~~x~~.md': [[3, 3]] };
+  for (const rejected of ['docs/[label](https:/evil.example).md:1']) {
+    assert.equal(runExtractor([{ type: 'result', result: review(rejected) }], 'full', {}, markupPaths).status, 1, rejected);
+  }
+  for (const accepted of ['docs/*bold*.md:5', 'docs/~~x~~.md:3', '`docs/*bold*.md:5`', '`docs/a_b_c.md:2`', 'docs/a_b_c.md:2']) {
+    assert.equal(runExtractor([{ type: 'result', result: review(accepted) }], 'full', {}, markupPaths).status, 0, accepted);
+  }
 });
 
 test('Claude review workflow marks opaque binary diffs as partial coverage', () => {
-  assert.match(workflow, /grep -qE '\^\(Binary files \.\* differ\|GIT binary patch\|old mode \[0-7\]\+\|new mode \[0-7\]\+\|\(new\|deleted\) file mode 160000\|Subproject commit \[0-9a-f\]\+\)\$' "\$VISIBLE_DIFF_FILE"/);
-  assert.match(workflow, /\|\| grep -q \$'\\xef\\xbf\\xbd' "\$CHANGED_LINES_FILE"/);
+  const opaqueGrep = workflow.match(/grep -qE '(\^\(Binary files[^']*\)\$)' "\$VISIBLE_DIFF_FILE"/u);
+  assert.ok(opaqueGrep, 'workflow must grep the visible diff for opaque entries');
+  const opaque = new RegExp(opaqueGrep[1], 'm');
+  for (const visible of [
+    'Binary files a/x.png and b/x.png differ',
+    'GIT binary patch',
+    'old mode 100755',
+    'new mode 100644',
+    'new file mode 160000',
+    'deleted file mode 160000',
+    'index 1234abcd..89ef0123 160000',
+    'similarity index 100%',
+  ]) assert.match(`diff --git a/x b/x\n${visible}\n`, opaque, visible);
+  for (const ordinary of [
+    'index 1234abcd..89ef0123 100644',
+    '+Subproject commit 1234abcd1234abcd1234abcd1234abcd1234abcd',
+    ' Binary files a/x.png and b/x.png differ',
+    '+old mode 100755',
+    'rename from old/path',
+    'rename to new/path',
+    'copy from old/path',
+    'similarity index 85%',
+    'similarity index',
+  ]) assert.doesNotMatch(`diff --git a/x b/x\n${ordinary}\n`, opaque, ordinary);
+  // json.dump escapes U+FFFD as the six-character \ufffd sequence.
+  assert.match(workflow, /\|\| grep -qF '\\ufffd' "\$CHANGED_LINES_FILE"/);
+  const locatableCheck = workflow.match(/python3 -c '([^']+)' "\$CHANGED_LINES_FILE"/);
+  assert.ok(locatableCheck, 'workflow must fail closed when the trusted map has no locatable ranges');
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-changed-lines-'));
+  const runLocatable = (map) => {
+    const mapFile = path.join(scratch, 'locatable.json');
+    fs.writeFileSync(mapFile, map);
+    return spawnSync('python3', ['-c', locatableCheck[1], mapFile], { encoding: 'utf8' }).status;
+  };
+  assert.equal(runLocatable('{}'), 1);
+  assert.equal(runLocatable('{"lib/a.js": []}'), 1);
+  assert.equal(runLocatable('{"lib/a.js": [[1, 1]]}'), 0);
+  fs.writeFileSync(path.join(scratch, 'visible.diff'), 'diff --git "a/docs/caf\\351.md" "b/docs/caf\\351.md"\n--- "a/docs/caf\\351.md"\n+++ "b/docs/caf\\351.md"\n@@ -1,1 +1,1 @@\n-x\n+y\n');
+  const built = spawnSync('python3', [path.join(__dirname, '..', 'scripts', 'build-changed-lines-map.py'), path.join(scratch, 'visible.diff'), path.join(scratch, 'map.json')], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  assert.equal(built.status, 0, built.stderr);
+  assert.match(fs.readFileSync(path.join(scratch, 'map.json'), 'utf8'), /\\ufffd/);
+  fs.writeFileSync(path.join(scratch, 'rename.diff'), 'diff --git a/old/path b/new/path\nsimilarity index 100%\nrename from old/path\nrename to new/path\n');
+  const renamed = spawnSync('python3', [path.join(__dirname, '..', 'scripts', 'build-changed-lines-map.py'), path.join(scratch, 'rename.diff'), path.join(scratch, 'rename.json')], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  assert.equal(renamed.status, 0, renamed.stderr);
+  assert.equal(fs.readFileSync(path.join(scratch, 'rename.json'), 'utf8'), '{}');
+  assert.equal(runLocatable(fs.readFileSync(path.join(scratch, 'rename.json'), 'utf8')), 1);
+  fs.rmSync(scratch, { recursive: true, force: true });
   assert.match(workflow, /elif \[ "\$OPAQUE" = "true" \]; then\n\s+echo "partial=true" >> "\$GITHUB_OUTPUT"/);
   // Both PARTIAL notes carry the marker the prompt keys its partial verdict on.
   const notes = workflow.match(/(?:TRUNC_NOTE|OPAQUE_NOTE)="\[NOTE:[^\n]*\]"/g) || [];

@@ -368,13 +368,15 @@ jobs:
           # model can inspect or cite, so a diff containing one can never be
           # reviewed in FULL: a zero-finding verdict must stay a PARTIAL comment,
           # never an APPROVE that claims coverage of bytes nobody inspected.
-          # Mode-only changes, gitlinks (submodule pointers), binary patches, and
-          # paths git could not render as UTF-8 (U+FFFD in the map) all leave
-          # nothing the model can cite line by line.
-          if grep -qE '^(Binary files .* differ|GIT binary patch|old mode [0-7]+|new mode [0-7]+|(new|deleted) file mode 160000|Subproject commit [0-9a-f]+)$' "$VISIBLE_DIFF_FILE" \
-              || grep -q $'\xef\xbf\xbd' "$CHANGED_LINES_FILE"; then
+          # Mode-only changes, gitlinks (submodule pointers), 100% renames/copies,
+          # binary patches, and paths git could not render as UTF-8 (JSON \ufffd)
+          # all leave nothing the model can cite line by line. json.dump writes
+          # U+FFFD as the six-character \ufffd escape, not the UTF-8 bytes.
+          if grep -qE '^(Binary files .* differ|GIT binary patch|old mode [0-7]+|new mode [0-7]+|(new|deleted) file mode 160000|index [0-9a-f]+\.\.[0-9a-f]+ 160000|similarity index 100%)$' "$VISIBLE_DIFF_FILE" \
+              || grep -qF '\ufffd' "$CHANGED_LINES_FILE" \
+              || ! python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); sys.exit(0 if any(ranges for ranges in data.values()) else 1)' "$CHANGED_LINES_FILE"; then
             OPAQUE=true
-            echo "::warning title=Opaque diff entries::PR diff contains binary, mode-only, gitlink, or otherwise opaque changes; coverage is PARTIAL."
+            echo "::warning title=Opaque diff entries::PR diff contains binary, mode-only, gitlink, rename, or otherwise opaque changes; coverage is PARTIAL."
           else
             OPAQUE=false
           fi

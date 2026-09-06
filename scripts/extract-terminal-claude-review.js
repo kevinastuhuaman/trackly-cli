@@ -144,6 +144,7 @@ function parseFindingLine(line) {
       || /(?:^|[^\p{L}\p{N}_])(?:#\d+|gh-\d+|[a-z0-9_.-]{1,39}\/[a-z0-9_.-]{1,100}#\d+|(?=[0-9]*[a-f])[0-9a-f]{7,40})(?![\p{L}\p{N}_])/iu.test(renderedRow)
       || /:[a-z0-9_+-]{1,64}:/iu.test(renderedRow)
       || hasUnsafeMarkdownDelimiter(outsideInlineCode)
+      || hasUnsafeMarkdownDelimiter(renderedRow)
       || /<!--|-->|<[^>\r\n]*>|!\[|~~~/i.test(renderedRow)
       || /[🔴🟡🟢]/u.test(outsideInlineCode)) {
     return { invalid: true };
