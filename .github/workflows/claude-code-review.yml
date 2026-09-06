@@ -280,6 +280,15 @@ jobs:
                   span[1] = min(span[1], span[0] + seen - 1)
 
 
+          def flush(pending_left, pending_right, seen_left, seen_right):
+              """Clamp the pending hunk on both sides; a shared span is clamped once."""
+              if pending_right is pending_left:
+                  clamp(pending_left, max(seen_left, seen_right))
+              else:
+                  clamp(pending_left, seen_left)
+                  clamp(pending_right, seen_right)
+
+
           def build_changed_lines(lines):
               changed = {}
               in_header = False
@@ -291,8 +300,7 @@ jobs:
               seen_right = 0
               for line in lines:
                   if line.startswith('diff --git '):
-                      clamp(pending_left, seen_left)
-                      clamp(pending_right, seen_right)
+                      flush(pending_left, pending_right, seen_left, seen_right)
                       pending_left = pending_right = None
                       in_header = True
                       old_path = None
@@ -309,8 +317,7 @@ jobs:
                       continue
                   hunk = HUNK.match(line)
                   if hunk and (old_path is not None or new_path is not None):
-                      clamp(pending_left, seen_left)
-                      clamp(pending_right, seen_right)
+                      flush(pending_left, pending_right, seen_left, seen_right)
                       pending_left = pending_right = None
                       seen_left = seen_right = 0
                       in_header = False
@@ -335,11 +342,7 @@ jobs:
                       elif line.startswith(' ') or line == '\n':
                           seen_left += 1
                           seen_right += 1
-              if pending_right is pending_left:
-                  clamp(pending_left, max(seen_left, seen_right))
-              else:
-                  clamp(pending_left, seen_left)
-                  clamp(pending_right, seen_right)
+              flush(pending_left, pending_right, seen_left, seen_right)
               return changed
 
 
@@ -471,7 +474,7 @@ jobs:
             line) pair that appears in that map - either an ADDED/CHANGED
             right-side line, or, for a finding about removed code, a DELETED
             left-side line. If the inline diff includes a
-            truncation NOTE, state PARTIAL coverage explicitly and do not claim
+            truncation or opaque-entry NOTE, state PARTIAL coverage explicitly and do not claim
             full coverage.
 
             Changed files:
@@ -511,10 +514,11 @@ jobs:
             necessary literal URL, email, @mention, severity symbol, or emoji
             shortcode inside inline code.
             If there are zero findings
-            and the review input was not truncated, use exactly:
+            and the review input carries no PARTIAL coverage NOTE, use exactly:
             `LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`
             If the review input
-            contains `[NOTE: diff truncated`, use exactly:
+            contains a NOTE saying `coverage is PARTIAL` (truncated or opaque
+            entries), use exactly:
             `Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).`
             Do not claim full coverage.
           claude_args: |
@@ -587,7 +591,7 @@ jobs:
             line) pair that appears in that map - either an ADDED/CHANGED
             right-side line, or, for a finding about removed code, a DELETED
             left-side line. If the inline diff includes a
-            truncation NOTE, state PARTIAL coverage explicitly and do not claim
+            truncation or opaque-entry NOTE, state PARTIAL coverage explicitly and do not claim
             full coverage.
 
             Changed files:
@@ -627,10 +631,11 @@ jobs:
             necessary literal URL, email, @mention, severity symbol, or emoji
             shortcode inside inline code.
             If there are zero findings
-            and the review input was not truncated, use exactly:
+            and the review input carries no PARTIAL coverage NOTE, use exactly:
             `LGTM — no issues found (checked correctness, security, data-loss, tests, performance).`
             If the review input
-            contains `[NOTE: diff truncated`, use exactly:
+            contains a NOTE saying `coverage is PARTIAL` (truncated or opaque
+            entries), use exactly:
             `Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).`
             Do not claim full coverage.
           claude_args: |

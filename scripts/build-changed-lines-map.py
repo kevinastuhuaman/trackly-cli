@@ -71,6 +71,15 @@ def clamp(entry, seen):
         span[1] = min(span[1], span[0] + seen - 1)
 
 
+def flush(pending_left, pending_right, seen_left, seen_right):
+    """Clamp the pending hunk on both sides; a shared span is clamped once."""
+    if pending_right is pending_left:
+        clamp(pending_left, max(seen_left, seen_right))
+    else:
+        clamp(pending_left, seen_left)
+        clamp(pending_right, seen_right)
+
+
 def build_changed_lines(lines):
     changed = {}
     in_header = False
@@ -82,8 +91,7 @@ def build_changed_lines(lines):
     seen_right = 0
     for line in lines:
         if line.startswith('diff --git '):
-            clamp(pending_left, seen_left)
-            clamp(pending_right, seen_right)
+            flush(pending_left, pending_right, seen_left, seen_right)
             pending_left = pending_right = None
             in_header = True
             old_path = None
@@ -100,8 +108,7 @@ def build_changed_lines(lines):
             continue
         hunk = HUNK.match(line)
         if hunk and (old_path is not None or new_path is not None):
-            clamp(pending_left, seen_left)
-            clamp(pending_right, seen_right)
+            flush(pending_left, pending_right, seen_left, seen_right)
             pending_left = pending_right = None
             seen_left = seen_right = 0
             in_header = False
@@ -126,11 +133,7 @@ def build_changed_lines(lines):
             elif line.startswith(' ') or line == '\n':
                 seen_left += 1
                 seen_right += 1
-    if pending_right is pending_left:
-        clamp(pending_left, max(seen_left, seen_right))
-    else:
-        clamp(pending_left, seen_left)
-        clamp(pending_right, seen_right)
+    flush(pending_left, pending_right, seen_left, seen_right)
     return changed
 
 

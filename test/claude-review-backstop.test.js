@@ -933,7 +933,7 @@ test('Claude review changed-line map builder records both diff sides and ignores
   const diffFile = path.join(directory, 'visible.diff');
   const mapFile = path.join(directory, 'map.json');
   fs.writeFileSync(diffFile, diff);
-  const result = spawnSync('python3', [builder, diffFile, mapFile], { encoding: 'utf8' });
+  const result = spawnSync('python3', [builder, diffFile, mapFile], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
   assert.equal(result.status, 0, result.stderr);
   const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
   fs.rmSync(directory, { recursive: true, force: true });
@@ -955,7 +955,7 @@ test('Claude review changed-line map builder records both diff sides and ignores
   const buildMap = (text) => {
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-changed-lines-'));
     fs.writeFileSync(path.join(scratch, 'visible.diff'), text);
-    const run = spawnSync('python3', [builder, path.join(scratch, 'visible.diff'), path.join(scratch, 'map.json')], { encoding: 'utf8' });
+    const run = spawnSync('python3', [builder, path.join(scratch, 'visible.diff'), path.join(scratch, 'map.json')], { encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
     assert.equal(run.status, 0, run.stderr);
     const built = JSON.parse(fs.readFileSync(path.join(scratch, 'map.json'), 'utf8'));
     fs.rmSync(scratch, { recursive: true, force: true });
@@ -973,6 +973,23 @@ test('Claude review changed-line map builder records both diff sides and ignores
     ' cont',
   ].join('\n')), { 'lib/big.js': [[100, 102], [100, 103]] });
   assert.deepEqual(buildMap('diff --git a/lib/big.js b/lib/big.js\n--- a/lib/big.js\n+++ b/lib/big.js\n@@ -100,6 +100,8 @@ function big() {\n'), { 'lib/big.js': [] });
+  // A shared old/new span followed by another file is clamped once to the
+  // longer visible side, exactly like the end-of-input path.
+  assert.deepEqual(buildMap([
+    'diff --git a/lib/shared.js b/lib/shared.js',
+    '--- a/lib/shared.js',
+    '+++ b/lib/shared.js',
+    '@@ -10,4 +10,4 @@',
+    ' keep',
+    '-old',
+    '+new',
+    'diff --git a/lib/next.js b/lib/next.js',
+    '--- a/lib/next.js',
+    '+++ b/lib/next.js',
+    '@@ -1,1 +1,1 @@',
+    '-a',
+    '+b',
+  ].join('\n')), { 'lib/shared.js': [[10, 11]], 'lib/next.js': [[1, 1]] });
 });
 
 test('Claude review backstop keeps decimal literals while rejecting commit references', () => {
@@ -1045,6 +1062,13 @@ test('Claude review backstop accepts Unicode changed paths in finding locators',
 test('Claude review workflow marks opaque binary diffs as partial coverage', () => {
   assert.match(workflow, /grep -qE '\^\(Binary files \.\* differ\|GIT binary patch\)\$' "\$VISIBLE_DIFF_FILE"/);
   assert.match(workflow, /elif \[ "\$OPAQUE" = "true" \]; then\n\s+echo "partial=true" >> "\$GITHUB_OUTPUT"/);
+  // Both PARTIAL notes carry the marker the prompt keys its partial verdict on.
+  const notes = workflow.match(/(?:TRUNC_NOTE|OPAQUE_NOTE)="\[NOTE:[^\n]*\]"/g) || [];
+  assert.equal(notes.length, 2);
+  for (const note of notes) assert.match(note, /coverage is PARTIAL/);
+  assert.equal((workflow.match(/contains a NOTE saying `coverage is PARTIAL`/g) || []).length, 2);
+  assert.doesNotMatch(workflow, /contains `\[NOTE: diff truncated`/);
+  assert.equal((workflow.match(/carries no PARTIAL coverage NOTE, use exactly:/g) || []).length, 2);
 });
 
 test('Claude review workflow builds and passes the trusted changed-line map', () => {
