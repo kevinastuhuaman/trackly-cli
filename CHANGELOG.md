@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Proposal approval and replay bindings now use bounded in-memory caches.
 - Fail the Claude review workflow closed when its recovered output contains
   intermediate planning text instead of a complete terminal review verdict.
+- Recapture the hosted contract fixture from the deployed backend merge of
+  provider-wide deferments (close-ai #1769, merge `254e1c6f`) after migration
+  507 completed, lock the backend's `owner_scoped_list_create_and_idempotent_clear`
+  deferment lifecycle, update the locked start-or-resume data flow, and let the
+  reachability check accept hoisted helper function declarations.
 
 ## [0.18.0] - 2026-09-04
 

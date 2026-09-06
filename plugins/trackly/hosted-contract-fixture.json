@@ -1,18 +1,18 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-09-04T01:25:26-0700",
+  "capturedAt": "2026-09-06T07:15:30-0700",
   "sourceRuntime": {
-    "commit": "58ca1b9374989062dd190b9e5f8e44082b216de2",
-    "parent": "2e9b02b3044a6ff2f5951d0f7288c72e53dd3f23",
-    "committedAt": "2026-09-03T09:06:51-07:00"
+    "commit": "4c4dab848b1068b1bd9290b14f8d278ec643aca6",
+    "parent": "debe407137abcff57887b96bdf1ee250306e5765",
+    "committedAt": "2026-09-05T13:41:00-07:00"
   },
   "mergedRuntime": {
-    "commit": "eafbf77f05c435881ebf922e1003d93f5520f06c",
+    "commit": "254e1c6fc3f98e2f3aa8c6492702e9b9480ca22e",
     "parents": [
-      "2e9b02b3044a6ff2f5951d0f7288c72e53dd3f23",
-      "58ca1b9374989062dd190b9e5f8e44082b216de2"
+      "981e1922dab08d4a640077e089ec55997f1aaf0b",
+      "4c4dab848b1068b1bd9290b14f8d278ec643aca6"
     ],
-    "committedAt": "2026-09-03T09:30:38-07:00"
+    "committedAt": "2026-09-05T14:00:15-07:00"
   },
   "applyContractVersion": "3.8.1",
   "pluginContractVersion": "1.0.0",
@@ -74,23 +74,23 @@
     ],
     [
       "trackly_list_apply_access_deferments",
-      "24ab6932f3dfd2f0b2ea5f4fad26e7aadd88bfb9475c14a38e5d33f33b44f7d4",
+      "7ddc74ee90c3c0e0a9cb729ccd2c2f4ed9443d2cd5827f32cb3846d956deb393",
       "11a3a58d1a775f830cc64ff17d591f7c3b7c6d67329f66c376697051a32f08a1"
     ],
     [
       "trackly_defer_apply_access",
-      "8198381bd09f4320b7d6cf8fef1d4f278f863e9b31b5823cb4c7425146863671",
+      "6cbc80148fbd288edac7240a3b8f3634c52bf18ca617e867a65ec3049a126fa8",
       "1389d30551a8536f09592c14184d4e156c91cef11895abe3eee508ed55ea932e"
     ],
     [
       "trackly_clear_apply_access_deferment",
-      "aa7a8b70e488f7e924d659428926840ff50e589e83b1b4815acdc8e069e35267",
+      "a337cd28aa85af4e422fb3b3f73dd84604ff458f37732e6fbb8f501b76151272",
       "de6b29b8469b758f5252edc565cc33d6e5a07c43a97cc2f7e8ebf3f0e3342e0b"
     ],
     [
       "trackly_start_or_resume_apply",
       "6c372e9bcbf7248f7c45a14ae0dc2efed9994309518c359b786746c65f165a8c",
-      "dbc08491ee7486824a9f3d598f1ba317aa31a0d7bbfd15d74298b4c8b41998db"
+      "207cdb3f64ba923052da5803b0c652bf24406694cd461ed617f52922149b750a"
     ],
     [
       "trackly_get_apply_work",
@@ -181,16 +181,16 @@
     "get_more_tools"
   ],
   "sourceSha256": {
-    "pluginServer": "8e537864c9983e04f48cbd8b632735b794a5ce080b5a792c2c8d223e2b9f9ec8",
+    "pluginServer": "e3991d42901b16c74b870985b04e3da78556aa1dcac9d3cd60ec1350feaa2d3d",
     "pluginScopes": "1bc08af5a67a2e3b5d56dbc566dbfc1cbb00e2bceaaa969be4f8e2eee4234250",
     "jobBriefService": "10f30d6564472125d24cd52dfd9c4ae54dfb9c6c4958d14f44db4ec9e276d0f2",
     "backendUiRedirect": "3d1018e472992626d39299be89ee8e996930fb76ce0f69155f2f63bb6f34d55e",
     "maintenanceMode": "0409b32355a014ecc4d64056bf251fcde5f377400fe4f7485e70795420b25afe",
-    "databaseBinding": "fe42e478ecef902d45092f9c40d3b6dc1d005ee4af2ede98dcc847f45e4c4229",
+    "databaseBinding": "da98dfa40349e694816f9a7d5d95517ea88dae04c1399a4d5f20207eb0b37924",
     "databasePoolPolicy": "17c716980598100cfd91aa0630f93ee967652daf256bfaeaffe4b37802e98928",
     "reviewIdentity": "d03432434c10bbfd0e53f51b2d475f0adf3ada88ac85c2c0534791be0bf03c10",
     "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
     "authRateLimit": "6929621038a85cc53da3fe239851de693148cb9fb917504ac04bb4cac44e5e17",
-    "applicationProfileService": "703603a9b3498711bacb9a9352c88cc4b1ffc063fd9fbcf562c194b551c26447"
+    "applicationProfileService": "0b76121340e819a32923d39b8dee84619fd95831df44846f330ec2b126f51f53"
   }
 }

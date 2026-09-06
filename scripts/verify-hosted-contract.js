@@ -11,7 +11,7 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '0539c0da82d68aaae70116f5fba6e8ea8a1a738d485390fc13ce9325288f9507';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '49ed225cb7c4b9d04cb52ba8c9788d8cbb16aefe58e238783dbe596f584a6fd9';
 const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
   applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
   applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
@@ -179,8 +179,12 @@ function directToolRegistrationsInNamedParameterFunction(
     });
     assert.ok(catalogRegistrationIndexes.length > 0, `${sourcePath} must directly register Apply tools`);
     assert.ok(
+      // Hoisted function declarations cannot branch, return, or throw around a
+      // registration, so they never make a later registration unreachable.
       factory.body.body.slice(0, catalogRegistrationIndexes.at(-1) + 1).every((statement) => (
-        statement.type === 'VariableDeclaration' || statement.type === 'ExpressionStatement'
+        statement.type === 'VariableDeclaration'
+        || statement.type === 'ExpressionStatement'
+        || statement.type === 'FunctionDeclaration'
       )),
       `${expectedFunction} in ${sourcePath} must reach every local registration without an earlier branch, return, or throw`,
     );
@@ -8768,9 +8772,7 @@ assertWrappedHandlerStatementSequenceAst(
   let proposedWave = projectApplyProposedWave(
     execution?.accessProposal ?? execution?.proposedWave,
     execution,
-  )
-    ?? startResult.proposedWave
-    ?? activeProposedWave;
+  );
   let batchId = readinessCount(execution?.execution?.unresolvedWaves?.[0]?.batchId);`,
   hostedPluginSourcePath,
 );
