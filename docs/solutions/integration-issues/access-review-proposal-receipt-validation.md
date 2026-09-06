@@ -125,12 +125,23 @@ being coupled accidentally.
 
 PR #135 merged as `e97309a07a8afdc6eb62b28f4313c538699c72e5`.
 Its CI passed 520 tests and the checked-in contract-fixture run passed 81 tests.
-The corrective npm release remains pending: npm latest is 0.18.0, and backend
-PR `#1769` is still open and readiness-blocked. Before publishing 0.18.1, run
-the backend-coupled hosted-contract check against the exact merged backend
-candidate, verify its Azure deployment and access-deferment behavior, and rerun
-the exact-head CLI review gate. Replace this pending status with the backend
-merge and deployed SHA plus the published CLI version after those checks pass.
+
+Backend PR `#1769` merged as `254e1c6fc3f98e2f3aa8c6492702e9b9480ca22e`
+(head `4c4dab848b1068b1bd9290b14f8d278ec643aca6`) on 2026-09-05 14:00 PDT.
+Production `https://closeai.mba/api/first-test` reports `build_sha`
+`d5a9abf3e12fb384d50ec998d83a2370725ae3e7`, which contains that merge, and
+every hosted path the CLI locks is byte-identical between the two commits.
+Protected migration 507 completed on 2026-09-06 07:13 PDT
+(`providerDefermentsReady: true` on an idempotent rerun after the first request
+outlived the Cloudflare proxy timeout). The hosted contract fixture was
+recaptured from `254e1c6fc3`, and
+`TRACKLY_BACKEND_DIR=<clean checkout at 254e1c6fc3> npm run test:hosted-contract`
+passes with Apply 3.8.1 and the 21-tool public facade at 1.0.0.
+
+Still pending: npm publication of 0.18.1 through the merge of PR #136, and the
+backend rollout switch `TRACKLY_APPLY_ACCESS_KNOWLEDGE_ROLLOUT`, which is unset
+in production, so the live protocol still advertises the 3.7.x window; that
+activation is a backend rollout decision outside this repository.
 
 ## Prevention
 

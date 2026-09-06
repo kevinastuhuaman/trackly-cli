@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   507 completed, lock the backend's `owner_scoped_list_create_and_idempotent_clear`
   deferment lifecycle, update the locked start-or-resume data flow, and let the
   reachability check accept hoisted helper function declarations.
+- Bind the hosted plugin lifecycle into the contract fixture and run the local
+  registration reachability checks in fixture-only mode, so CI can no longer
+  pass while the backend-coupled verifier would fail.
+- Validate every Claude review finding location against a trusted changed-line
+  map built from the reviewed diff; a misstated path or line now fails the
+  terminal review record closed.
 
 ## [0.18.0] - 2026-09-04
 

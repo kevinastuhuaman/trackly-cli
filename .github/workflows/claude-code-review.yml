@@ -190,6 +190,38 @@ jobs:
             echo "::warning title=No diff::Empty diff (files: ${FILES:-none}); skipping review to avoid a false LGTM."
             exit 0
           fi
+          # Trusted changed-line map: every finding locator the model emits must
+          # name a changed path and a line inside one of these hunks, so a
+          # misstated or hallucinated location cannot become part of the
+          # validated exact-run record. (Codex P2 on PR #136.)
+          CHANGED_LINES_FILE="${RUNNER_TEMP:-/tmp}/claude-review-changed-lines.json"
+          if ! python3 - "$DIFF_FILE" "$CHANGED_LINES_FILE" <<'PY'
+          import json, re, sys
+          diff_file, out_file = sys.argv[1:3]
+          changed = {}
+          current = None
+          with open(diff_file, encoding='utf-8', errors='replace') as handle:
+              for line in handle:
+                  if line.startswith('+++ '):
+                      target = line[4:].rstrip('\n')
+                      current = None if target == '/dev/null' else re.sub(r'^b/', '', target)
+                      if current is not None:
+                          changed.setdefault(current, [])
+                      continue
+                  hunk = re.match(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', line)
+                  if hunk and current is not None:
+                      start = int(hunk.group(1))
+                      count = int(hunk.group(2)) if hunk.group(2) is not None else 1
+                      if count > 0:
+                          changed[current].append([start, start + count - 1])
+          with open(out_file, 'w', encoding='utf-8') as handle:
+              json.dump(changed, handle)
+          PY
+          then
+            echo "::error title=Changed-line map failed::Could not build the trusted changed-line map; refusing to review without it."
+            exit 1
+          fi
+          echo "changed_lines_file=${CHANGED_LINES_FILE}" >> "$GITHUB_OUTPUT"
           if [ "$BYTES" -gt "$MAXLEN" ]; then
             echo "partial=true" >> "$GITHUB_OUTPUT"
             TRUNC_NOTE="[NOTE: diff truncated at ${MAXLEN} bytes - coverage is PARTIAL; state that explicitly in the verdict and do not claim full coverage.]"
@@ -522,10 +554,15 @@ jobs:
           EXEC_FILE_PRIMARY: ${{ steps.claude-review.outputs.execution_file }}
           EXEC_FILE_FALLBACK: ${{ steps.claude-review-fallback.outputs.execution_file }}
           PARTIAL_COVERAGE: ${{ steps.precompute.outputs.partial }}
+          CHANGED_LINES_FILE: ${{ steps.precompute.outputs.changed_lines_file }}
         run: |
           set -uo pipefail
           # Publish the terminal text from this exact execution. This is the
           # only model-authored review content allowed onto the PR.
+          if [ -z "${CHANGED_LINES_FILE:-}" ] || [ ! -s "$CHANGED_LINES_FILE" ]; then
+            echo "::error::Trusted changed-line map is missing; every finding location must be validated against the reviewed diff."
+            exit 1
+          fi
           if [ "${{ steps.claude-review.outcome }}" = "success" ]; then
             EXEC_FILE="$EXEC_FILE_PRIMARY"
           else
@@ -551,7 +588,7 @@ jobs:
             echo "::error::Could not decode the trusted Claude review extractor."
             exit 1
           elif [ -n "${EXEC_FILE:-}" ] && [ -f "$EXEC_FILE" ] \
-              && REVIEW_TEXT="$(node "$TRUSTED_EXTRACTOR" "$EXEC_FILE" "$COVERAGE_FLAG")"; then
+              && REVIEW_TEXT="$(node "$TRUSTED_EXTRACTOR" "$EXEC_FILE" "$COVERAGE_FLAG" "$CHANGED_LINES_FILE")"; then
             REVIEW_BYTES="$(printf '%s' "$REVIEW_TEXT" | wc -c | tr -d '[:space:]')"
             if ! [[ "$REVIEW_BYTES" =~ ^[0-9]+$ ]] || [ "$REVIEW_BYTES" -gt 60000 ]; then
               echo "::error title=Oversized review::The complete terminal review exceeds the safe GitHub comment limit; refusing to truncate findings."

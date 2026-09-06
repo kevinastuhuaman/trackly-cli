@@ -11,11 +11,17 @@ const workflow = fs.readFileSync(
   'utf8',
 );
 
-function runExtractor(events, coverage = 'full', options = {}) {
+function runExtractor(events, coverage = 'full', options = {}, changedLines) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-claude-review-'));
   const executionFile = path.join(directory, 'execution.jsonl');
   fs.writeFileSync(executionFile, events.map((event) => JSON.stringify(event)).join('\n'));
-  const result = spawnSync(process.execPath, [extractor, executionFile, `--${coverage}`], {
+  const args = [extractor, executionFile, `--${coverage}`];
+  if (changedLines !== undefined) {
+    const changedLinesFile = path.join(directory, 'changed-lines.json');
+    fs.writeFileSync(changedLinesFile, typeof changedLines === 'string' ? changedLines : JSON.stringify(changedLines));
+    args.push(changedLinesFile);
+  }
+  const result = spawnSync(process.execPath, args, {
     encoding: 'utf8',
     ...options,
   });
@@ -815,6 +821,58 @@ test('Claude review backstop fails closed when the final result is incomplete', 
     { type: 'result', result: 'Posting findings now.' },
   ]);
   assert.equal(result.status, 1);
+});
+
+test('Claude review backstop validates finding locators against the trusted changed-line map', () => {
+  const review = (locator) => [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: COMMENT',
+    `${locator} — 🟡 P2 — Bound the retry loop.`,
+  ].join('\n');
+  const changedLines = { 'lib/client.js': [[10, 14], [40, 52]], 'mcp/server.js': [[3, 3]] };
+  for (const accepted of ['lib/client.js:12', 'lib/client.js:40-52', '`lib/client.js:14`', 'mcp/server.js:3']) {
+    const result = runExtractor([{ type: 'result', result: review(accepted) }], 'full', {}, changedLines);
+    assert.equal(result.status, 0, `${accepted}: ${result.stderr}`);
+  }
+  for (const rejected of [
+    'lib/client.js:9',
+    'lib/client.js:15',
+    'lib/client.js:12-16',
+    'lib/client.js:52-40',
+    'lib/other.js:12',
+    'src/lib/client.js:12',
+    'mcp/server.js:4',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: review(rejected) }], 'full', {}, changedLines);
+    assert.equal(result.status, 1, `${rejected} must be rejected`);
+    assert.match(result.stderr, /required terminal review verdict/);
+  }
+  // Without a map the grammar alone is enforced; the workflow always supplies one.
+  assert.equal(runExtractor([{ type: 'result', result: review('lib/other.js:12') }]).status, 0);
+  for (const malformed of ['[]', '{"lib/client.js": [[0, 3]]}', '{"lib/client.js": [[5, 3]]}', '{"lib/client.js": [5]}', 'not json']) {
+    const result = runExtractor([{ type: 'result', result: review('lib/client.js:12') }], 'full', {}, malformed);
+    assert.equal(result.status, 1, `${malformed} must fail closed`);
+    assert.match(result.stderr, /Could not load the trusted changed-line map/);
+  }
+  const clean = [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 0 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: APPROVE',
+    'LGTM — no issues found (checked correctness, security, data-loss, tests, performance).',
+  ].join('\n');
+  assert.equal(runExtractor([{ type: 'result', result: clean }], 'full', {}, {}).status, 0);
+});
+
+test('Claude review workflow builds and passes the trusted changed-line map', () => {
+  assert.match(workflow, /CHANGED_LINES_FILE="\$\{RUNNER_TEMP:-\/tmp\}\/claude-review-changed-lines\.json"/);
+  assert.match(workflow, /Could not build the trusted changed-line map[\s\S]*?exit 1/);
+  assert.match(workflow, /echo "changed_lines_file=\$\{CHANGED_LINES_FILE\}" >> "\$GITHUB_OUTPUT"/);
+  assert.match(workflow, /CHANGED_LINES_FILE: \$\{\{ steps\.precompute\.outputs\.changed_lines_file \}\}/);
+  assert.match(workflow, /Trusted changed-line map is missing[\s\S]*?exit 1/);
+  assert.match(workflow, /node "\$TRUSTED_EXTRACTOR" "\$EXEC_FILE" "\$COVERAGE_FLAG" "\$CHANGED_LINES_FILE"/);
 });
 
 test('Claude review workflow always publishes this run and fails closed without trusted code', () => {

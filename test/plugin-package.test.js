@@ -1196,6 +1196,19 @@ test('local Apply registrations are bound to the helper reached by createServer'
     ),
     /must not alias, escape, or otherwise reference server outside direct catalog registrations/,
   );
+  assert.deepEqual(
+    directToolRegistrationsInNamedParameterFunction(
+      applySource.replace(
+        "server.tool('trackly_zero'",
+        "function rememberState(key, value) { cache.set(key, value); }\n      server.tool('trackly_zero'",
+      ),
+      'registerApplyTools',
+      'server',
+      'tool',
+      'hoisted helper before local registration fixture',
+    ).map(({ name }) => name),
+    ['trackly_zero'],
+  );
   for (const [label, prefix] of [
     ['return', 'if (disabled) return;'],
     ['throw', "throw new Error('disabled');"],

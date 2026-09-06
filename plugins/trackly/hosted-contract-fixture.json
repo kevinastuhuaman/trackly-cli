@@ -1,5 +1,5 @@
 {
-  "formatVersion": 2,
+  "formatVersion": 3,
   "capturedAt": "2026-09-06T07:15:30-0700",
   "sourceRuntime": {
     "commit": "4c4dab848b1068b1bd9290b14f8d278ec643aca6",
@@ -192,5 +192,34 @@
     "azureRateLimitOptions": "67321eae458cc1d7c44d1fe7511aa05c86a98d0ea0af9b774cc3ee4a014bf820",
     "authRateLimit": "6929621038a85cc53da3fe239851de693148cb9fb917504ac04bb4cac44e5e17",
     "applicationProfileService": "0b76121340e819a32923d39b8dee84619fd95831df44846f330ec2b126f51f53"
+  },
+  "hostedPluginLifecycle": {
+    "readinessMissingProfileFields": "canonical_key_and_public_label_only",
+    "readinessAvailableProfileFields": "saved_canonical_key_and_public_label_only",
+    "startOrResume": "returns_claimed_batch_bound_runs",
+    "readinessSections": "independently_available_with_explicit_availability",
+    "readinessCardAvailability": "unavailable_sections_never_render_as_saved_state",
+    "readinessQueueCount": "page_count_with_has_more_lower_bound",
+    "leaseHandling": "facade_owned_never_model_visible",
+    "leaseRenewal": "facade_owned_on_every_work_and_mutation_path",
+    "waveLeaseRecovery": "claim_unleased_or_renew_same_facade_lease",
+    "surfaceBinding": "value_free_via_report_progress_with_facade_owned_lease_and_concurrency_receipt",
+    "parkedMemberResume": "explicit_user_assertion_via_report_progress_with_idempotent_value_free_receipt",
+    "observationBulk": "atomic_grant_bound_idempotent_replay",
+    "profileEducation": "bounded_explicitly_confirmed_user_approved_replace_all",
+    "advanceReceipt": "returns_access_review_proposal_or_prepared_batch_and_member_ids",
+    "orderingV3AccessReview": "exact_ordered_job_ids_and_approval_hash_required_before_nonempty_batch_creation",
+    "allDeferredAccessReview": "proposal_only_no_batch_created",
+    "accessDefermentRecovery": "owner_scoped_list_create_and_idempotent_clear",
+    "applyWorkOutput": "discriminated_allowlisted_structured_content",
+    "applyWorkProfileProjection": "requested_global_fields_plus_member_bound_exact_office_fields_and_resume_availability_boolean_only",
+    "applyWorkNavigation": "bounded_frozen_requisition_identity_with_server_verified_origin_and_tenant_policy",
+    "conditionalSensitiveScopes": "required_only_for_requested_sensitive_fields",
+    "appliedStatusScope": "tracking_write_plus_apply_write_for_run_reconciliation",
+    "jobBriefRecentPosts": "validated_posted_at_only",
+    "resumeHandling": "manual_unbound_not_attested",
+    "certifyReviewReady": "atomic_checkpoint_truth_outcome_manual_resume_unbound",
+    "reconcileManualSubmission": "atomic_current_epoch_evidence_outcome",
+    "submissionBoundary": "manual_only_no_submit_tool"
   }
 }

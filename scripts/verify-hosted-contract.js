@@ -11,7 +11,7 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '49ed225cb7c4b9d04cb52ba8c9788d8cbb16aefe58e238783dbe596f584a6fd9';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'a4f44aabb799d6d9774bde3f8cb372242e7d2ff6febaae9ae24a41b3895bf979';
 const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
   applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
   applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
@@ -645,6 +645,11 @@ function verifyHostedSnapshotGitProvenance(cliRoot, backendRoot) {
     `${mergeCommit} must have the recorded merge parents in order`,
   );
   assertHostedCommitTimestamps(backendRoot, fixture);
+  assert.deepEqual(
+    JSON.parse(gitOutput(backendRoot, ['show', `${mergeCommit}:contracts/trackly-plugin-tools.json`])).lifecycle,
+    fixture.hostedPluginLifecycle,
+    `contracts/trackly-plugin-tools.json lifecycle at deployed merge ${mergeCommit} drifted from the reviewed hosted snapshot`,
+  );
   assertMergeCommitPreservesPaths(
     backendRoot,
     sourceCommit,
@@ -6450,10 +6455,11 @@ function verifyCheckedInHostedContractFixture(
       'publicTools',
       'hostedMcpToolNames',
       'sourceSha256',
+      'hostedPluginLifecycle',
     ],
     `${fixturePath} must use the exact standalone fixture shape`,
   );
-  assert.equal(fixture.formatVersion, 2);
+  assert.equal(fixture.formatVersion, 3);
   const commitPattern = /^[a-f0-9]{40}$/;
   assert.match(fixture.sourceRuntime.commit, commitPattern);
   assert.match(fixture.sourceRuntime.parent, commitPattern);
@@ -6527,6 +6533,35 @@ function verifyCheckedInHostedContractFixture(
     `${fixturePath} hosted MCP tool-name snapshot drifted`,
   );
   assert.equal(new Set(fixture.hostedMcpToolNames).size, fixture.hostedMcpToolNames.length);
+  assert.deepEqual(
+    fixture.hostedPluginLifecycle,
+    lock.publicLifecycleContract,
+    `${fixturePath} hosted plugin lifecycle snapshot drifted from the packaged public lifecycle contract`,
+  );
+  // CI only runs this fixture-only mode, so the backend-independent local
+  // registration reachability checks must execute here on the real sources
+  // rather than only behind TRACKLY_BACKEND_DIR.
+  const localApplySourcePath = path.join(cliRoot, 'mcp', 'apply-tools.js');
+  const localServerSourcePath = path.join(cliRoot, 'mcp', 'server.js');
+  const localApplySource = fs.readFileSync(localApplySourcePath, 'utf8');
+  const localServerSource = fs.readFileSync(localServerSourcePath, 'utf8');
+  for (const method of ['tool', 'registerTool']) {
+    directToolRegistrationsInNamedParameterFunction(
+      localApplySource,
+      'registerApplyTools',
+      'server',
+      method,
+      localApplySourcePath,
+    );
+  }
+  directToolRegistrationsInNamedParameterFunction(
+    localServerSource,
+    'createServer',
+    'server',
+    'tool',
+    localServerSourcePath,
+    'direct-construction',
+  );
   assert.deepEqual(fixture.sourceSha256, {
     pluginServer: lock.publicExecutableContract.pluginServerSha256,
     pluginScopes: lock.publicExecutableContract.pluginScopesSha256,

@@ -144,10 +144,43 @@ function parseFindingLine(line) {
       || /[🔴🟡🟢]/u.test(outsideInlineCode)) {
     return { invalid: true };
   }
-  return { invalid: false, severity: match[2], level: match[3] };
+  return { invalid: false, severity: match[2], level: match[3], locator: match[1] };
 }
 
-function isTerminalReview(review, coverage) {
+function loadChangedLines(changedLinesFile) {
+  const parsed = JSON.parse(fs.readFileSync(changedLinesFile, 'utf8'));
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('changed-line map must be a JSON object keyed by path');
+  }
+  const changedLines = new Map();
+  for (const [filePath, ranges] of Object.entries(parsed)) {
+    if (!Array.isArray(ranges) || !ranges.every((range) => (
+      Array.isArray(range) && range.length === 2
+      && Number.isInteger(range[0]) && Number.isInteger(range[1])
+      && range[0] >= 1 && range[1] >= range[0]
+    ))) {
+      throw new Error(`changed-line map for ${filePath} must list [start, end] line ranges`);
+    }
+    changedLines.set(filePath, ranges);
+  }
+  return changedLines;
+}
+
+// A finding locator is trusted only when it names a changed path and every
+// cited line falls inside a hunk of the trusted diff. A hallucinated path or
+// line number must not become part of a validated exact-run record.
+function locatorInChangedLines(locator, changedLines) {
+  const match = locator.match(/^(.*):(\d+)(?:-(\d+))?$/u);
+  if (!match) return false;
+  const ranges = changedLines.get(match[1]);
+  if (!ranges) return false;
+  const start = Number(match[2]);
+  const end = match[3] === undefined ? start : Number(match[3]);
+  if (end < start) return false;
+  return ranges.some(([rangeStart, rangeEnd]) => start >= rangeStart && end <= rangeEnd);
+}
+
+function isTerminalReview(review, coverage, changedLines = null) {
   if (coverage !== 'full' && coverage !== 'partial') return false;
   const lines = review.split(/\r?\n/).filter((line) => line.trim() !== '');
   if (lines[0] !== '## 🔵 Claude Code Review') return false;
@@ -175,6 +208,7 @@ function isTerminalReview(review, coverage) {
     if (finding) {
       if (finding.invalid) return false;
       if (finding.level && finding.level !== expectedLevel.get(finding.severity)) return false;
+      if (changedLines && !locatorInChangedLines(finding.locator, changedLines)) return false;
       findingCounts.set(finding.severity, findingCounts.get(finding.severity) + 1);
     } else if (line === 'Partial LGTM — no issues found in the visible diff (coverage was partial because the diff was truncated).') {
       if (hasPartialVerdict) return false;
@@ -218,15 +252,26 @@ function canonicalizeCountRecord(review) {
 
 const executionFile = process.argv[2];
 const coverageFlag = process.argv[3];
+const changedLinesFile = process.argv[4];
 const coverage = coverageFlag === '--partial' ? 'partial' : coverageFlag === '--full' ? 'full' : '';
 if (!executionFile || !coverage) {
-  console.error('usage: extract-terminal-claude-review.js <execution-file> <--full|--partial>');
+  console.error('usage: extract-terminal-claude-review.js <execution-file> <--full|--partial> [changed-lines.json]');
   process.exit(2);
+}
+
+let changedLines = null;
+if (changedLinesFile !== undefined) {
+  try {
+    changedLines = loadChangedLines(changedLinesFile);
+  } catch (error) {
+    console.error(`Could not load the trusted changed-line map: ${error.message}`);
+    process.exit(1);
+  }
 }
 
 try {
   const review = extractReview(parseEvents(fs.readFileSync(executionFile, 'utf8'))).trim();
-  if (!isTerminalReview(review, coverage)) {
+  if (!isTerminalReview(review, coverage, changedLines)) {
     console.error('Claude execution ended without the required terminal review verdict.');
     process.exit(1);
   }
