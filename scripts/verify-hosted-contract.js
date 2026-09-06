@@ -6739,6 +6739,8 @@ for (const constantName of [
   'applyExecutionRecoveryEligibilityCodes',
   'applyHandoffReconciliationClassifications',
 ]) {
+  assert.equal(Object.prototype.hasOwnProperty.call(hosted.constants, constantName), true, `${constantName} missing from hosted execution contract`);
+  assert.equal(Object.prototype.hasOwnProperty.call(local.constants, constantName), true, `${constantName} missing from local execution contract`);
   assert.deepEqual(
     hosted.constants[constantName],
     local.constants[constantName],
