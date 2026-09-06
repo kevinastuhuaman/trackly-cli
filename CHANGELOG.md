@@ -31,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   map built from the exact diff the reviewer saw, covering added and deleted
   lines and ignoring forged file headers; a misstated path or line now fails
   the terminal review record closed, and the trusted base extractor must
-  support that validation before a record is published.
+  support that validation before a record is published. Diffs containing
+  binary or otherwise opaque entries are reviewed as partial coverage.
 
 ## [0.18.0] - 2026-09-04
 

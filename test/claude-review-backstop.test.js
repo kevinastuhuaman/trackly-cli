@@ -1026,6 +1026,27 @@ test('Claude review backstop normalizes diff-prefixed locators only onto changed
   }
 });
 
+test('Claude review backstop accepts Unicode changed paths in finding locators', () => {
+  const review = (locator) => [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: COMMENT',
+    `${locator} — 🟡 P2 — Bound the retry loop.`,
+  ].join('\n');
+  const changedLines = { 'docs/café.md': [[5, 5]], 'docs/日本語/guide.md': [[1, 3]] };
+  for (const accepted of ['docs/café.md:5', '`docs/日本語/guide.md:2`']) {
+    const result = runExtractor([{ type: 'result', result: review(accepted) }], 'full', {}, changedLines);
+    assert.equal(result.status, 0, `${accepted}: ${result.stderr}`);
+  }
+  assert.equal(runExtractor([{ type: 'result', result: review('docs/cafe.md:5') }], 'full', {}, changedLines).status, 1);
+});
+
+test('Claude review workflow marks opaque binary diffs as partial coverage', () => {
+  assert.match(workflow, /grep -qE '\^\(Binary files \.\* differ\|GIT binary patch\)\$' "\$VISIBLE_DIFF_FILE"/);
+  assert.match(workflow, /elif \[ "\$OPAQUE" = "true" \]; then\n\s+echo "partial=true" >> "\$GITHUB_OUTPUT"/);
+});
+
 test('Claude review workflow builds and passes the trusted changed-line map', () => {
   assert.match(workflow, /CHANGED_LINES_FILE="\$\{RUNNER_TEMP:-\/tmp\}\/claude-review-changed-lines\.json"/);
   assert.match(workflow, /grep -q 'function loadChangedLines' "\$TRUSTED_EXTRACTOR"[\s\S]*?does not validate finding locations[\s\S]*?exit 1/);

@@ -123,7 +123,7 @@ function parseFindingLine(line) {
   if (/^[ \t]*(?:[-+*]|\d+[.)])[ \t]+/u.test(line)) return { invalid: true };
   const normalized = normalizeFindingLine(line);
   const match = normalized.match(
-    /^([A-Za-z0-9_.@/+][A-Za-z0-9_.@/+() -]*:\d+(?:-\d+)?)[ \t]+[—-][ \t]+(🔴|🟡|🟢)(?:[ \t]*P([1-3]))?[ \t]+[—-][ \t]+(\S.*)$/u,
+    /^([\p{L}\p{N}_.@/+][\p{L}\p{N}_.@/+() -]*:\d+(?:-\d+)?)[ \t]+[—-][ \t]+(🔴|🟡|🟢)(?:[ \t]*P([1-3]))?[ \t]+[—-][ \t]+(\S.*)$/u,
   );
   if (!match) return null;
   const description = match[4];

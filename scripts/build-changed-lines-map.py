@@ -64,12 +64,11 @@ def clamp(entry, seen):
     """Shrink a recorded range to the lines actually present in the diff."""
     if entry is None:
         return
-    ranges, index = entry
-    start = ranges[index][0]
+    ranges, span = entry
     if seen <= 0:
-        del ranges[index]
+        ranges[:] = [candidate for candidate in ranges if candidate is not span]
     else:
-        ranges[index][1] = min(ranges[index][1], start + seen - 1)
+        span[1] = min(span[1], span[0] + seen - 1)
 
 
 def build_changed_lines(lines):
@@ -110,10 +109,10 @@ def build_changed_lines(lines):
             right = hunk_range(hunk.group(3), hunk.group(4))
             if old_path is not None and left is not None:
                 changed[old_path].append(left)
-                pending_left = (changed[old_path], len(changed[old_path]) - 1)
+                pending_left = (changed[old_path], left)
             if new_path is not None and right is not None and (new_path != old_path or right != left):
                 changed[new_path].append(right)
-                pending_right = (changed[new_path], len(changed[new_path]) - 1)
+                pending_right = (changed[new_path], right)
             elif new_path is not None and right is not None:
                 pending_right = pending_left
             continue
