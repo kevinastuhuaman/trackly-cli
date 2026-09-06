@@ -6562,6 +6562,26 @@ function verifyCheckedInHostedContractFixture(
     localServerSourcePath,
     'direct-construction',
   );
+  // The Apply registration call must be live: imported from ./apply-tools and
+  // executed before createServer's sole final return, exactly as backend mode
+  // requires, so a dead registration cannot ship through fixture-only CI.
+  assertCommonJsDestructuredRequire(
+    localServerSource,
+    'registerApplyTools',
+    './apply-tools',
+    localServerSourcePath,
+  );
+  assertActiveFunctionDirectStatementAst(
+    localServerSource,
+    'createServer',
+    `registerApplyTools(server, {
+    wrapTool,
+    mcpUserAgent: MCP_USER_AGENT,
+    throwMcpResourceError,
+  });`,
+    localServerSourcePath,
+    { mustPrecedeSoleFinalReturn: true },
+  );
   assert.deepEqual(fixture.sourceSha256, {
     pluginServer: lock.publicExecutableContract.pluginServerSha256,
     pluginScopes: lock.publicExecutableContract.pluginScopesSha256,

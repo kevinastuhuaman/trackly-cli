@@ -2546,6 +2546,18 @@ test('standalone hosted verifier executes tool, schema, and handler snapshot wir
   );
   fs.writeFileSync(localApplyPath, localApplySource);
   assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
+  const localServerPath = path.join(temporaryRoot, 'mcp', 'server.js');
+  const localServerSource = fs.readFileSync(localServerPath, 'utf8');
+  const registration = localServerSource.match(/^  registerApplyTools\(server, \{\n(?:.*\n)*?  \}\);\n/m);
+  assert.ok(registration, 'server.js must call registerApplyTools inside createServer');
+  const deadRegistration = localServerSource
+    .replace(registration[0], '')
+    .replace(/^  return server;\n/m, `  return server;\n${registration[0]}`);
+  assert.notEqual(deadRegistration, localServerSource);
+  fs.writeFileSync(localServerPath, deadRegistration);
+  assert.throws(verifyFixture(structuredClone(originalFixture)));
+  fs.writeFileSync(localServerPath, localServerSource);
+  assert.doesNotThrow(verifyFixture(structuredClone(originalFixture)));
   const renamed = structuredClone(originalFixture);
   renamed.publicTools[0][0] = 'trackly_shadow_search';
   assert.throws(verifyFixture(renamed), /public tool-name snapshot drifted/);

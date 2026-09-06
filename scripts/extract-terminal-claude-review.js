@@ -137,7 +137,7 @@ function parseFindingLine(line) {
       || /\b(?:https?|ftp):\/\/|\bwww\.|\bmailto:/iu.test(renderedRow)
       || renderedRow.includes('@')
       || renderedRow.includes('\\')
-      || /(?:^|[^\p{L}\p{N}_])(?:#\d+|gh-\d+|[a-z0-9_.-]{1,39}\/[a-z0-9_.-]{1,100}#\d+|[0-9a-f]{7,40})(?![\p{L}\p{N}_])/iu.test(renderedRow)
+      || /(?:^|[^\p{L}\p{N}_])(?:#\d+|gh-\d+|[a-z0-9_.-]{1,39}\/[a-z0-9_.-]{1,100}#\d+|(?=[0-9]*[a-f])[0-9a-f]{7,40})(?![\p{L}\p{N}_])/iu.test(renderedRow)
       || /:[a-z0-9_+-]{1,64}:/iu.test(renderedRow)
       || hasUnsafeMarkdownDelimiter(outsideInlineCode)
       || /<!--|-->|<[^>\r\n]*>|!\[|~~~/i.test(renderedRow)
@@ -172,7 +172,10 @@ function loadChangedLines(changedLinesFile) {
 function locatorInChangedLines(locator, changedLines) {
   const match = locator.match(/^(.*):(\d+)(?:-(\d+))?$/u);
   if (!match) return false;
-  const ranges = changedLines.get(match[1]);
+  // Accept a locator copied from a diff header (`a/` or `b/` prefix) only
+  // when the unprefixed path is itself a changed path.
+  const ranges = changedLines.get(match[1])
+    ?? (/^[ab]\//u.test(match[1]) ? changedLines.get(match[1].slice(2)) : undefined);
   if (!ranges) return false;
   const start = Number(match[2]);
   const end = match[3] === undefined ? start : Number(match[3]);

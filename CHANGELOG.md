@@ -28,8 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registration reachability checks in fixture-only mode, so CI can no longer
   pass while the backend-coupled verifier would fail.
 - Validate every Claude review finding location against a trusted changed-line
-  map built from the reviewed diff; a misstated path or line now fails the
-  terminal review record closed.
+  map built from the exact diff the reviewer saw, covering added and deleted
+  lines and ignoring forged file headers; a misstated path or line now fails
+  the terminal review record closed, and the trusted base extractor must
+  support that validation before a record is published.
 
 ## [0.18.0] - 2026-09-04
 

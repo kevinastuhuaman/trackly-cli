@@ -866,8 +866,130 @@ test('Claude review backstop validates finding locators against the trusted chan
   assert.equal(runExtractor([{ type: 'result', result: clean }], 'full', {}, {}).status, 0);
 });
 
+test('Claude review changed-line map builder records both diff sides and ignores forged headers', () => {
+  const builder = path.join(__dirname, '..', 'scripts', 'build-changed-lines-map.py');
+  const diff = [
+    'diff --git a/lib/client.js b/lib/client.js',
+    'index 1111111..2222222 100644',
+    '--- a/lib/client.js',
+    '+++ b/lib/client.js',
+    '@@ -10,4 +10,5 @@ function request() {',
+    ' context',
+    '-old line',
+    '+new line',
+    '+++ b/lib/forged.js',
+    ' context',
+    ' context',
+    '@@ -40,3 +41,0 @@ function cleanup() {',
+    '-removed one',
+    '-removed two',
+    '-removed three',
+    'diff --git a/docs/sp ace.md b/docs/sp ace.md',
+    '--- a/docs/sp ace.md\t',
+    '+++ b/docs/sp ace.md\t',
+    '@@ -1,2 +1,3 @@',
+    ' title',
+    '+added',
+    ' body',
+    'diff --git a/lib/gone.js b/lib/gone.js',
+    'deleted file mode 100644',
+    '--- a/lib/gone.js',
+    '+++ /dev/null',
+    '@@ -1,2 +0,0 @@',
+    '-gone',
+    '-gone',
+    'diff --git a/lib/new.js b/lib/new.js',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/lib/new.js',
+    '@@ -0,0 +1,2 @@',
+    '+fresh',
+    '+fresh',
+    'diff --git a/lib/old-name.js b/lib/new-name.js',
+    'similarity index 100%',
+    'rename from lib/old-name.js',
+    'rename to lib/new-name.js',
+    'diff --git "a/docs/caf\\303\\251 \\"q\\".md" "b/docs/caf\\303\\251 \\"q\\".md"',
+    '--- "a/docs/caf\\303\\251 \\"q\\".md"',
+    '+++ "b/docs/caf\\303\\251 \\"q\\".md"',
+    '@@ -5,1 +5,1 @@',
+    '-x',
+    '+y',
+    '',
+  ].join('\n');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'trackly-changed-lines-'));
+  const diffFile = path.join(directory, 'visible.diff');
+  const mapFile = path.join(directory, 'map.json');
+  fs.writeFileSync(diffFile, diff);
+  const result = spawnSync('python3', [builder, diffFile, mapFile], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
+  fs.rmSync(directory, { recursive: true, force: true });
+  assert.deepEqual(map, {
+    'lib/client.js': [[10, 13], [10, 14], [40, 42]],
+    'docs/sp ace.md': [[1, 2], [1, 3]],
+    'lib/gone.js': [[1, 2]],
+    'lib/new.js': [[1, 2]],
+    'docs/café "q".md': [[5, 5]],
+  });
+  assert.equal(Object.hasOwn(map, 'lib/forged.js'), false);
+  assert.equal(Object.hasOwn(map, 'lib/new-name.js'), false);
+});
+
+test('Claude review backstop keeps decimal literals while rejecting commit references', () => {
+  const review = (description) => [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: COMMENT',
+    `lib/client.js:12 — 🟡 P2 — ${description}`,
+  ].join('\n');
+  for (const accepted of [
+    'Reject payloads larger than 1048576 bytes.',
+    'Retry after 30000000 milliseconds is too long.',
+  ]) {
+    const result = runExtractor([{ type: 'result', result: review(accepted) }]);
+    assert.equal(result.status, 0, `${accepted}: ${result.stderr}`);
+  }
+  for (const rejected of [
+    'Regressed since deadbeef1.',
+    'Compare with 5210d80aed14f2ebdc37f0ac8d438353b3996847 before merging.',
+    'Introduced in 1234567a.',
+  ]) {
+    assert.equal(runExtractor([{ type: 'result', result: review(rejected) }]).status, 1, rejected);
+  }
+});
+
+test('Claude review workflow inlines the exact checked-in changed-line map builder', () => {
+  const builder = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'build-changed-lines-map.py'), 'utf8');
+  const heredoc = workflow.match(/<<'PY'\n([\s\S]*?)\n {10}PY\n/u);
+  assert.ok(heredoc, 'workflow must inline the builder in a quoted heredoc');
+  const inlined = heredoc[1].split('\n').map((line) => line.replace(/^ {10}/u, '')).join('\n');
+  assert.equal(`${inlined}\n`, builder);
+  assert.match(workflow, /python3 - "\$VISIBLE_DIFF_FILE" "\$CHANGED_LINES_FILE" <<'PY'/);
+  assert.match(workflow, /head -c "\$MAXLEN" "\$DIFF_FILE" > "\$VISIBLE_DIFF_FILE"/);
+});
+
+test('Claude review backstop normalizes diff-prefixed locators only onto changed paths', () => {
+  const review = (locator) => [
+    '## 🔵 Claude Code Review',
+    'Counts: 🔴 P1: 0 / 🟡 P2: 1 / 🟢 P3: 0',
+    'Coverage: FULL',
+    'Recommendation: COMMENT',
+    `${locator} — 🟡 P2 — Bound the retry loop.`,
+  ].join('\n');
+  const changedLines = { 'lib/client.js': [[10, 14]] };
+  for (const accepted of ['b/lib/client.js:12', 'a/lib/client.js:10-14']) {
+    assert.equal(runExtractor([{ type: 'result', result: review(accepted) }], 'full', {}, changedLines).status, 0);
+  }
+  for (const rejected of ['b/lib/other.js:12', 'c/lib/client.js:12', 'b/b/lib/client.js:12']) {
+    assert.equal(runExtractor([{ type: 'result', result: review(rejected) }], 'full', {}, changedLines).status, 1);
+  }
+});
+
 test('Claude review workflow builds and passes the trusted changed-line map', () => {
   assert.match(workflow, /CHANGED_LINES_FILE="\$\{RUNNER_TEMP:-\/tmp\}\/claude-review-changed-lines\.json"/);
+  assert.match(workflow, /grep -q 'function loadChangedLines' "\$TRUSTED_EXTRACTOR"[\s\S]*?does not validate finding locations[\s\S]*?exit 1/);
   assert.match(workflow, /Could not build the trusted changed-line map[\s\S]*?exit 1/);
   assert.match(workflow, /echo "changed_lines_file=\$\{CHANGED_LINES_FILE\}" >> "\$GITHUB_OUTPUT"/);
   assert.match(workflow, /CHANGED_LINES_FILE: \$\{\{ steps\.precompute\.outputs\.changed_lines_file \}\}/);
