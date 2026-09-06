@@ -3,12 +3,12 @@
   "adaptationVersion": "1.0.0",
   "source": {
     "path": "skills/trackly-apply",
-    "skillVersion": "4.7.1",
-    "treeSha256": "2816d243ec221cf3a6557db03928812e1966a15364093b65c513857c0d076acf"
+    "skillVersion": "4.8.0",
+    "treeSha256": "abd3656ae2142a04e765b1b23fca47be8d50b03bfce3d0e9f1e0603a007b41c6"
   },
   "adapted": {
     "path": "plugins/trackly/skills/trackly-apply",
-    "treeSha256": "5f3cf1ca22e4d0eadf7a700e2a8299072977de854c094ceb4c00375addb265fa"
+    "treeSha256": "95dc8ade594082b28235fbfc3cf87d8684fdc40be709546185e36550b69bf6a7"
   },
   "adaptation": {
     "reason": "The public plugin facade intentionally exposes a smaller stable tool vocabulary than the full local trackly Apply MCP contract.",
@@ -214,6 +214,9 @@
     "trackly_advance_apply_execution",
     "trackly_record_apply_execution_dispositions",
     "trackly_stop_apply_execution",
+    "trackly_list_apply_access_deferments",
+    "trackly_defer_apply_access",
+    "trackly_clear_apply_access_deferment",
     "trackly_get_apply_batch",
     "trackly_get_active_apply_batch",
     "trackly_claim_apply_batch",

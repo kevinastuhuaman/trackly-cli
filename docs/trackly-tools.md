@@ -115,7 +115,10 @@ API-key creation attempts.
 - **trackly_get_apply_execution_snapshot**: Fetch a compact bounded projection of current members, requested profile keys, mutability, allowed operations, milestones, lease timing, and the authoritative funnel.
 - **trackly_resume_parked_apply_member**: Resume one parked member only after explicit user instruction; a fresh non-mutating access probe remains required before form mutation.
 - **trackly_approve_apply_execution_resume**: Approve one exact resume identity for an execution's unchanged original snapshot while preserving immediate per-run local verification before upload.
-- **trackly_advance_apply_execution** — Transactionally select the next wave from the execution's original recent-first snapshot for the declared `browserSurface`. Same-key retries return current authoritative progress and the current execution revision.
+- **trackly_advance_apply_execution** — Transactionally select the next wave from the execution's original recent-first snapshot for the declared `browserSurface`. Returns the immutable `proposedWave` with frozen `accessKnowledge` receipts. Same-key retries return identical members, order, and rationale. Optional hash-bound `accessReviewApproval` probes exact deferred job IDs after personal deferments are cleared.
+- **trackly_list_apply_access_deferments** — List the current user's persistent job/company access deferments. Returns only scope identities; never URLs or global policy.
+- **trackly_defer_apply_access** — Persist an explicit user deferment for one Trackly `jobId` at `job` or `company` scope. The server derives company, provider, tenant, origin, and route; agents cannot submit URLs or free text.
+- **trackly_clear_apply_access_deferment** — Clear one previously listed or created deferment. Idempotent replay is preserved and does not change global policy.
 - **trackly_record_apply_execution_dispositions** — Record typed, value-free live-probe classifications for the current wave. Every item requires `jobId`, one allowed `classification`, `source: 'live_probe'`, and the exact `batchId`, `memberId`, `runId`, `expectedMemberVersion`, `expectedInspectionEpoch`, and `browserSurface`; cache/static scheduling records are server-owned and cannot be submitted through MCP.
 - **trackly_stop_apply_execution** — Stop an execution with optimistic revision and idempotency guards.
 - **trackly_create_apply_batch** — Freeze an exact recent-first set of approved jobs with an idempotency key.
@@ -144,6 +147,11 @@ API-key creation attempts.
 - **trackly_validate_apply_resume_upload**: Local MCP only: validate the browser adapter's capabilities and ordered, value-free attachment proof stages without opening a chooser, reading a path, controlling a browser, or sending form data to Trackly.
 
 Apply contract v3 intentionally gives this verifier different local and hosted schemas: local MCP receives the full proof needed to inspect the private file, while hosted MCP accepts only run and confirmation identifiers and returns the manual/local-agent requirement. Local paths are never sent remotely. Resume fingerprints are sent only to authenticated Trackly resume approval and truth-certification endpoints, never observations or employer forms. Version 3.1 also records universal value-free evidence for critical-contact integrity and the manual-submit boundary. Version 3.2 authorizes the exact stored HTTPS origin for jobs Trackly ingested from employer careers sources, without granting redirect, iframe, or hostname-suffix privileges. Version 3.3.1 adds active-batch recovery, epoch-bound observations/outcomes, and truth certification for forms with no resume control. Version 3.4 adds server-owned accessible executions above immutable child batches, typed access dispositions, and an authoritative target-completion funnel.
+
+Version 3.8 adds access-aware scheduling receipts, `nextAction: access_review`,
+hash-bound deferred-probe approval, and user deferment tools. Historical OPEN
+never authorizes form filling; every selected job still requires a fresh
+non-mutating live probe.
 
 Version 3.7 adds public exact-member recovery and scoped review-handoff claims,
 plus local tab-finalizer and resume-upload proof validators. Recovery candidates

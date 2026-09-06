@@ -164,6 +164,9 @@ test('clean npm install runs the packed CLI, MCP, agent setup, and audit command
   assert.ok(toolNames.includes('trackly_get_active_apply_execution'));
   assert.ok(toolNames.includes('trackly_get_apply_execution'));
   assert.ok(toolNames.includes('trackly_advance_apply_execution'));
+  assert.ok(toolNames.includes('trackly_list_apply_access_deferments'));
+  assert.ok(toolNames.includes('trackly_defer_apply_access'));
+  assert.ok(toolNames.includes('trackly_clear_apply_access_deferment'));
   assert.ok(toolNames.includes('trackly_record_apply_execution_dispositions'));
   assert.ok(toolNames.includes('trackly_stop_apply_execution'));
   assert.ok(toolNames.includes('trackly_create_apply_batch'));

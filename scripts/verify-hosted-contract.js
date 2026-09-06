@@ -11,7 +11,7 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 const sha256ExactBytes = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
-const CHECKED_IN_HOSTED_FIXTURE_SHA256 = 'bf980e3c48aa0817f8860a308dba4d5e054ca34f1e4b4bfdf1ace0402ad73799';
+const CHECKED_IN_HOSTED_FIXTURE_SHA256 = '6df3d379a994444fd65057eacc3c111b95e822d35f5ff0265591f77625c81cf8';
 const HOSTED_APPLY_CHECKPOINT_HELPER_AST_SHA256 = Object.freeze({
   applyCheckpointActionVariant: '6d83fd691e69b578f683c5e367cc1706a8f74b336e0ff435195f580c2350587c',
   applyCheckpointActionSchema: '6f0b0698b13997eda7100ec00720fff199d936270d232c7de5f55a8fcef2c2ab',
@@ -6727,6 +6727,12 @@ for (const constantName of [
   'applyExecutionMaxTarget',
   'applyBrowserSurfaces',
   'applyAccessClassifications',
+  'applyObservedAccessClassifications',
+  'applyAccessKnowledgeSources',
+  'applyAccessFreshnessStates',
+  'applySchedulingEffects',
+  'applyAccessDefermentScopes',
+  'applyAccessMatchedScopes',
   'applyExecutionDispositionSources',
   'applyExecutionStopReasonCodes',
   'applyProbeCleanupPreferences',

@@ -23,3 +23,15 @@ A durable receipt identifying the exact application members ready for human revi
 ## Manual Submit boundary
 
 The invariant that the agent prepares and verifies the application through final review while only the user activates the employer's submission control.
+
+## Access knowledge
+
+Server-owned scheduling evidence that ranks jobs by curated ATS defaults, user deferments, and live-probe observations. It can schedule or defer work but can never authorize form filling. Every selected job still requires a fresh non-mutating live probe.
+
+## Access review
+
+The `nextAction` that returns a bounded deferred proposal when only account-wall or user-deferred candidates remain. Trackly opens nothing and does not report the queue as exhausted.
+
+## User deferment
+
+An explicit, persistent, reversible per-user preference to skip a Trackly job or company scope while alternatives exist. The server derives identity from `jobId`; agents cannot submit URLs or raw chat. Global policy is never trained from individual deferments.

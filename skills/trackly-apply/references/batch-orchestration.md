@@ -3,6 +3,12 @@
 Protocol 3.4 adds a server-owned Apply execution above immutable child batches.
 Protocol 3.6 adds exact-member recovery after local context loss and scoped
 review-handoff reconciliation.
+Protocol 3.7 adds access-aware scheduling: curated ATS defaults, user
+deferments, and live-probe observations produce frozen `accessKnowledge` on
+every proposed-wave member, batch member, compact snapshot member, and
+recovery candidate. Historical knowledge can schedule work but can never
+authorize form filling.
+
 After context loss, rediscover active handoff receipts with
 `trackly_list_apply_review_handoffs`; never reconstruct or guess a handoff ID
 from chat history, tab order, or application similarity.
@@ -58,9 +64,38 @@ draft, question, review, submission, or closure obligation after a newer
 replacement wave was created. Use `response.execution.currentWave.batchId`
 only as the latest scheduling identity when following `response.progress.nextAction`; it is not
 the complete recovery set. For an advance response that creates a wave, use
-its top-level `response.batchId`. Never guess across those response shapes. If
+its top-level `response.batchId` and the immutable `proposedWave` with frozen
+`accessKnowledge` receipts. Never guess across those response shapes. If
 the applicable field is null or `unresolvedWaves` is empty, follow
 `response.progress.nextAction` rather than guessing a prior batch.
+
+## Access-aware scheduling
+
+Every proposed-wave member, execution-owned batch member, compact snapshot
+member, and recovery candidate includes `accessKnowledge`. Use it only to
+schedule. A fresh non-mutating live probe is still required before private
+data or form mutation.
+
+Rank `OPEN`, then neutral `VARIES`/`UNKNOWN`, then fresh `ACCOUNT WALL`. Never
+select an active user deferment automatically. Workday starts as `ACCOUNT WALL`
+and waits while Greenhouse or other `OPEN`/neutral alternatives exist. Static
+safety exclusions always override `OPEN`.
+
+Read `progress.availableCandidateCount`, `progress.deferredCandidateCount`, and
+`nextAction`. When `nextAction` is `access_review`, return the bounded deferred
+proposal, open nothing, and do not report the queue as exhausted. Probe those
+exact job IDs only with hash-bound `accessReviewApproval` after clearing any
+active personal deferment. List, defer, or clear deferments only through
+`trackly_list_apply_access_deferments`, `trackly_defer_apply_access`, and
+`trackly_clear_apply_access_deferment` using a Trackly `jobId`; never submit a
+URL or raw chat. Global policy is admin/review-only.
+
+Pause after every `proposedWave`. Same-key advance replay returns the same
+member IDs, order, and rationale. Browser probing requires explicit wave
+approval. Show each proposed job with a short reason such as “Greenhouse
+default: OPEN, audited 6 days ago; fresh probe still required.” Never describe
+a proposed job as accessible until the current probe proves it.
+`freshLiveProbeRequired` remains true for every classification.
 
 ## Exact recovery after local context loss
 
@@ -70,7 +105,8 @@ and candidates are the complete bounded recovery menu. Resolve every distinct
 returned `jobId` through `trackly_get_job`, bind that Trackly-owned record to
 its `candidateId`, and present its company, role, requisition identity when
 available, and source execution to the user. A missing or mismatched Trackly
-job record blocks confirmation. Require explicit confirmation of the exact
+job record blocks confirmation. An active personal deferment on any confirmed
+candidate blocks recovery until that deferment is cleared. Require explicit confirmation of the exact
 candidate set. Never infer the set from browser tabs, conversation memory,
 search results, page copy, employer similarity, or queue position.
 
@@ -201,7 +237,8 @@ For an execution request:
 5. bring accessible members through the ordinary batch integrity and review
    gates; and
 6. refetch progress, then call `trackly_advance_apply_execution` only when the
-   current wave has no unclassified member.
+   current wave has no unclassified member. Pause on the returned
+   `proposedWave`. Follow `nextAction: access_review` without opening a browser.
 
 For an explicit fixed inspection request or legacy recovery:
 
