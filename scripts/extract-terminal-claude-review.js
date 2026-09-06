@@ -119,11 +119,15 @@ function hasUnsafeMarkdownDelimiter(value) {
   return false;
 }
 
+// The locator path accepts any git path text except Markdown block leaders and
+// HTML angle brackets; exact membership in the trusted changed-line map is what
+// validates it, while the row-level checks below still reject backslashes,
+// controls, links, entities, and hidden markup.
 function parseFindingLine(line) {
   if (/^[ \t]*(?:[-+*]|\d+[.)])[ \t]+/u.test(line)) return { invalid: true };
   const normalized = normalizeFindingLine(line);
   const match = normalized.match(
-    /^([\p{L}\p{N}_.@/+][\p{L}\p{N}_.@/+() -]*:\d+(?:-\d+)?)[ \t]+[—-][ \t]+(🔴|🟡|🟢)(?:[ \t]*P([1-3]))?[ \t]+[—-][ \t]+(\S.*)$/u,
+    /^([^\s`<>#|!\[][^`\r\n<>]*?:\d+(?:-\d+)?)[ \t]+[—-][ \t]+(🔴|🟡|🟢)(?:[ \t]*P([1-3]))?[ \t]+[—-][ \t]+(\S.*)$/u,
   );
   if (!match) return null;
   const description = match[4];

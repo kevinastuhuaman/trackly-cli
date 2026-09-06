@@ -368,9 +368,13 @@ jobs:
           # model can inspect or cite, so a diff containing one can never be
           # reviewed in FULL: a zero-finding verdict must stay a PARTIAL comment,
           # never an APPROVE that claims coverage of bytes nobody inspected.
-          if grep -qE '^(Binary files .* differ|GIT binary patch)$' "$VISIBLE_DIFF_FILE"; then
+          # Mode-only changes, gitlinks (submodule pointers), binary patches, and
+          # paths git could not render as UTF-8 (U+FFFD in the map) all leave
+          # nothing the model can cite line by line.
+          if grep -qE '^(Binary files .* differ|GIT binary patch|old mode [0-7]+|new mode [0-7]+|(new|deleted) file mode 160000|Subproject commit [0-9a-f]+)$' "$VISIBLE_DIFF_FILE" \
+              || grep -q $'\xef\xbf\xbd' "$CHANGED_LINES_FILE"; then
             OPAQUE=true
-            echo "::warning title=Opaque diff entries::PR diff contains binary or otherwise opaque changes; coverage is PARTIAL."
+            echo "::warning title=Opaque diff entries::PR diff contains binary, mode-only, gitlink, or otherwise opaque changes; coverage is PARTIAL."
           else
             OPAQUE=false
           fi

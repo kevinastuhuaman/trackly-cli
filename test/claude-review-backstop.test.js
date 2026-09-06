@@ -1051,16 +1051,19 @@ test('Claude review backstop accepts Unicode changed paths in finding locators',
     'Recommendation: COMMENT',
     `${locator} — 🟡 P2 — Bound the retry loop.`,
   ].join('\n');
-  const changedLines = { 'docs/café.md': [[5, 5]], 'docs/日本語/guide.md': [[1, 3]] };
-  for (const accepted of ['docs/café.md:5', '`docs/日本語/guide.md:2`']) {
+  const changedLines = { 'docs/café.md': [[5, 5]], 'docs/日本語/guide.md': [[1, 3]], 'docs/foo:bar.md': [[5, 5]], 'docs/a b#c.md': [[1, 1]] };
+  for (const accepted of ['docs/café.md:5', '`docs/日本語/guide.md:2`', '`docs/foo:bar.md:5`', 'docs/a b#c.md:1']) {
     const result = runExtractor([{ type: 'result', result: review(accepted) }], 'full', {}, changedLines);
     assert.equal(result.status, 0, `${accepted}: ${result.stderr}`);
   }
-  assert.equal(runExtractor([{ type: 'result', result: review('docs/cafe.md:5') }], 'full', {}, changedLines).status, 1);
+  for (const rejected of ['docs/cafe.md:5', 'docs/foo:bar.md:6', 'docs/foo:5', 'docs/caf\uFFFD.md:5']) {
+    assert.equal(runExtractor([{ type: 'result', result: review(rejected) }], 'full', {}, changedLines).status, 1, rejected);
+  }
 });
 
 test('Claude review workflow marks opaque binary diffs as partial coverage', () => {
-  assert.match(workflow, /grep -qE '\^\(Binary files \.\* differ\|GIT binary patch\)\$' "\$VISIBLE_DIFF_FILE"/);
+  assert.match(workflow, /grep -qE '\^\(Binary files \.\* differ\|GIT binary patch\|old mode \[0-7\]\+\|new mode \[0-7\]\+\|\(new\|deleted\) file mode 160000\|Subproject commit \[0-9a-f\]\+\)\$' "\$VISIBLE_DIFF_FILE"/);
+  assert.match(workflow, /\|\| grep -q \$'\\xef\\xbf\\xbd' "\$CHANGED_LINES_FILE"/);
   assert.match(workflow, /elif \[ "\$OPAQUE" = "true" \]; then\n\s+echo "partial=true" >> "\$GITHUB_OUTPUT"/);
   // Both PARTIAL notes carry the marker the prompt keys its partial verdict on.
   const notes = workflow.match(/(?:TRUNC_NOTE|OPAQUE_NOTE)="\[NOTE:[^\n]*\]"/g) || [];
